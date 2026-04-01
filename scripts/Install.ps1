@@ -20,6 +20,7 @@
     .\Install.ps1                # install all
     .\Install.ps1 -Tool RTK     # RTK only
     .\Install.ps1 -VerifyOnly   # check status
+    .\Install.ps1 -DryRun       # simulate install, no changes made
 #>
 
 [CmdletBinding()]
@@ -27,7 +28,8 @@ param(
     [ValidateSet("All", "RTK", "tilth", "Serena")]
     [string]$Tool = "All",
     [switch]$SkipDedup,
-    [switch]$VerifyOnly
+    [switch]$VerifyOnly,
+    [switch]$DryRun
 )
 
 $ErrorActionPreference = "Stop"
@@ -43,6 +45,7 @@ function Write-Ok     { param($msg) Write-Host "[ok]    $msg" -ForegroundColor G
 function Write-Warn   { param($msg) Write-Host "[warn]  $msg" -ForegroundColor Yellow }
 function Write-Fail   { param($msg) Write-Host "[fail]  $msg" -ForegroundColor Red; exit 1 }
 function Write-Header { param($msg) Write-Host "`n--- $msg ---`n" -ForegroundColor White }
+function Write-DryRun { param($msg) Write-Host "[dry-run] would run: $msg" -ForegroundColor Magenta }
 
 function Test-Cmd { param([string]$Name) $null -ne (Get-Command $Name -ErrorAction SilentlyContinue) }
 
@@ -64,15 +67,20 @@ function Ensure-Git {
 function Ensure-Rust {
     if (Test-Cmd "rustup") {
         Write-Ok "Rust found: $(rustc --version 2>$null)"
-        rustup update stable --no-self-update 2>$null | Out-Null
+        if (-not $DryRun) { rustup update stable --no-self-update 2>$null | Out-Null }
+        else { Write-DryRun "rustup update stable --no-self-update" }
     } else {
-        Write-Info "Installing Rust toolchain..."
-        $installer = Join-Path $env:TEMP "rustup-init.exe"
-        Invoke-WebRequest -Uri "https://win.rustup.rs/x86_64" -OutFile $installer -UseBasicParsing
-        & $installer -y --default-toolchain stable 2>&1 | Out-Null
-        $env:PATH = "$env:USERPROFILE\.cargo\bin;$env:PATH"
-        if (-not (Test-Cmd "rustc")) { Write-Fail "Rust installation failed. Install from https://rustup.rs" }
-        Write-Ok "Rust installed: $(rustc --version)"
+        if ($DryRun) {
+            Write-DryRun "Download https://win.rustup.rs/x86_64 and install Rust toolchain"
+        } else {
+            Write-Info "Installing Rust toolchain..."
+            $installer = Join-Path $env:TEMP "rustup-init.exe"
+            Invoke-WebRequest -Uri "https://win.rustup.rs/x86_64" -OutFile $installer -UseBasicParsing
+            & $installer -y --default-toolchain stable 2>&1 | Out-Null
+            $env:PATH = "$env:USERPROFILE\.cargo\bin;$env:PATH"
+            if (-not (Test-Cmd "rustc")) { Write-Fail "Rust installation failed. Install from https://rustup.rs" }
+            Write-Ok "Rust installed: $(rustc --version)"
+        }
     }
 }
 
@@ -80,11 +88,15 @@ function Ensure-Uv {
     if (Test-Cmd "uv") {
         Write-Ok "uv found: $(uv --version 2>$null)"
     } else {
-        Write-Info "Installing uv..."
-        Invoke-RestMethod https://astral.sh/uv/install.ps1 | Invoke-Expression
-        $env:PATH = "$env:USERPROFILE\.local\bin;$env:PATH"
-        if (-not (Test-Cmd "uv")) { Write-Fail "uv installation failed. See https://docs.astral.sh/uv/" }
-        Write-Ok "uv installed: $(uv --version)"
+        if ($DryRun) {
+            Write-DryRun "Invoke-RestMethod https://astral.sh/uv/install.ps1 | Invoke-Expression"
+        } else {
+            Write-Info "Installing uv..."
+            Invoke-RestMethod https://astral.sh/uv/install.ps1 | Invoke-Expression
+            $env:PATH = "$env:USERPROFILE\.local\bin;$env:PATH"
+            if (-not (Test-Cmd "uv")) { Write-Fail "uv installation failed. See https://docs.astral.sh/uv/" }
+            Write-Ok "uv installed: $(uv --version)"
+        }
     }
 }
 
@@ -119,20 +131,28 @@ function Install-RTK {
         Write-Warn "Wrong 'rtk' detected. Reinstalling."
     }
 
-    cargo install --git $RTK_REPO --force 2>&1 | Select-Object -Last 5
-    Write-Ok "RTK installed: $(rtk --version 2>$null)"
+    if ($DryRun) {
+        Write-DryRun "cargo install --git $RTK_REPO --force"
+    } else {
+        cargo install --git $RTK_REPO --force 2>&1 | Select-Object -Last 5
+        Write-Ok "RTK installed: $(rtk --version 2>$null)"
+    }
 
     # Host integration
     if ($script:HasClaude -and $script:HasOpenCode) {
-        try { rtk init -g --opencode 2>$null; Write-Ok "RTK: Claude Code + Codex + OpenCode" } catch { Write-Warn "RTK init failed" }
+        if ($DryRun) { Write-DryRun "rtk init -g --opencode" }
+        else { try { rtk init -g --opencode 2>$null; Write-Ok "RTK: Claude Code + Codex + OpenCode" } catch { Write-Warn "RTK init failed" } }
     } elseif ($script:HasClaude) {
-        try { rtk init -g 2>$null; Write-Ok "RTK: Claude Code + Codex" } catch { Write-Warn "RTK init failed" }
+        if ($DryRun) { Write-DryRun "rtk init -g" }
+        else { try { rtk init -g 2>$null; Write-Ok "RTK: Claude Code + Codex" } catch { Write-Warn "RTK init failed" } }
     }
     if ($script:HasCodex -and -not $script:HasClaude) {
-        try { rtk init --codex 2>$null; Write-Ok "RTK: Codex CLI" } catch { Write-Warn "RTK Codex init failed" }
+        if ($DryRun) { Write-DryRun "rtk init --codex" }
+        else { try { rtk init --codex 2>$null; Write-Ok "RTK: Codex CLI" } catch { Write-Warn "RTK Codex init failed" } }
     }
     if ($script:HasOpenCode -and -not $script:HasClaude) {
-        try { rtk init -g --opencode 2>$null; Write-Ok "RTK: OpenCode" } catch { Write-Warn "RTK OpenCode init failed" }
+        if ($DryRun) { Write-DryRun "rtk init -g --opencode" }
+        else { try { rtk init -g --opencode 2>$null; Write-Ok "RTK: OpenCode" } catch { Write-Warn "RTK OpenCode init failed" } }
     }
 }
 
@@ -145,18 +165,25 @@ function Install-Tilth {
         Write-Info "Upgrading..."
     }
 
-    cargo install --git $TILTH_REPO --force 2>&1 | Select-Object -Last 5
-    Write-Ok "tilth installed: $(tilth --version 2>$null)"
+    if ($DryRun) {
+        Write-DryRun "cargo install --git $TILTH_REPO --force"
+    } else {
+        cargo install --git $TILTH_REPO --force 2>&1 | Select-Object -Last 5
+        Write-Ok "tilth installed: $(tilth --version 2>$null)"
+    }
 
     # Host integration
     if ($script:HasClaude) {
-        try { tilth install claude-code 2>$null; Write-Ok "tilth MCP: Claude Code" } catch { Write-Warn "tilth MCP: Claude Code failed" }
+        if ($DryRun) { Write-DryRun "tilth install claude-code" }
+        else { try { tilth install claude-code 2>$null; Write-Ok "tilth MCP: Claude Code" } catch { Write-Warn "tilth MCP: Claude Code failed" } }
     }
     if ($script:HasCodex) {
-        try { tilth install codex 2>$null; Write-Ok "tilth MCP: Codex CLI" } catch { Write-Warn "tilth MCP: Codex failed" }
+        if ($DryRun) { Write-DryRun "tilth install codex" }
+        else { try { tilth install codex 2>$null; Write-Ok "tilth MCP: Codex CLI" } catch { Write-Warn "tilth MCP: Codex failed" } }
     }
     if ($script:HasOpenCode) {
-        try { tilth install opencode 2>$null; Write-Ok "tilth MCP: OpenCode" } catch { Write-Warn "tilth MCP: OpenCode failed" }
+        if ($DryRun) { Write-DryRun "tilth install opencode" }
+        else { try { tilth install opencode 2>$null; Write-Ok "tilth MCP: OpenCode" } catch { Write-Warn "tilth MCP: OpenCode failed" } }
     }
 }
 
@@ -164,22 +191,30 @@ function Install-Tilth {
 function Install-Serena {
     Write-Header "Serena (IDE-like symbol navigation)"
 
-    Write-Info "Verifying Serena via uvx..."
-    try {
-        uvx --from "git+$SERENA_REPO" serena --help 2>$null | Out-Null
-        Write-Ok "Serena accessible via uvx"
-    } catch {
-        Write-Warn "Serena fetch failed. May work on first real invocation."
+    if ($DryRun) {
+        Write-DryRun "uvx --from git+$SERENA_REPO serena --help  (prefetch check)"
+    } else {
+        Write-Info "Verifying Serena via uvx..."
+        try {
+            uvx --from "git+$SERENA_REPO" serena --help 2>$null | Out-Null
+            Write-Ok "Serena accessible via uvx"
+        } catch {
+            Write-Warn "Serena fetch failed. May work on first real invocation."
+        }
     }
 
     # Claude Code
     if ($script:HasClaude) {
-        try {
-            claude mcp add --scope user serena -- `
-                uvx --from "git+$SERENA_REPO" serena start-mcp-server `
-                --context=claude-code --project-from-cwd 2>$null
-            Write-Ok "Serena MCP: Claude Code"
-        } catch { Write-Warn "Serena MCP: Claude Code failed (may already exist)" }
+        if ($DryRun) {
+            Write-DryRun "claude mcp add --scope user serena -- uvx --from git+$SERENA_REPO serena start-mcp-server --context=claude-code --project-from-cwd"
+        } else {
+            try {
+                claude mcp add --scope user serena -- `
+                    uvx --from "git+$SERENA_REPO" serena start-mcp-server `
+                    --context=claude-code --project-from-cwd 2>$null
+                Write-Ok "Serena MCP: Claude Code"
+            } catch { Write-Warn "Serena MCP: Claude Code failed (may already exist)" }
+        }
     }
 
     # Codex CLI
@@ -188,37 +223,45 @@ function Install-Serena {
         if ((Test-Path $codexConfig) -and (Select-String -Path $codexConfig -Pattern "serena" -Quiet)) {
             Write-Ok "Serena MCP: Codex CLI (already configured)"
         } else {
-            $codexDir = Join-Path $env:USERPROFILE ".codex"
-            if (-not (Test-Path $codexDir)) { New-Item -ItemType Directory -Path $codexDir -Force | Out-Null }
-            $tomlBlock = @"
+            if ($DryRun) {
+                Write-DryRun "Append [mcp_servers.serena] block to $codexConfig"
+            } else {
+                $codexDir = Join-Path $env:USERPROFILE ".codex"
+                if (-not (Test-Path $codexDir)) { New-Item -ItemType Directory -Path $codexDir -Force | Out-Null }
+                $tomlBlock = @"
 
 # Serena MCP server (added by token-diet)
 [mcp_servers.serena]
 command = "uvx"
 args = ["--from", "git+$SERENA_REPO", "serena", "start-mcp-server", "--context=codex", "--project-from-cwd"]
 "@
-            Add-Content -Path $codexConfig -Value $tomlBlock -Encoding UTF8
-            Write-Ok "Serena MCP: Codex CLI (appended to $codexConfig)"
+                Add-Content -Path $codexConfig -Value $tomlBlock -Encoding UTF8
+                Write-Ok "Serena MCP: Codex CLI (appended to $codexConfig)"
+            }
         }
     }
 
-    # OpenCode — writes to $env:USERPROFILE\.opencode.json (mcpServers format, same as tilth)
+    # OpenCode
     if ($script:HasOpenCode) {
         $ocCfg = Join-Path $env:USERPROFILE ".opencode.json"
-        try {
-            $data = if (Test-Path $ocCfg) { Get-Content $ocCfg -Raw | ConvertFrom-Json } else { [PSCustomObject]@{} }
-            if (-not $data.PSObject.Properties["mcpServers"]) {
-                $data | Add-Member -NotePropertyName "mcpServers" -NotePropertyValue ([PSCustomObject]@{})
+        if ($DryRun) {
+            Write-DryRun "Write mcpServers.serena entry to $ocCfg"
+        } else {
+            try {
+                $data = if (Test-Path $ocCfg) { Get-Content $ocCfg -Raw | ConvertFrom-Json } else { [PSCustomObject]@{} }
+                if (-not $data.PSObject.Properties["mcpServers"]) {
+                    $data | Add-Member -NotePropertyName "mcpServers" -NotePropertyValue ([PSCustomObject]@{})
+                }
+                $serenaEntry = [PSCustomObject]@{
+                    command = "uvx"
+                    args    = @("--from", "git+$SERENA_REPO", "serena", "start-mcp-server", "--context=ide", "--project-from-cwd")
+                }
+                $data.mcpServers | Add-Member -NotePropertyName "serena" -NotePropertyValue $serenaEntry -Force
+                $data | ConvertTo-Json -Depth 10 | Set-Content -Path $ocCfg -Encoding UTF8
+                Write-Ok "Serena MCP: OpenCode ($ocCfg)"
+            } catch {
+                Write-Warn "Serena MCP: OpenCode setup failed — $_"
             }
-            $serenaEntry = [PSCustomObject]@{
-                command = "uvx"
-                args    = @("--from", "git+$SERENA_REPO", "serena", "start-mcp-server", "--context=ide", "--project-from-cwd")
-            }
-            $data.mcpServers | Add-Member -NotePropertyName "serena" -NotePropertyValue $serenaEntry -Force
-            $data | ConvertTo-Json -Depth 10 | Set-Content -Path $ocCfg -Encoding UTF8
-            Write-Ok "Serena MCP: OpenCode ($ocCfg)"
-        } catch {
-            Write-Warn "Serena MCP: OpenCode setup failed — $_"
         }
     }
 }
@@ -239,10 +282,13 @@ function Configure-Dedup {
     $scriptDir = Split-Path -Parent $MyInvocation.ScriptName
     $configSource = Join-Path (Split-Path -Parent $scriptDir) "config\serena-dedup.template.yml"
 
-    if (Test-Path $configSource) {
-        Copy-Item $configSource $templateFile -Force
+    if ($DryRun) {
+        Write-DryRun "Write serena dedup template to $templateFile"
     } else {
-        @"
+        if (Test-Path $configSource) {
+            Copy-Item $configSource $templateFile -Force
+        } else {
+            @"
 # Serena project.local.yml -- overlap fix when tilth is also installed
 context: claude-code
 disabled_tools:
@@ -250,9 +296,9 @@ disabled_tools:
   - find_symbol
   - read_file
 "@ | Set-Content -Path $templateFile -Encoding UTF8
+        }
+        Write-Ok "Dedup template: $templateFile"
     }
-
-    Write-Ok "Dedup template: $templateFile"
     Write-Info "Apply per project: Copy-Item '$templateFile' '<project>\project.local.yml'"
 }
 
@@ -348,6 +394,10 @@ function Invoke-Wizard {
 # --- Main ---------------------------------------------------------------------
 Write-Host "`n=== token-diet ===" -ForegroundColor White
 Write-Host "    RTK + tilth + Serena`n" -ForegroundColor White
+
+if ($DryRun) {
+    Write-Host "    *** DRY-RUN MODE — no changes will be made ***`n" -ForegroundColor Magenta
+}
 
 if ($VerifyOnly) { Verify-Stack; exit 0 }
 

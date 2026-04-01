@@ -1,0 +1,256 @@
+#!/usr/bin/env bash
+# tkd — token-diet stack dashboard
+# Shows combined token savings and health across RTK + tilth + Serena.
+#
+# Usage:
+#   tkd gain           Show token savings dashboard (default)
+#   tkd version        Show versions of all three tools
+#   tkd verify         Re-run installation verification
+#   tkd --help         Show this help
+
+set -euo pipefail
+
+# --- Colors -------------------------------------------------------------------
+if [ -t 1 ]; then
+  GREEN='\033[0;32m'; YELLOW='\033[1;33m'; RED='\033[0;31m'
+  BLUE='\033[0;34m'; CYAN='\033[0;36m'; BOLD='\033[1m'; DIM='\033[2m'; NC='\033[0m'
+else
+  GREEN=''; YELLOW=''; RED=''; BLUE=''; CYAN=''; BOLD=''; DIM=''; NC=''
+fi
+
+ok()   { echo -e "  ${GREEN}✓${NC}  $*"; }
+warn() { echo -e "  ${YELLOW}!${NC}  $*"; }
+miss() { echo -e "  ${RED}✗${NC}  $*"; }
+dim()  { echo -e "${DIM}$*${NC}"; }
+
+# --- Helpers ------------------------------------------------------------------
+human_tokens() {
+  local n=$1
+  if   [ "$n" -ge 1000000 ]; then printf "%.1fM" "$(echo "$n / 1000000" | bc -l)"
+  elif [ "$n" -ge 1000 ];    then printf "%.1fK" "$(echo "$n / 1000"    | bc -l)"
+  else printf "%d" "$n"
+  fi
+}
+
+human_ms() {
+  local ms=$1
+  if   [ "$ms" -ge 3600000 ]; then printf "%dh %dm" "$((ms/3600000))" "$(( (ms%3600000)/60000 ))"
+  elif [ "$ms" -ge 60000 ];   then printf "%dm %ds" "$((ms/60000))" "$(( (ms%60000)/1000 ))"
+  elif [ "$ms" -ge 1000 ];    then printf "%ds"      "$((ms/1000))"
+  else printf "%dms" "$ms"
+  fi
+}
+
+bar() {
+  local pct=${1%.*}   # integer part of percentage
+  local width=20
+  local filled=$(( pct * width / 100 ))
+  local empty=$(( width - filled ))
+  printf '%0.s█' $(seq 1 "$filled") 2>/dev/null || printf '%*s' "$filled" | tr ' ' '█'
+  printf '%0.s░' $(seq 1 "$empty")  2>/dev/null || printf '%*s' "$empty"  | tr ' ' '░'
+}
+
+check_cmd() { command -v "$1" &>/dev/null; }
+
+# Scan common MCP config files for a tool name
+hosts_registered() {
+  local tool="$1"
+  local found=()
+  local configs=(
+    "$HOME/.claude/settings.json"
+    "$HOME/Library/Application Support/Claude/claude_desktop_config.json"
+    "$HOME/.config/Claude/claude_desktop_config.json"
+    "$HOME/.opencode.json"
+  )
+  for cfg in "${configs[@]}"; do
+    [ -f "$cfg" ] || continue
+    if python3 -c "import json,sys; d=json.load(open('$cfg')); exit(0 if any('$tool' in k.lower() for k in d.get('mcpServers',{}).keys()) else 1)" 2>/dev/null; then
+      case "$cfg" in
+        *"Application Support"*) found+=("claude-desktop") ;;
+        *settings.json*)         found+=("claude-code") ;;
+        *opencode*)              found+=("opencode") ;;
+      esac
+    fi
+  done
+  # Codex
+  local codex="$HOME/.codex/config.toml"
+  [ -f "$codex" ] && grep -q "$tool" "$codex" 2>/dev/null && found+=("codex")
+  # VS Code
+  local vscode_cfg="$HOME/.config/Code/User/settings.json"
+  [ -f "$vscode_cfg" ] && grep -q "$tool" "$vscode_cfg" 2>/dev/null && found+=("vscode")
+
+  if [ ${#found[@]} -gt 0 ]; then
+    echo "${found[*]}" | tr ' ' ','
+  else
+    echo "none"
+  fi
+}
+
+# --- Commands -----------------------------------------------------------------
+cmd_gain() {
+  echo -e "\n${BOLD}=== token-diet gain ===${NC}\n"
+
+  # --- RTK -------------------------------------------------------------------
+  echo -e "${BOLD}RTK${NC} ${DIM}— command output compression${NC}"
+  echo -e "${DIM}$(printf '%.0s─' {1..50})${NC}"
+
+  if check_cmd rtk && rtk gain --help &>/dev/null 2>&1; then
+    local json
+    json=$(rtk gain --format json 2>/dev/null)
+    local cmds saved input pct ms
+    cmds=$(echo "$json" | python3 -c "import sys,json; d=json.load(sys.stdin)['summary']; print(d['total_commands'])")
+    input=$(echo "$json" | python3 -c "import sys,json; d=json.load(sys.stdin)['summary']; print(d['total_input'])")
+    saved=$(echo "$json" | python3 -c "import sys,json; d=json.load(sys.stdin)['summary']; print(d['total_saved'])")
+    pct=$(echo "$json"   | python3 -c "import sys,json; d=json.load(sys.stdin)['summary']; print(round(d['avg_savings_pct'],1))")
+    ms=$(echo "$json"    | python3 -c "import sys,json; d=json.load(sys.stdin)['summary']; print(d['total_time_ms'])")
+
+    printf "  %-22s %s\n"  "Commands filtered:"  "$cmds"
+    printf "  %-22s %s\n"  "Tokens in:"          "$(human_tokens "$input")"
+    printf "  %-22s %s\n"  "Tokens saved:"        "$(human_tokens "$saved")  (${pct}%)"
+    printf "  %-22s %s\n"  "Exec time:"           "$(human_ms "$ms")"
+    echo -e "  Efficiency:  ${CYAN}$(bar "$pct")${NC}  ${BOLD}${pct}%${NC}"
+    local rtk_ver; rtk_ver=$(rtk --version 2>/dev/null | awk '{print $2}')
+    ok "RTK ${rtk_ver} — active"
+  else
+    miss "RTK not installed  →  run: bash install.sh --rtk-only"
+  fi
+
+  echo ""
+
+  # --- tilth -----------------------------------------------------------------
+  echo -e "${BOLD}tilth${NC} ${DIM}— AST-aware code reading (tree-sitter)${NC}"
+  echo -e "${DIM}$(printf '%.0s─' {1..50})${NC}"
+  echo -e "  ${DIM}Note: tilth reduces prompt size — not tracked per-command${NC}"
+
+  if check_cmd tilth; then
+    local tv; tv=$(tilth --version 2>/dev/null | awk '{print $2}')
+    local th; th=$(hosts_registered "tilth")
+    printf "  %-22s %s\n" "Version:"   "$tv"
+    printf "  %-22s %s\n" "MCP hosts:" "$th"
+    ok "tilth ${tv} — active"
+  else
+    miss "tilth not installed  →  run: bash install.sh --tilth-only"
+  fi
+
+  echo ""
+
+  # --- Serena ----------------------------------------------------------------
+  echo -e "${BOLD}Serena${NC} ${DIM}— LSP symbol navigation${NC}"
+  echo -e "${DIM}$(printf '%.0s─' {1..50})${NC}"
+  echo -e "  ${DIM}Note: Serena reduces prompt size — not tracked per-command${NC}"
+
+  local serena_ok=false
+  # Check uvx availability (online mode) or Docker image (local mode)
+  if check_cmd uvx || docker image inspect token-diet/serena:latest &>/dev/null 2>&1; then
+    serena_ok=true
+  fi
+
+  if $serena_ok; then
+    local sh; sh=$(hosts_registered "serena")
+    local mem_count=0 log_days=0
+    [ -d "$HOME/.serena/memories" ] && mem_count=$(ls "$HOME/.serena/memories/" 2>/dev/null | wc -l | tr -d ' ')
+    [ -d "$HOME/.serena/logs"     ] && log_days=$(ls "$HOME/.serena/logs/"     2>/dev/null | wc -l | tr -d ' ')
+    printf "  %-22s %s\n" "MCP hosts:"    "$sh"
+    printf "  %-22s %s\n" "Memories:"     "$mem_count files"
+    printf "  %-22s %s\n" "Session logs:" "$log_days days"
+    ok "Serena — active"
+  else
+    miss "Serena not installed  →  run: bash install.sh --serena-only"
+  fi
+
+  echo ""
+
+  # --- Stack summary ---------------------------------------------------------
+  echo -e "${DIM}$(printf '%.0s─' {1..50})${NC}"
+  local tools_active=0
+  check_cmd rtk      && rtk gain --help &>/dev/null 2>&1 && (( tools_active++ )) || true
+  check_cmd tilth    && (( tools_active++ )) || true
+  $serena_ok         && (( tools_active++ )) || true
+
+  printf "  %-22s %d/3\n" "Tools active:" "$tools_active"
+
+  if check_cmd rtk && rtk gain --help &>/dev/null 2>&1; then
+    printf "  %-22s %s  (%s%%)\n" "RTK tokens saved:" \
+      "$(human_tokens "$saved")" "$pct"
+    echo -e "\n  ${DIM}tilth + Serena savings are structural (smaller prompts, fewer turns)${NC}"
+    echo -e "  ${DIM}and not individually tracked — but typically add 30-50% reduction${NC}"
+  fi
+
+  echo ""
+  if [ "$tools_active" -eq 3 ]; then
+    echo -e "  ${GREEN}${BOLD}Full stack active. Maximum token savings.${NC}"
+  elif [ "$tools_active" -gt 0 ]; then
+    echo -e "  ${YELLOW}${BOLD}Partial stack — run 'bash install.sh' to complete setup.${NC}"
+  else
+    echo -e "  ${RED}${BOLD}No tools installed — run 'bash install.sh' to get started.${NC}"
+  fi
+  echo ""
+}
+
+cmd_version() {
+  echo -e "\n${BOLD}token-diet stack versions${NC}\n"
+  check_cmd rtk    && ok "RTK    $(rtk --version 2>/dev/null)"    || miss "RTK    not installed"
+  check_cmd tilth  && ok "tilth  $(tilth --version 2>/dev/null)"  || miss "tilth  not installed"
+  check_cmd uvx    && ok "Serena (uvx available: $(uvx --version 2>/dev/null || echo 'ok'))" \
+                  || { docker image inspect token-diet/serena:latest &>/dev/null 2>&1 \
+                       && ok "Serena (Docker image: token-diet/serena:latest)" \
+                       || miss "Serena not installed"; }
+  echo ""
+}
+
+cmd_verify() {
+  local script_dir; script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  bash "$script_dir/install.sh" --verify
+}
+
+cmd_dashboard() {
+  local dashboard_bin
+  # Prefer the installed copy, fall back to script-dir sibling
+  if command -v tkd-dashboard &>/dev/null; then
+    dashboard_bin="$(command -v tkd-dashboard)"
+  else
+    local script_dir; script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    dashboard_bin="$script_dir/tkd-dashboard"
+  fi
+  if [ ! -f "$dashboard_bin" ]; then
+    echo "tkd-dashboard not found — run: bash install.sh" >&2; exit 1
+  fi
+  exec python3 "$dashboard_bin" "$@"
+}
+
+cmd_help() {
+  cat << EOF
+
+${BOLD}tkd${NC} — token-diet stack dashboard
+
+${BOLD}USAGE${NC}
+  tkd [command]
+
+${BOLD}COMMANDS${NC}
+  gain         Show token savings dashboard across RTK + tilth + Serena  (default)
+  dashboard    Open live browser dashboard  [--port N]
+  version      Show installed versions of all three tools
+  verify       Re-run installation verification
+  --help       Show this help
+
+${BOLD}TOOLS${NC}
+  RTK    Command output compression       60-90% savings (tracked)
+  tilth  AST-aware code reading           38-44% savings (structural)
+  Serena LSP symbol navigation            fewer prompt turns (structural)
+
+${BOLD}INSTALL${NC}
+  bash install.sh             Install all tools
+  bash install.sh --dry-run   Preview what would be installed
+
+EOF
+}
+
+# --- Dispatch -----------------------------------------------------------------
+case "${1:-gain}" in
+  gain)              cmd_gain ;;
+  dashboard)         shift; cmd_dashboard "$@" ;;
+  version|versions)  cmd_version ;;
+  verify)            cmd_verify ;;
+  --help|-h|help)    cmd_help ;;
+  *)  echo "Unknown command: $1"; cmd_help; exit 1 ;;
+esac

@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [1.1.2] - 2026-04-01
+
+### Fixed
+
+* `scripts/install.sh` — set `web_dashboard: false` in `~/.serena/serena_config.yml` to fully disable Serena's built-in pywebview app; on macOS each registered host spawned a native window even with `open_on_launch: false`
+
 ## [1.1.1] - 2026-04-01
 
 ### Fixed

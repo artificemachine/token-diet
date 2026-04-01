@@ -429,6 +429,17 @@ PYEOF
   if $HAS_COPILOT; then
     ok "Serena: Copilot CLI uses VS Code MCP config (shared)"
   fi
+
+  # Suppress Serena's built-in dashboard auto-open.
+  # Without this, every AI host that starts Serena opens a browser tab —
+  # one per registered host (claude-code, opencode, codex, etc.).
+  local serena_cfg="$HOME/.serena/serena_config.yml"
+  if [ "${DRY_RUN:-false}" = "true" ]; then
+    dryrun "Set web_dashboard_open_on_launch: false in $serena_cfg"
+  elif [ -f "$serena_cfg" ]; then
+    sed -i.bak 's/^web_dashboard_open_on_launch: true/web_dashboard_open_on_launch: false/' "$serena_cfg"
+    ok "Serena: suppressed dashboard auto-open ($serena_cfg)"
+  fi
 }
 
 # --- Overlap fix --------------------------------------------------------------

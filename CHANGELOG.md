@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [1.1.1] - 2026-04-01
+
+### Fixed
+
+* `scripts/install.sh` — patch `~/.serena/serena_config.yml` to set `web_dashboard_open_on_launch: false` after Serena registration, preventing multiple browser tabs from opening when Serena is registered in multiple AI hosts
+
 ## [1.1.0] - 2026-04-01
 
 ### Added

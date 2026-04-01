@@ -18,7 +18,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(dirname "$SCRIPT_DIR")"
 FORKS="$ROOT/forks"
 DIST="$ROOT/dist"
-VERSION="1.1.0"
+VERSION="1.1.1"
 
 # --- Colors -------------------------------------------------------------------
 if [ -t 1 ]; then

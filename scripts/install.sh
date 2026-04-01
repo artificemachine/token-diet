@@ -21,16 +21,18 @@ SERENA_REPO="https://github.com/celstnblacc/serena"
 
 # Colors
 if [ -t 1 ]; then
-  GREEN='\033[0;32m'; YELLOW='\033[1;33m'; RED='\033[0;31m'; BLUE='\033[0;34m'; BOLD='\033[1m'; NC='\033[0m'
+  GREEN='\033[0;32m'; YELLOW='\033[1;33m'; RED='\033[0;31m'
+  BLUE='\033[0;34m'; MAGENTA='\033[0;35m'; BOLD='\033[1m'; NC='\033[0m'
 else
-  GREEN=''; YELLOW=''; RED=''; BLUE=''; BOLD=''; NC=''
+  GREEN=''; YELLOW=''; RED=''; BLUE=''; MAGENTA=''; BOLD=''; NC=''
 fi
 
-info()  { echo -e "${BLUE}[info]${NC}  $*"; }
-ok()    { echo -e "${GREEN}[ok]${NC}    $*"; }
-warn()  { echo -e "${YELLOW}[warn]${NC}  $*"; }
-fail()  { echo -e "${RED}[fail]${NC}  $*"; exit 1; }
-header(){ echo -e "\n${BOLD}--- $* ---${NC}\n"; }
+info()    { echo -e "${BLUE}[info]${NC}  $*"; }
+ok()      { echo -e "${GREEN}[ok]${NC}    $*"; }
+warn()    { echo -e "${YELLOW}[warn]${NC}  $*"; }
+fail()    { echo -e "${RED}[fail]${NC}  $*"; exit 1; }
+header()  { echo -e "\n${BOLD}--- $* ---${NC}\n"; }
+dryrun()  { echo -e "${MAGENTA:-\033[0;35m}[dry-run]${NC} would run: $*"; }
 
 # --- Local build verification (--local mode only) ----------------------------
 # Runs clippy + tests before cargo install to catch broken builds early.
@@ -88,13 +90,21 @@ ensure_curl() {
 ensure_rust() {
   if check_command rustup; then
     ok "Rust toolchain found: $(rustc --version 2>/dev/null || echo 'updating...')"
-    rustup update stable --no-self-update 2>/dev/null || true
+    if [ "${DRY_RUN:-false}" = "true" ]; then
+      dryrun "rustup update stable --no-self-update"
+    else
+      rustup update stable --no-self-update 2>/dev/null || true
+    fi
   else
-    info "Installing Rust toolchain via rustup..."
-    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
-    # shellcheck source=/dev/null
-    source "$HOME/.cargo/env"
-    ok "Rust installed: $(rustc --version)"
+    if [ "${DRY_RUN:-false}" = "true" ]; then
+      dryrun "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable"
+    else
+      info "Installing Rust toolchain via rustup..."
+      curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
+      # shellcheck source=/dev/null
+      source "$HOME/.cargo/env"
+      ok "Rust installed: $(rustc --version)"
+    fi
   fi
 }
 
@@ -102,10 +112,14 @@ ensure_uv() {
   if check_command uv; then
     ok "uv found: $(uv --version 2>/dev/null)"
   else
-    info "Installing uv (Python package manager)..."
-    curl -LsSf https://astral.sh/uv/install.sh | sh
-    export PATH="$HOME/.local/bin:$PATH"
-    ok "uv installed: $(uv --version)"
+    if [ "${DRY_RUN:-false}" = "true" ]; then
+      dryrun "curl -LsSf https://astral.sh/uv/install.sh | sh"
+    else
+      info "Installing uv (Python package manager)..."
+      curl -LsSf https://astral.sh/uv/install.sh | sh
+      export PATH="$HOME/.local/bin:$PATH"
+      ok "uv installed: $(uv --version)"
+    fi
   fi
 }
 
@@ -149,12 +163,20 @@ install_rtk() {
 
   if $LOCAL_MODE; then
     verify_local_build "RTK" "$PROJECT_ROOT/forks/rtk/Cargo.toml"
-    info "Building RTK from fork (no internet)..."
-    cargo install --path "$PROJECT_ROOT/forks/rtk" --force 2>&1 | tail -5
-    ok "RTK built and installed from fork"
+    if [ "${DRY_RUN:-false}" = "true" ]; then
+      dryrun "cargo install --path $PROJECT_ROOT/forks/rtk --force"
+    else
+      info "Building RTK from fork (no internet)..."
+      cargo install --path "$PROJECT_ROOT/forks/rtk" --force 2>&1 | tail -5
+      ok "RTK built and installed from fork"
+    fi
   else
-    cargo install --git "$RTK_REPO" --force 2>&1 | tail -5
-    ok "RTK installed: $(rtk --version 2>/dev/null)"
+    if [ "${DRY_RUN:-false}" = "true" ]; then
+      dryrun "cargo install --git $RTK_REPO --force"
+    else
+      cargo install --git "$RTK_REPO" --force 2>&1 | tail -5
+      ok "RTK installed: $(rtk --version 2>/dev/null)"
+    fi
   fi
 
   # Verify
@@ -168,25 +190,25 @@ install_rtk() {
   info "Configuring RTK for detected hosts..."
 
   if $HAS_CLAUDE && $HAS_OPENCODE; then
-    rtk init -g --opencode 2>/dev/null \
-      && ok "RTK: Claude Code + Codex + OpenCode (global)" \
-      || warn "RTK init failed (may already be configured)"
+    [ "${DRY_RUN:-false}" = "true" ] \
+      && dryrun "rtk init -g --opencode" \
+      || { rtk init -g --opencode 2>/dev/null && ok "RTK: Claude Code + Codex + OpenCode (global)" || warn "RTK init failed (may already be configured)"; }
   elif $HAS_CLAUDE; then
-    rtk init -g 2>/dev/null \
-      && ok "RTK: Claude Code + Codex (global)" \
-      || warn "RTK init failed (may already be configured)"
+    [ "${DRY_RUN:-false}" = "true" ] \
+      && dryrun "rtk init -g" \
+      || { rtk init -g 2>/dev/null && ok "RTK: Claude Code + Codex (global)" || warn "RTK init failed (may already be configured)"; }
   fi
 
   if $HAS_CODEX && ! $HAS_CLAUDE; then
-    rtk init --codex 2>/dev/null \
-      && ok "RTK: Codex CLI" \
-      || warn "RTK Codex init failed"
+    [ "${DRY_RUN:-false}" = "true" ] \
+      && dryrun "rtk init --codex" \
+      || { rtk init --codex 2>/dev/null && ok "RTK: Codex CLI" || warn "RTK Codex init failed"; }
   fi
 
   if $HAS_OPENCODE && ! $HAS_CLAUDE; then
-    rtk init -g --opencode 2>/dev/null \
-      && ok "RTK: OpenCode" \
-      || warn "RTK OpenCode init failed"
+    [ "${DRY_RUN:-false}" = "true" ] \
+      && dryrun "rtk init -g --opencode" \
+      || { rtk init -g --opencode 2>/dev/null && ok "RTK: OpenCode" || warn "RTK OpenCode init failed"; }
   fi
 
   # Copilot CLI uses the same hook system as Claude Code
@@ -206,12 +228,20 @@ install_tilth() {
 
   if $LOCAL_MODE; then
     verify_local_build "tilth" "$PROJECT_ROOT/forks/tilth/Cargo.toml"
-    info "Building tilth from fork (no internet)..."
-    cargo install --path "$PROJECT_ROOT/forks/tilth" --force 2>&1 | tail -5
-    ok "tilth built and installed from fork"
+    if [ "${DRY_RUN:-false}" = "true" ]; then
+      dryrun "cargo install --path $PROJECT_ROOT/forks/tilth --force"
+    else
+      info "Building tilth from fork (no internet)..."
+      cargo install --path "$PROJECT_ROOT/forks/tilth" --force 2>&1 | tail -5
+      ok "tilth built and installed from fork"
+    fi
   else
-    cargo install --git "$TILTH_REPO" --force 2>&1 | tail -5
-    ok "tilth installed: $(tilth --version 2>/dev/null)"
+    if [ "${DRY_RUN:-false}" = "true" ]; then
+      dryrun "cargo install --git $TILTH_REPO --force"
+    else
+      cargo install --git "$TILTH_REPO" --force 2>&1 | tail -5
+      ok "tilth installed: $(tilth --version 2>/dev/null)"
+    fi
   fi
 
   # Host integration — tilth install <host>
@@ -223,9 +253,13 @@ install_tilth() {
   $HAS_VSCODE   && hosts+=("vscode")
 
   for host in "${hosts[@]}"; do
-    tilth install "$host" 2>/dev/null \
-      && ok "tilth MCP: $host" \
-      || warn "tilth MCP: $host failed (may already exist)"
+    if [ "${DRY_RUN:-false}" = "true" ]; then
+      dryrun "tilth install $host"
+    else
+      tilth install "$host" 2>/dev/null \
+        && ok "tilth MCP: $host" \
+        || warn "tilth MCP: $host failed (may already exist)"
+    fi
   done
 
   if [ ${#hosts[@]} -eq 0 ]; then
@@ -241,27 +275,37 @@ install_serena() {
     if docker image inspect token-diet/serena:latest &>/dev/null; then
       ok "Serena Docker image already built"
     else
-      info "Building Serena Docker image from fork (no internet)..."
-      ensure_docker
-      docker build -f "$PROJECT_ROOT/docker/Dockerfile.serena" -t token-diet/serena:latest "$PROJECT_ROOT" 2>&1 | tail -10
-      ok "Serena Docker image built"
+      if [ "${DRY_RUN:-false}" = "true" ]; then
+        dryrun "docker build -f $PROJECT_ROOT/docker/Dockerfile.serena -t token-diet/serena:latest $PROJECT_ROOT"
+      else
+        info "Building Serena Docker image from fork (no internet)..."
+        ensure_docker
+        docker build -f "$PROJECT_ROOT/docker/Dockerfile.serena" -t token-diet/serena:latest "$PROJECT_ROOT" 2>&1 | tail -10
+        ok "Serena Docker image built"
+      fi
     fi
-
     local serena_cmd="docker run --rm -i -v \$(pwd):/workspace:ro --network none token-diet/serena:latest"
   else
-    info "Verifying Serena via uvx..."
-    if uvx --from "git+${SERENA_REPO}" serena --help &>/dev/null; then
-      ok "Serena accessible via uvx"
+    if [ "${DRY_RUN:-false}" = "true" ]; then
+      dryrun "uvx --from git+${SERENA_REPO} serena --help  (prefetch check)"
     else
-      warn "Serena fetch via uvx failed. May work on first real invocation."
+      info "Verifying Serena via uvx..."
+      if uvx --from "git+${SERENA_REPO}" serena --help &>/dev/null; then
+        ok "Serena accessible via uvx"
+      else
+        warn "Serena fetch via uvx failed. May work on first real invocation."
+      fi
     fi
-
     local serena_cmd="uvx --from git+${SERENA_REPO} serena start-mcp-server --project-from-cwd"
   fi
 
   # Claude Code MCP
   if $HAS_CLAUDE; then
-    if $LOCAL_MODE; then
+    if [ "${DRY_RUN:-false}" = "true" ]; then
+      $LOCAL_MODE \
+        && dryrun "claude mcp add --scope user serena -- docker run ... token-diet/serena:latest --context=claude-code" \
+        || dryrun "claude mcp add --scope user serena -- uvx --from git+${SERENA_REPO} serena start-mcp-server --context=claude-code --project-from-cwd"
+    elif $LOCAL_MODE; then
       claude mcp add --scope user serena -- \
         docker run --rm -i -v "\$(pwd):/workspace:ro" --network none \
         token-diet/serena:latest --context=claude-code --project /workspace \
@@ -284,33 +328,40 @@ install_serena() {
     if [ -f "$codex_config" ] && grep -q "serena" "$codex_config" 2>/dev/null; then
       ok "Serena MCP: Codex CLI (already configured)"
     else
-      mkdir -p "$HOME/.codex"
-      if $LOCAL_MODE; then
-        cat >> "$codex_config" << 'TOML'
+      if [ "${DRY_RUN:-false}" = "true" ]; then
+        dryrun "Append [mcp_servers.serena] block to $codex_config"
+      else
+        mkdir -p "$HOME/.codex"
+        if $LOCAL_MODE; then
+          cat >> "$codex_config" << 'TOML'
 
 # Serena MCP server (added by token-diet, Docker mode)
 [mcp_servers.serena]
 command = "docker"
 args = ["run", "--rm", "-i", "-v", ".:/workspace:ro", "--network", "none", "token-diet/serena:latest", "--context=codex", "--project", "/workspace"]
 TOML
-      else
-        cat >> "$codex_config" << TOML
+        else
+          cat >> "$codex_config" << TOML
 
 # Serena MCP server (added by token-diet)
 [mcp_servers.serena]
 command = "uvx"
 args = ["--from", "git+${SERENA_REPO}", "serena", "start-mcp-server", "--context=codex", "--project-from-cwd"]
 TOML
+        fi
+        ok "Serena MCP: Codex CLI"
       fi
-      ok "Serena MCP: Codex CLI"
     fi
   fi
 
   # VS Code — write .vscode/mcp.json template
   if $HAS_VSCODE; then
     local vscode_template="$HOME/.config/token-diet/vscode-mcp.template.json"
-    mkdir -p "$(dirname "$vscode_template")"
-    cat > "$vscode_template" << 'JSON'
+    if [ "${DRY_RUN:-false}" = "true" ]; then
+      dryrun "Write VS Code MCP template to $vscode_template"
+    else
+      mkdir -p "$(dirname "$vscode_template")"
+      cat > "$vscode_template" << 'JSON'
 {
   "servers": {
     "serena": {
@@ -324,14 +375,17 @@ TOML
   }
 }
 JSON
-    ok "VS Code MCP template: $vscode_template"
-    info "  Copy to project: cp $vscode_template /path/to/project/.vscode/mcp.json"
+      ok "VS Code MCP template: $vscode_template"
+      info "  Copy to project: cp $vscode_template /path/to/project/.vscode/mcp.json"
+    fi
   fi
 
-  # OpenCode — writes to ~/.opencode.json (mcpServers format, same as tilth)
+  # OpenCode
   if $HAS_OPENCODE; then
     local oc_cfg="$HOME/.opencode.json"
-    if $LOCAL_MODE; then
+    if [ "${DRY_RUN:-false}" = "true" ]; then
+      dryrun "Write mcpServers.serena entry to $oc_cfg"
+    elif $LOCAL_MODE; then
       python3 - "$oc_cfg" <<'PYEOF'
 import json, sys
 cfg = sys.argv[1]
@@ -387,10 +441,15 @@ configure_dedup() {
   fi
 
   local template_dir="$HOME/.config/serena"
-  mkdir -p "$template_dir"
-
   local template_file="$template_dir/project.local.template.yml"
   local config_source="$SCRIPT_DIR/../config/serena-dedup.template.yml"
+
+  if [ "${DRY_RUN:-false}" = "true" ]; then
+    dryrun "Write serena dedup template to $template_file"
+    return 0
+  fi
+
+  mkdir -p "$template_dir"
 
   if [ -f "$config_source" ]; then
     cp "$config_source" "$template_file"
@@ -480,6 +539,38 @@ verify_stack() {
 EOF
 }
 
+# --- tkd dashboard command ----------------------------------------------------
+install_tkd() {
+  local bin_dir="$HOME/.local/bin"
+  local src_tkd="$SCRIPT_DIR/tkd"
+  local src_dash="$SCRIPT_DIR/tkd-dashboard"
+
+  if [ ! -f "$src_tkd" ]; then
+    warn "scripts/tkd not found — skipping tkd install"
+    return 0
+  fi
+
+  if [ "${DRY_RUN:-false}" = "true" ]; then
+    dryrun "install -m755 $src_tkd $bin_dir/tkd"
+    [ -f "$src_dash" ] && dryrun "install -m755 $src_dash $bin_dir/tkd-dashboard"
+    return 0
+  fi
+
+  mkdir -p "$bin_dir"
+  install -m755 "$src_tkd" "$bin_dir/tkd"
+  ok "tkd installed: $bin_dir/tkd"
+
+  if [ -f "$src_dash" ]; then
+    install -m755 "$src_dash" "$bin_dir/tkd-dashboard"
+    ok "tkd-dashboard installed: $bin_dir/tkd-dashboard"
+  fi
+
+  # Nudge if ~/.local/bin not in PATH
+  if ! echo "$PATH" | grep -q "$HOME/.local/bin"; then
+    info "Add to your shell: export PATH=\"\$HOME/.local/bin:\$PATH\""
+  fi
+}
+
 # --- Main ---------------------------------------------------------------------
 usage() {
   cat << EOF
@@ -504,6 +595,7 @@ Options:
   --verify       Only verify current installation
   --no-dedup     Skip overlap fix configuration
   --skip-tests   Skip clippy + tests in --local mode (faster install)
+  --dry-run      Simulate install — detect hosts and show what would run, no changes made
   -h, --help     Show this help
 EOF
 }
@@ -572,6 +664,7 @@ main() {
   local do_dedup=true verify_only=false has_args=false
   LOCAL_MODE=false
   SKIP_TESTS=false
+  DRY_RUN=false
 
   while [ $# -gt 0 ]; do
     has_args=true
@@ -584,6 +677,7 @@ main() {
       --verify)       verify_only=true ;;
       --no-dedup)     do_dedup=false ;;
       --skip-tests)   SKIP_TESTS=true ;;
+      --dry-run)      DRY_RUN=true; SKIP_TESTS=true ;;
       -h|--help)      usage; exit 0 ;;
       *)              warn "Unknown option: $1"; usage; exit 1 ;;
     esac
@@ -593,6 +687,9 @@ main() {
   echo -e "\n${BOLD}=== token-diet ===${NC}"
   echo -e "${BOLD}    RTK + tilth + Serena${NC}"
   echo ""
+  if [ "${DRY_RUN:-false}" = "true" ]; then
+    echo -e "${MAGENTA}    *** DRY-RUN MODE — no changes will be made ***${NC}\n"
+  fi
 
   if $verify_only; then
     detect_hosts
@@ -630,6 +727,9 @@ main() {
   if $do_dedup && $do_tilth && $do_serena; then
     configure_dedup
   fi
+
+  # Install tkd dashboard command
+  install_tkd
 
   verify_stack
 }

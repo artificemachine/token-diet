@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-04-01
+
+### Added
+
+* `scripts/tkd` — global CLI dashboard: `tkd gain`, `tkd dashboard`, `tkd version`, `tkd verify`
+* `scripts/tkd-dashboard` — stdlib-only Python browser dashboard (auto-refreshing, dark theme, RTK bar chart, host detection); installed to `~/.local/bin/tkd-dashboard`
+* `scripts/install.sh` — `--dry-run` flag: previews all install steps without making changes
+* `scripts/Install.ps1` — `-DryRun` switch: previews all install steps without making changes
+* `README.md` — Dashboard & CLI section documenting `tkd` commands and browser dashboard
+
 ## [1.0.0] - 2026-04-01
 
 ### Added

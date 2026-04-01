@@ -1,0 +1,252 @@
+#!/usr/bin/env python3
+"""tkd-dashboard — live browser dashboard for the token-diet stack.
+stdlib only. Starts a local HTTP server, opens browser, Ctrl+C to stop.
+
+Usage: tkd dashboard [--port N]
+"""
+import http.server, json, os, pathlib, subprocess, sys, threading, webbrowser
+from urllib.parse import urlparse
+
+PORT = int(sys.argv[2]) if len(sys.argv) > 2 and sys.argv[1:2] == ["--port"] else 7384
+
+# ---------------------------------------------------------------------------
+# Data collection
+# ---------------------------------------------------------------------------
+
+def run(cmd, **kw):
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=10, **kw)
+        return r.stdout.strip() if r.returncode == 0 else None
+    except Exception:
+        return None
+
+def rtk_stats():
+    raw = run(["rtk", "gain", "--daily", "--format", "json"])
+    if not raw:
+        return None
+    d = json.loads(raw)
+    return {"summary": d["summary"], "daily": d.get("daily", [])[-14:]}
+
+def tilth_stats():
+    ver = run(["tilth", "--version"])
+    if not ver:
+        return None
+    hosts = _registered_hosts("tilth")
+    return {"version": ver.split()[-1], "hosts": hosts}
+
+def serena_stats():
+    has_uvx    = run(["uvx", "--version"]) is not None
+    has_docker = run(["docker", "image", "inspect", "token-diet/serena:latest"]) is not None
+    if not has_uvx and not has_docker:
+        return None
+    mem_dir = pathlib.Path.home() / ".serena" / "memories"
+    log_dir = pathlib.Path.home() / ".serena" / "logs"
+    memories  = len(list(mem_dir.iterdir())) if mem_dir.exists() else 0
+    log_days  = len(list(log_dir.iterdir())) if log_dir.exists() else 0
+    hosts     = _registered_hosts("serena")
+    mode      = "docker" if has_docker else "uvx"
+    return {"mode": mode, "hosts": hosts, "memories": memories, "log_days": log_days}
+
+def _registered_hosts(tool):
+    found = []
+    candidates = [
+        (pathlib.Path.home() / ".claude" / "settings.json",              "claude-code"),
+        (pathlib.Path.home() / "Library" / "Application Support" /
+         "Claude" / "claude_desktop_config.json",                         "claude-desktop"),
+        (pathlib.Path.home() / ".config" / "Claude" /
+         "claude_desktop_config.json",                                     "claude-desktop"),
+        (pathlib.Path.home() / ".opencode.json",                          "opencode"),
+    ]
+    for path, label in candidates:
+        try:
+            d = json.loads(path.read_text())
+            if any(tool in k.lower() for k in d.get("mcpServers", {})):
+                found.append(label)
+        except Exception:
+            pass
+    codex = pathlib.Path.home() / ".codex" / "config.toml"
+    if codex.exists() and tool in codex.read_text():
+        found.append("codex")
+    return list(dict.fromkeys(found))  # dedup, preserve order
+
+def collect():
+    return {"rtk": rtk_stats(), "tilth": tilth_stats(), "serena": serena_stats()}
+
+# ---------------------------------------------------------------------------
+# HTML template
+# ---------------------------------------------------------------------------
+
+HTML = """<!doctype html><html lang=en><head><meta charset=utf-8>
+<meta name=viewport content="width=device-width,initial-scale=1">
+<title>token-diet dashboard</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#0d1117;color:#e6edf3;font:14px/1.5 'Segoe UI',system-ui,sans-serif;padding:24px}
+h1{font-size:20px;font-weight:600;color:#58a6ff;margin-bottom:4px}
+.sub{color:#8b949e;font-size:12px;margin-bottom:24px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px;margin-bottom:24px}
+.card{background:#161b22;border:1px solid #30363d;border-radius:8px;padding:20px}
+.card h2{font-size:13px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:#8b949e;margin-bottom:12px}
+.card .tool{font-size:18px;font-weight:700;margin-bottom:4px}
+.badge{display:inline-block;padding:2px 8px;border-radius:12px;font-size:11px;font-weight:600}
+.ok  {background:#1a3a1a;color:#39d353}.warn{background:#3a2a00;color:#e3b341}.off{background:#2d1b1b;color:#f85149}
+.stat{display:flex;justify-content:space-between;align-items:center;padding:4px 0;border-bottom:1px solid #21262d}
+.stat:last-child{border:none}.sv{font-weight:600;color:#e6edf3}.sl{color:#8b949e;font-size:12px}
+.bar-wrap{margin-top:14px}.bar-label{font-size:11px;color:#8b949e;margin-bottom:6px}
+.bars{display:flex;align-items:flex-end;gap:3px;height:60px}
+.bar{flex:1;background:#21262d;border-radius:3px 3px 0 0;position:relative;min-height:4px;transition:height .3s}
+.bar:hover .tip{display:block}
+.tip{display:none;position:absolute;bottom:calc(100% + 4px);left:50%;transform:translateX(-50%);
+     background:#161b22;border:1px solid #30363d;border-radius:4px;padding:4px 8px;
+     font-size:11px;white-space:nowrap;z-index:10;color:#e6edf3}
+.hosts{margin-top:10px;display:flex;flex-wrap:wrap;gap:6px}
+.host{background:#1c2128;border:1px solid #30363d;border-radius:4px;padding:2px 8px;font-size:11px;color:#8b949e}
+.summary{background:#161b22;border:1px solid #30363d;border-radius:8px;padding:20px;margin-bottom:24px;
+         display:flex;gap:32px;flex-wrap:wrap}
+.metric{flex:1;min-width:120px}.metric .v{font-size:28px;font-weight:700;color:#58a6ff}
+.metric .l{font-size:12px;color:#8b949e;margin-top:2px}
+.refresh{color:#8b949e;font-size:11px;text-align:right;margin-top:12px}
+.eff-bar{height:8px;background:#21262d;border-radius:4px;margin-top:6px;overflow:hidden}
+.eff-fill{height:100%;background:linear-gradient(90deg,#388bfd,#39d353);border-radius:4px;transition:width .5s}
+.none{color:#8b949e;font-style:italic}
+</style></head><body>
+<h1>token-diet</h1>
+<p class=sub id=ts>Loading…</p>
+<div class=summary id=summary></div>
+<div class=grid id=cards></div>
+<p class=refresh id=rf></p>
+<script>
+function fmt(n){if(n>=1e6)return(n/1e6).toFixed(1)+'M';if(n>=1e3)return(n/1e3).toFixed(1)+'K';return n}
+function fmtMs(ms){if(ms>=3600000)return Math.floor(ms/3600000)+'h '+Math.floor((ms%3600000)/60000)+'m';
+  if(ms>=60000)return Math.floor(ms/60000)+'m '+Math.floor((ms%60000)/1000)+'s';
+  if(ms>=1000)return (ms/1000).toFixed(1)+'s';return ms+'ms'}
+function badge(ok){return ok?'<span class="badge ok">active</span>':'<span class="badge off">not installed</span>'}
+function hosts(arr){if(!arr||!arr.length)return '<span class=none>none detected</span>';
+  return arr.map(h=>'<span class=host>'+h+'</span>').join('')}
+
+function render(d){
+  document.getElementById('ts').textContent='Last updated: '+new Date().toLocaleTimeString();
+  const r=d.rtk, t=d.tilth, s=d.serena;
+
+  // Summary bar
+  let sh='<div class=summary>';
+  if(r){
+    const sm=r.summary;
+    sh+=`<div class=metric><div class=v>${fmt(sm.total_saved)}</div><div class=l>tokens saved (RTK)</div></div>`;
+    sh+=`<div class=metric><div class=v>${sm.total_commands}</div><div class=l>commands filtered</div></div>`;
+    sh+=`<div class=metric><div class=v>${sm.avg_savings_pct.toFixed(1)}%</div><div class=l>avg efficiency</div>
+         <div class=eff-bar><div class=eff-fill style="width:${sm.avg_savings_pct.toFixed(1)}%"></div></div></div>`;
+    sh+=`<div class=metric><div class=v>${fmtMs(sm.total_time_ms)}</div><div class=l>total exec time</div></div>`;
+  } else {
+    sh+='<div class=metric><div class=v style="color:#f85149">—</div><div class=l>RTK not installed</div></div>';
+  }
+  const active=[r,t,s].filter(Boolean).length;
+  sh+=`<div class=metric><div class=v style="color:${active===3?'#39d353':'#e3b341'}">${active}/3</div><div class=l>tools active</div></div>`;
+  sh+='</div>';
+  document.getElementById('summary').outerHTML=sh;
+
+  // Cards
+  let cards='';
+
+  // RTK card
+  cards+='<div class=card><h2>RTK — output compression</h2>';
+  if(r){
+    const sm=r.summary;
+    cards+=`<div class=tool>${badge(true)} RTK</div>`;
+    cards+=`<div class=stat><span class=sl>Tokens in</span><span class=sv>${fmt(sm.total_input)}</span></div>`;
+    cards+=`<div class=stat><span class=sl>Tokens saved</span><span class=sv>${fmt(sm.total_saved)}</span></div>`;
+    cards+=`<div class=stat><span class=sl>Avg efficiency</span><span class=sv>${sm.avg_savings_pct.toFixed(1)}%</span></div>`;
+    cards+=`<div class=stat><span class=sl>Commands</span><span class=sv>${sm.total_commands}</span></div>`;
+    if(r.daily&&r.daily.length){
+      const maxS=Math.max(...r.daily.map(x=>x.saved_tokens),1);
+      cards+='<div class=bar-wrap><div class=bar-label>Daily saved tokens (last '+r.daily.length+' days)</div><div class=bars>';
+      r.daily.forEach(day=>{
+        const h=Math.max(4,Math.round((day.saved_tokens/maxS)*60));
+        const col=day.savings_pct>=80?'#39d353':day.savings_pct>=60?'#e3b341':'#f85149';
+        cards+=`<div class=bar style="height:${h}px;background:${col}"><span class=tip>${day.date}<br>${fmt(day.saved_tokens)} saved<br>${day.savings_pct.toFixed(1)}%</span></div>`;
+      });
+      cards+='</div></div>';
+    }
+  } else { cards+=badge(false)+'<p class=none style="margin-top:8px">Run: bash install.sh --rtk-only</p>'; }
+  cards+='</div>';
+
+  // tilth card
+  cards+='<div class=card><h2>tilth — AST code reading</h2>';
+  if(t){
+    cards+=`<div class=tool>${badge(true)} tilth ${t.version}</div>`;
+    cards+=`<div class=stat><span class=sl>Version</span><span class=sv>${t.version}</span></div>`;
+    cards+=`<div class=stat><span class=sl>Layer</span><span class=sv>tree-sitter (fast)</span></div>`;
+    cards+=`<div class=stat><span class=sl>Savings type</span><span class=sv>structural (prompt size)</span></div>`;
+    cards+='<div class=hosts>'+hosts(t.hosts)+'</div>';
+  } else { cards+=badge(false)+'<p class=none style="margin-top:8px">Run: bash install.sh --tilth-only</p>'; }
+  cards+='</div>';
+
+  // Serena card
+  cards+='<div class=card><h2>Serena — LSP navigation</h2>';
+  if(s){
+    cards+=`<div class=tool>${badge(true)} Serena (${s.mode})</div>`;
+    cards+=`<div class=stat><span class=sl>Mode</span><span class=sv>${s.mode}</span></div>`;
+    cards+=`<div class=stat><span class=sl>Memories</span><span class=sv>${s.memories} files</span></div>`;
+    cards+=`<div class=stat><span class=sl>Session logs</span><span class=sv>${s.log_days} days</span></div>`;
+    cards+=`<div class=stat><span class=sl>Savings type</span><span class=sv>structural (fewer turns)</span></div>`;
+    cards+='<div class=hosts>'+hosts(s.hosts)+'</div>';
+  } else { cards+=badge(false)+'<p class=none style="margin-top:8px">Run: bash install.sh --serena-only</p>'; }
+  cards+='</div>';
+
+  document.getElementById('cards').innerHTML=cards;
+  document.getElementById('rf').textContent='Auto-refreshes every 30s — Ctrl+C in terminal to stop';
+}
+
+async function refresh(){
+  try{const r=await fetch('/api/stats');render(await r.json())}
+  catch(e){document.getElementById('ts').textContent='Error fetching stats: '+e}
+}
+refresh();setInterval(refresh,30000);
+</script></body></html>"""
+
+# ---------------------------------------------------------------------------
+# HTTP handler
+# ---------------------------------------------------------------------------
+
+class Handler(http.server.BaseHTTPRequestHandler):
+    def log_message(self, fmt, *args):  # suppress request logs
+        pass
+
+    def do_GET(self):
+        path = urlparse(self.path).path
+        if path == "/api/stats":
+            data = json.dumps(collect()).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", len(data))
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(data)
+        elif path in ("/", "/index.html"):
+            body = HTML.encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", len(body))
+            self.end_headers()
+            self.wfile.write(body)
+        else:
+            self.send_error(404)
+
+# ---------------------------------------------------------------------------
+# Entry point
+# ---------------------------------------------------------------------------
+
+def main():
+    server = http.server.HTTPServer(("127.0.0.1", PORT), Handler)
+    url = f"http://127.0.0.1:{PORT}"
+    print(f"  token-diet dashboard → {url}")
+    print(f"  Ctrl+C to stop\n")
+    threading.Timer(0.4, lambda: webbrowser.open(url)).start()
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        print("\n  Dashboard stopped.")
+        server.server_close()
+
+if __name__ == "__main__":
+    main()

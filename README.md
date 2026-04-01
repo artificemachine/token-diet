@@ -49,6 +49,9 @@ bash scripts/install.sh
 # Install specific tool
 bash scripts/install.sh --rtk-only
 
+# Preview what would be installed (no changes made)
+bash scripts/install.sh --dry-run
+
 # Check status
 bash scripts/install.sh --verify
 ```
@@ -57,6 +60,7 @@ bash scripts/install.sh --verify
 # Windows
 .\scripts\Install.ps1
 .\scripts\Install.ps1 -Tool RTK
+.\scripts\Install.ps1 -DryRun        # preview, no changes made
 .\scripts\Install.ps1 -VerifyOnly
 ```
 
@@ -65,6 +69,20 @@ bash scripts/install.sh --verify
 ansible-playbook scripts/playbook.yml
 ansible-playbook scripts/playbook.yml -e "tools=rtk,tilth"
 ```
+
+## Dashboard & CLI
+
+After installation, `tkd` is available globally:
+
+```bash
+tkd                  # token savings summary (RTK + tilth + Serena)
+tkd dashboard        # live browser dashboard at http://127.0.0.1:7384
+tkd dashboard --port 8080
+tkd version          # show installed versions
+tkd verify           # re-run installation verification
+```
+
+The browser dashboard auto-refreshes every 30 s and shows cumulative RTK savings, a 14-day savings bar chart, tilth/Serena status, and registered MCP hosts.
 
 ## Enterprise / Air-Gapped Deployment
 
@@ -134,6 +152,8 @@ token-diet/
 ├── scripts/
 │   ├── install.sh            # macOS/Linux installer (--local for air-gapped)
 │   ├── Install.ps1           # Windows installer
+│   ├── tkd                   # CLI dashboard (installed to ~/.local/bin/tkd)
+│   ├── tkd-dashboard         # Browser dashboard server (Python stdlib)
 │   ├── playbook.yml          # Ansible playbook
 │   └── build.sh              # Build from forks (no internet)
 ├── config/

@@ -6,3 +6,7 @@ credentials.json
 .DS_Store
 .superharness/
 target/
+.serena/
+.vscode/
+dist/
+excalidraw.log

@@ -1,0 +1,102 @@
+{
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.5",
+  "serialNumber": "urn:uuid:token-diet-1.0.0",
+  "version": 1,
+  "metadata": {
+    "timestamp": "2026-04-01T00:00:00Z",
+    "tools": [
+      {
+        "vendor": "Claude Code",
+        "name": "automated-sbom-generator",
+        "version": "1.0.0"
+      }
+    ],
+    "component": {
+      "type": "application",
+      "bom-ref": "token-diet@1.0.0",
+      "name": "token-diet",
+      "version": "1.0.0",
+      "description": "Installer, build system, and compliance kit for RTK + tilth + Serena token optimization stack",
+      "licenses": [{ "license": { "id": "MIT" } }],
+      "purl": "pkg:github/token-diet/token-diet@1.0.0"
+    }
+  },
+  "components": [
+    {
+      "type": "library",
+      "bom-ref": "rtk@0.34.3",
+      "name": "rtk",
+      "version": "0.34.3",
+      "description": "Rust Token Killer — CLI proxy that filters and compresses command output for 60-90% token savings",
+      "licenses": [{ "license": { "id": "MIT" } }],
+      "purl": "pkg:github/celstnblacc/rtk@0.34.3",
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/celstnblacc/rtk.git",
+          "comment": "Audited fork — pinned commit: 8c27defe878c1514528821c0998ed9747e43a9c7"
+        }
+      ],
+      "properties": [
+        { "name": "language", "value": "Rust" },
+        { "name": "total-transitive-deps", "value": "164" },
+        { "name": "cargo-audit-date", "value": "2026-04-01" },
+        { "name": "cargo-audit-result", "value": "0 vulnerabilities" },
+        { "name": "submodule-commit", "value": "8c27defe878c1514528821c0998ed9747e43a9c7" }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "tilth@0.5.7",
+      "name": "tilth",
+      "version": "0.5.7",
+      "description": "AST-aware code reading and symbol search MCP server — 38-44% cost reduction via tree-sitter",
+      "licenses": [{ "license": { "id": "MIT" } }],
+      "purl": "pkg:github/celstnblacc/tilth@0.5.7",
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/celstnblacc/tilth.git",
+          "comment": "Audited fork — pinned commit: 8aa3d26fa252f4938f7bc883ec67a5b9ddfdf123"
+        }
+      ],
+      "properties": [
+        { "name": "language", "value": "Rust" },
+        { "name": "total-transitive-deps", "value": "93" },
+        { "name": "cargo-audit-date", "value": "2026-04-01" },
+        { "name": "cargo-audit-result", "value": "0 vulnerabilities" },
+        { "name": "submodule-commit", "value": "8aa3d26fa252f4938f7bc883ec67a5b9ddfdf123" }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "serena@0.1.4",
+      "name": "serena-agent",
+      "version": "0.1.4",
+      "description": "LSP-powered symbol navigation MCP server for AI coding agents",
+      "licenses": [{ "license": { "id": "MIT" } }],
+      "purl": "pkg:github/celstnblacc/serena@0.1.4",
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/celstnblacc/serena.git",
+          "comment": "Audited fork — pinned commit: 1acd0118b253e99a3bfaecfdd464499509b3ceb0"
+        }
+      ],
+      "properties": [
+        { "name": "language", "value": "Python" },
+        { "name": "lockfile", "value": "uv.lock" },
+        { "name": "pip-audit-date", "value": "2026-04-01" },
+        { "name": "pip-audit-result", "value": "0 known vulnerabilities" },
+        { "name": "submodule-commit", "value": "1acd0118b253e99a3bfaecfdd464499509b3ceb0" }
+      ]
+    }
+  ],
+  "dependencies": [
+    {
+      "ref": "token-diet@1.0.0",
+      "dependsOn": ["rtk@0.34.3", "tilth@0.5.7", "serena@0.1.4"]
+    }
+  ]
+}

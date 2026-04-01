@@ -3,14 +3,11 @@
 [submodule "forks/rtk"]
 	path = forks/rtk
 	url = https://github.com/celstnblacc/rtk.git
-	branch = master
 
 [submodule "forks/tilth"]
 	path = forks/tilth
 	url = https://github.com/celstnblacc/tilth.git
-	branch = main
 
 [submodule "forks/serena"]
 	path = forks/serena
 	url = https://github.com/celstnblacc/serena.git
-	branch = main

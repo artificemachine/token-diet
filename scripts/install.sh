@@ -32,6 +32,39 @@ warn()  { echo -e "${YELLOW}[warn]${NC}  $*"; }
 fail()  { echo -e "${RED}[fail]${NC}  $*"; exit 1; }
 header(){ echo -e "\n${BOLD}--- $* ---${NC}\n"; }
 
+# --- Local build verification (--local mode only) ----------------------------
+# Runs clippy + tests before cargo install to catch broken builds early.
+# Skipped when SKIP_TESTS=true (--skip-tests flag).
+verify_local_build() {
+  local name="$1"        # display name, e.g. "RTK"
+  local manifest="$2"    # path to Cargo.toml
+
+  if [ "${SKIP_TESTS:-false}" = "true" ]; then
+    info "$name: skipping clippy + tests (--skip-tests)"
+    return 0
+  fi
+
+  info "$name: running clippy..."
+  if cargo clippy --manifest-path "$manifest" --all-targets -- -D warnings 2>&1; then
+    ok "$name clippy clean"
+  else
+    warn "$name clippy warnings found — continuing install (fix before release)"
+  fi
+
+  info "$name: running tests..."
+  local log; log=$(mktemp)
+  if cargo test --manifest-path "$manifest" 2>&1 | tee "$log" | tail -5; then
+    if grep -qE "^FAILED|error\[E" "$log"; then
+      warn "$name test failures detected — continuing install (check $log)"
+    else
+      ok "$name tests passed"
+    fi
+  else
+    warn "$name tests did not complete cleanly — continuing install"
+  fi
+  rm -f "$log"
+}
+
 # --- Prerequisite checks -----------------------------------------------------
 check_command() { command -v "$1" &>/dev/null; }
 
@@ -115,6 +148,7 @@ install_rtk() {
   fi
 
   if $LOCAL_MODE; then
+    verify_local_build "RTK" "$PROJECT_ROOT/forks/rtk/Cargo.toml"
     info "Building RTK from fork (no internet)..."
     cargo install --path "$PROJECT_ROOT/forks/rtk" --force 2>&1 | tail -5
     ok "RTK built and installed from fork"
@@ -171,6 +205,7 @@ install_tilth() {
   fi
 
   if $LOCAL_MODE; then
+    verify_local_build "tilth" "$PROJECT_ROOT/forks/tilth/Cargo.toml"
     info "Building tilth from fork (no internet)..."
     cargo install --path "$PROJECT_ROOT/forks/tilth" --force 2>&1 | tail -5
     ok "tilth built and installed from fork"
@@ -468,6 +503,7 @@ Options:
   --serena-only  Install only Serena
   --verify       Only verify current installation
   --no-dedup     Skip overlap fix configuration
+  --skip-tests   Skip clippy + tests in --local mode (faster install)
   -h, --help     Show this help
 EOF
 }
@@ -506,9 +542,15 @@ run_wizard() {
   fi
 
   WIZ_LOCAL=false
+  WIZ_SKIP_TESTS=false
   local l
   read -rp "  Air-gapped / local build? [y/N] " l
-  [[ "$l" =~ ^[Yy] ]] && WIZ_LOCAL=true
+  if [[ "$l" =~ ^[Yy] ]]; then
+    WIZ_LOCAL=true
+    local st
+    read -rp "  Skip clippy + tests? (faster, not recommended) [y/N] " st
+    [[ "$st" =~ ^[Yy] ]] && WIZ_SKIP_TESTS=true
+  fi
 
   echo ""
   echo -e "${BOLD}  Ready to install:${NC}"
@@ -529,6 +571,7 @@ main() {
   local do_rtk=false do_tilth=false do_serena=false
   local do_dedup=true verify_only=false has_args=false
   LOCAL_MODE=false
+  SKIP_TESTS=false
 
   while [ $# -gt 0 ]; do
     has_args=true
@@ -540,6 +583,7 @@ main() {
       --serena-only)  do_serena=true ;;
       --verify)       verify_only=true ;;
       --no-dedup)     do_dedup=false ;;
+      --skip-tests)   SKIP_TESTS=true ;;
       -h|--help)      usage; exit 0 ;;
       *)              warn "Unknown option: $1"; usage; exit 1 ;;
     esac
@@ -560,7 +604,7 @@ main() {
   if ! $has_args; then
     run_wizard
     do_rtk=$WIZ_RTK; do_tilth=$WIZ_TILTH; do_serena=$WIZ_SERENA
-    do_dedup=$WIZ_DEDUP; LOCAL_MODE=$WIZ_LOCAL
+    do_dedup=$WIZ_DEDUP; LOCAL_MODE=$WIZ_LOCAL; SKIP_TESTS=$WIZ_SKIP_TESTS
   fi
 
   if $LOCAL_MODE; then echo -e "${BOLD}    Mode: LOCAL (air-gapped)${NC}\n"; fi

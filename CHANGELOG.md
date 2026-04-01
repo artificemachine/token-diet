@@ -6,11 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-04-01
+
 ### Added
 
 * `CLAUDE.md` — project guidance for Claude Code sessions (structure, commands, conventions)
 * `README.md` — project overview for the token-diet installer stack
 * `README.md` — internal forge mirroring guide: staying in sync with `--mirror`, Forgejo/GitLab pull mirror tip
+* `compliance/SBOM.json` — CycloneDX 1.5 bill of materials for all three components (rtk 0.34.3, tilth 0.5.7, serena-agent 0.1.4) with audit results and submodule commit pins
+* `compliance/security-audit.md` — completed automated security audit pass (cargo audit, pip-audit, grep checks, Docker config)
 
 ### Fixed
 
@@ -21,3 +25,5 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ### Changed
 
 * Submodule forks (rtk, tilth, serena) point to security-patched versions with `## This Fork` documentation
+* `.gitmodules` — removed `branch =` tracking lines; submodules pinned to exact commits for reproducible builds
+* `.gitignore` — added `.serena/`, `.vscode/`, `dist/`, `excalidraw.log`

@@ -293,10 +293,49 @@ JSON
     info "  Copy to project: cp $vscode_template /path/to/project/.vscode/mcp.json"
   fi
 
-  # OpenCode / Copilot CLI
+  # OpenCode — writes to ~/.opencode.json (mcpServers format, same as tilth)
   if $HAS_OPENCODE; then
-    info "Serena MCP: OpenCode — add to ~/.config/opencode/ MCP config"
-    info "  Command: $serena_cmd"
+    local oc_cfg="$HOME/.opencode.json"
+    if $LOCAL_MODE; then
+      python3 - "$oc_cfg" <<'PYEOF'
+import json, sys
+cfg = sys.argv[1]
+try:
+    with open(cfg) as f: data = json.load(f)
+except FileNotFoundError:
+    data = {}
+data.setdefault("mcpServers", {})
+data["mcpServers"]["serena"] = {
+    "command": "docker",
+    "args": ["run","--rm","-i","-v","$(pwd):/workspace:ro",
+             "--network","none","token-diet/serena:latest",
+             "--context=ide","--project","/workspace"]
+}
+with open(cfg, "w") as f:
+    json.dump(data, f, indent=2)
+    f.write("\n")
+PYEOF
+      ok "Serena MCP: OpenCode (Docker, $oc_cfg)"
+    else
+      python3 - "$oc_cfg" "${SERENA_REPO}" <<'PYEOF'
+import json, sys
+cfg, repo = sys.argv[1], sys.argv[2]
+try:
+    with open(cfg) as f: data = json.load(f)
+except FileNotFoundError:
+    data = {}
+data.setdefault("mcpServers", {})
+data["mcpServers"]["serena"] = {
+    "command": "uvx",
+    "args": ["--from", "git+" + repo, "serena", "start-mcp-server",
+             "--context=ide", "--project-from-cwd"]
+}
+with open(cfg, "w") as f:
+    json.dump(data, f, indent=2)
+    f.write("\n")
+PYEOF
+      ok "Serena MCP: OpenCode ($oc_cfg)"
+    fi
   fi
   if $HAS_COPILOT; then
     ok "Serena: Copilot CLI uses VS Code MCP config (shared)"

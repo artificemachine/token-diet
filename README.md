@@ -80,6 +80,18 @@ git push internal main
 # Repeat for tilth and serena
 ```
 
+The repo must exist on the forge first (create it empty, no README). You now have two remotes: `origin` (GitHub) and `internal` (your forge). Verify with `git remote -v`.
+
+**Staying in sync** — pull upstream changes and re-push:
+
+```bash
+git fetch origin && git push internal --mirror
+```
+
+`--mirror` syncs all branches, tags, and refs — not just `main`. Run this as a cron job or CI task to keep the mirror current.
+
+> **Tip:** Forgejo, GitLab, and Gitea all support *pull mirrors* from the UI — point them at the GitHub URL and they auto-sync on a schedule without any manual script.
+
 ### 2. Update submodule URLs
 
 Edit `.gitmodules` to point to your internal server, then:

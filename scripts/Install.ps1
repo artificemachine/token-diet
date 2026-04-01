@@ -202,10 +202,24 @@ args = ["--from", "git+$SERENA_REPO", "serena", "start-mcp-server", "--context=c
         }
     }
 
-    # OpenCode
+    # OpenCode — writes to $env:USERPROFILE\.opencode.json (mcpServers format, same as tilth)
     if ($script:HasOpenCode) {
-        Write-Warn "Serena MCP: OpenCode requires manual config"
-        Write-Info "  Add serena to MCP servers with: uvx --from git+$SERENA_REPO serena start-mcp-server --project-from-cwd"
+        $ocCfg = Join-Path $env:USERPROFILE ".opencode.json"
+        try {
+            $data = if (Test-Path $ocCfg) { Get-Content $ocCfg -Raw | ConvertFrom-Json } else { [PSCustomObject]@{} }
+            if (-not $data.PSObject.Properties["mcpServers"]) {
+                $data | Add-Member -NotePropertyName "mcpServers" -NotePropertyValue ([PSCustomObject]@{})
+            }
+            $serenaEntry = [PSCustomObject]@{
+                command = "uvx"
+                args    = @("--from", "git+$SERENA_REPO", "serena", "start-mcp-server", "--context=ide", "--project-from-cwd")
+            }
+            $data.mcpServers | Add-Member -NotePropertyName "serena" -NotePropertyValue $serenaEntry -Force
+            $data | ConvertTo-Json -Depth 10 | Set-Content -Path $ocCfg -Encoding UTF8
+            Write-Ok "Serena MCP: OpenCode ($ocCfg)"
+        } catch {
+            Write-Warn "Serena MCP: OpenCode setup failed — $_"
+        }
     }
 }
 

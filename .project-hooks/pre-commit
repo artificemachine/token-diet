@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+# token-diet project pre-commit hook
+# Run by ~/.githooks/pre-commit (global hook delegates here)
+# ShipGuard SAST + secret detection are handled by the global hook — not here.
+
+set -euo pipefail
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+
+# Verify install script is executable and passes a dry-run
+echo "token-diet: verifying install.sh dry-run..."
+bash "$REPO_ROOT/scripts/install.sh" --dry-run --skip-tests 2>&1 | tail -5
+
+echo "token-diet: pre-commit checks passed."

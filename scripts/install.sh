@@ -567,14 +567,17 @@ install_tkd() {
   fi
 
   if [ "${DRY_RUN:-false}" = "true" ]; then
-    dryrun "install -m755 $src_tkd $bin_dir/tkd"
+    dryrun "install -m755 $src_tkd $bin_dir/tkd + symlink token-diet"
     [ -f "$src_dash" ] && dryrun "install -m755 $src_dash $bin_dir/tkd-dashboard"
+    dryrun "write ~/.claude/token-diet.md + add @token-diet.md to ~/.claude/CLAUDE.md"
+    dryrun "write ~/.codex/token-diet.md + add @token-diet.md to ~/.codex/AGENTS.md"
     return 0
   fi
 
   mkdir -p "$bin_dir"
   install -m755 "$src_tkd" "$bin_dir/tkd"
-  ok "tkd installed: $bin_dir/tkd"
+  ln -sf "$bin_dir/tkd" "$bin_dir/token-diet"
+  ok "tkd + token-diet installed: $bin_dir"
 
   if [ -f "$src_dash" ]; then
     install -m755 "$src_dash" "$bin_dir/tkd-dashboard"
@@ -585,6 +588,54 @@ install_tkd() {
   if ! echo "$PATH" | grep -q "$HOME/.local/bin"; then
     info "Add to your shell: export PATH=\"\$HOME/.local/bin:\$PATH\""
   fi
+
+  # Write token-diet.md into each AI host config dir and ensure it is referenced.
+  # Idempotent: skips if token-diet.md already exists and is up to date.
+  write_tkd_md() {
+    local config_dir="$1"
+    local instruction_file="$2"  # CLAUDE.md or AGENTS.md
+
+    [ -d "$config_dir" ] || return 0  # host not installed — skip silently
+
+    local tkd_file="$config_dir/token-diet.md"
+    cat > "$tkd_file" << 'TKDDOC'
+# TKD — token-diet unified CLI
+
+`tkd` (`~/.local/bin/tkd`) is the top-level command for the token-diet stack (RTK + tilth + Serena).
+
+## Commands
+
+```bash
+tkd gain       # Combined savings dashboard: RTK + tilth + Serena
+tkd version    # Installed versions of all three tools
+tkd verify     # Re-run installation verification
+tkd dashboard  # Open live browser dashboard
+```
+
+## Rules
+
+- **`tkd` is a real binary.** Never assume it is a typo for `rtk`.
+- Run `which tkd` if unsure whether it is installed.
+- `tkd gain` shows RTK tracked savings + tilth/Serena structural savings.
+  RTK savings are exact (output compression). tilth + Serena savings are
+  structural (smaller prompts, fewer turns) and shown as estimates.
+TKDDOC
+    ok "token-diet.md written: $tkd_file"
+
+    # Add @token-diet.md reference to instruction file if not already present
+    if [ -f "$instruction_file" ] && ! grep -q "@token-diet.md" "$instruction_file"; then
+      # Insert before @RTK.md if present, otherwise append
+      if grep -q "@RTK.md" "$instruction_file"; then
+        sed -i.bak "s|@RTK.md|@token-diet.md\n@RTK.md|" "$instruction_file" && rm -f "${instruction_file}.bak"
+      else
+        printf "\n@token-diet.md\n" >> "$instruction_file"
+      fi
+      ok "@token-diet.md added to: $instruction_file"
+    fi
+  }
+
+  write_tkd_md "$HOME/.claude" "$HOME/.claude/CLAUDE.md"
+  write_tkd_md "$HOME/.codex" "$HOME/.codex/AGENTS.md"
 }
 
 # --- Main ---------------------------------------------------------------------

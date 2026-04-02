@@ -34,6 +34,27 @@ fail()    { echo -e "${RED}[fail]${NC}  $*"; exit 1; }
 header()  { echo -e "\n${BOLD}--- $* ---${NC}\n"; }
 dryrun()  { echo -e "${MAGENTA:-\033[0;35m}[dry-run]${NC} would run: $*"; }
 
+# show_output — pipe build output through.
+# Without --verbose: show only the last 5 lines (less noise).
+# With --verbose:    show everything and tee to install.log.
+LOG_FILE="${HOME}/.local/share/token-diet/install.log"
+show_output() {
+  if [ "${VERBOSE:-false}" = "true" ]; then
+    mkdir -p "$(dirname "$LOG_FILE")"
+    tee -a "$LOG_FILE"
+  else
+    tail -5
+  fi
+}
+
+rotate_log() {
+  [ -f "$LOG_FILE" ] || return 0
+  local size; size=$(wc -c < "$LOG_FILE" 2>/dev/null || echo 0)
+  if [ "$size" -gt 524288 ]; then   # 512 KB
+    mv "$LOG_FILE" "${LOG_FILE}.1"
+  fi
+}
+
 # --- Local build verification (--local mode only) ----------------------------
 # Runs clippy + tests before cargo install to catch broken builds early.
 # Skipped when SKIP_TESTS=true (--skip-tests flag).
@@ -55,7 +76,7 @@ verify_local_build() {
 
   info "$name: running tests..."
   local log; log=$(mktemp)
-  if cargo test --manifest-path "$manifest" 2>&1 | tee "$log" | tail -5; then
+  if cargo test --manifest-path "$manifest" 2>&1 | tee "$log" | show_output; then
     if grep -qE "^FAILED|error\[E" "$log"; then
       warn "$name test failures detected — continuing install (check $log)"
     else
@@ -167,14 +188,14 @@ install_rtk() {
       dryrun "cargo install --path $PROJECT_ROOT/forks/rtk --force"
     else
       info "Building RTK from fork (no internet)..."
-      cargo install --path "$PROJECT_ROOT/forks/rtk" --force 2>&1 | tail -5
+      cargo install --path "$PROJECT_ROOT/forks/rtk" --force 2>&1 | show_output
       ok "RTK built and installed from fork"
     fi
   else
     if [ "${DRY_RUN:-false}" = "true" ]; then
       dryrun "cargo install --git $RTK_REPO --force"
     else
-      cargo install --git "$RTK_REPO" --force 2>&1 | tail -5
+      cargo install --git "$RTK_REPO" --force 2>&1 | show_output
       ok "RTK installed: $(rtk --version 2>/dev/null)"
     fi
   fi
@@ -232,14 +253,14 @@ install_tilth() {
       dryrun "cargo install --path $PROJECT_ROOT/forks/tilth --force"
     else
       info "Building tilth from fork (no internet)..."
-      cargo install --path "$PROJECT_ROOT/forks/tilth" --force 2>&1 | tail -5
+      cargo install --path "$PROJECT_ROOT/forks/tilth" --force 2>&1 | show_output
       ok "tilth built and installed from fork"
     fi
   else
     if [ "${DRY_RUN:-false}" = "true" ]; then
       dryrun "cargo install --git $TILTH_REPO --force"
     else
-      cargo install --git "$TILTH_REPO" --force 2>&1 | tail -5
+      cargo install --git "$TILTH_REPO" --force 2>&1 | show_output
       ok "tilth installed: $(tilth --version 2>/dev/null)"
     fi
   fi
@@ -662,6 +683,7 @@ Options:
   --no-dedup     Skip overlap fix configuration
   --skip-tests   Skip clippy + tests in --local mode (faster install)
   --dry-run      Simulate install — detect hosts and show what would run, no changes made
+  --verbose      Show full build output instead of last 5 lines; log to ~/.local/share/token-diet/install.log
   -h, --help     Show this help
 EOF
 }
@@ -731,6 +753,7 @@ main() {
   LOCAL_MODE=false
   SKIP_TESTS=false
   DRY_RUN=false
+  VERBOSE=false
 
   while [ $# -gt 0 ]; do
     has_args=true
@@ -744,11 +767,17 @@ main() {
       --no-dedup)     do_dedup=false ;;
       --skip-tests)   SKIP_TESTS=true ;;
       --dry-run)      DRY_RUN=true; SKIP_TESTS=true ;;
+      --verbose)      VERBOSE=true ;;
       -h|--help)      usage; exit 0 ;;
       *)              warn "Unknown option: $1"; usage; exit 1 ;;
     esac
     shift
   done
+
+  if [ "$VERBOSE" = "true" ]; then
+    rotate_log
+    info "Verbose mode — full output logged to $LOG_FILE"
+  fi
 
   echo -e "\n${BOLD}=== token-diet ===${NC}"
   echo -e "${BOLD}    RTK + tilth + Serena${NC}"

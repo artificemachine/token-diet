@@ -69,8 +69,66 @@ def _registered_hosts(tool):
         found.append("codex")
     return list(dict.fromkeys(found))  # dedup, preserve order
 
+def budget_stats():
+    """Read .token-budget from cwd (or home), cross-reference with RTK usage."""
+    budget_file = None
+    # Walk from home looking for .token-budget
+    home = pathlib.Path.home()
+    for candidate in [pathlib.Path.cwd(), home]:
+        p = candidate / ".token-budget"
+        if p.exists():
+            budget_file = p
+            break
+    if budget_file is None:
+        return None
+    try:
+        cfg = json.loads(budget_file.read_text())
+    except Exception:
+        return None
+
+    warn = cfg.get("warn", 50000)
+    hard = cfg.get("hard", 100000)
+
+    # Get current usage from RTK
+    used = 0
+    raw = run(["rtk", "gain", "--format", "json"])
+    if raw:
+        try:
+            used = json.loads(raw)["summary"]["total_input"]
+        except Exception:
+            pass
+
+    remaining = hard - used
+    pct = round(used * 100 / hard, 1) if hard > 0 else 0
+    status = "ok" if used < warn else ("warn" if used < hard else "hard")
+
+    return {
+        "warn": warn,
+        "hard": hard,
+        "used": used,
+        "remaining": remaining,
+        "pct": pct,
+        "status": status,
+        "file": str(budget_file),
+    }
+
+def breakdown_stats(limit=10):
+    raw = run(["rtk", "gain", "--history"])
+    if not raw:
+        return None
+    d = json.loads(raw)
+    cmds = d.get("commands", [])
+    top = sorted(cmds, key=lambda c: c.get("total_saved", 0), reverse=True)[:limit]
+    return {"top_commands": top}
+
 def collect():
-    return {"rtk": rtk_stats(), "tilth": tilth_stats(), "serena": serena_stats()}
+    return {
+        "rtk":       rtk_stats(),
+        "tilth":     tilth_stats(),
+        "serena":    serena_stats(),
+        "breakdown": breakdown_stats(),
+        "budget":    budget_stats(),
+    }
 
 # ---------------------------------------------------------------------------
 # HTML template

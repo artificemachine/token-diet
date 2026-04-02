@@ -1,14 +1,18 @@
 #!/usr/bin/env bash
-# tkd — token-diet stack dashboard
+# token-diet — token optimization stack dashboard
 # Shows combined token savings and health across RTK + tilth + Serena.
 #
 # Usage:
-#   tkd gain           Show token savings dashboard (default)
-#   tkd version        Show versions of all three tools
-#   tkd verify         Re-run installation verification
-#   tkd --help         Show this help
+#   token-diet gain           Show token savings dashboard (default)
+#   token-diet health         Quick health check: tools + MCP hosts
+#   token-diet version        Show versions of all three tools
+#   token-diet verify         Re-run installation verification
+#   token-diet uninstall      Remove all token-diet components
+#   token-diet --help         Show this help
 
 set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # --- Colors -------------------------------------------------------------------
 if [ -t 1 ]; then
@@ -199,39 +203,608 @@ cmd_version() {
 }
 
 cmd_verify() {
-  local script_dir; script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-  bash "$script_dir/install.sh" --verify
+  bash "$SCRIPT_DIR/install.sh" --verify
 }
 
 cmd_dashboard() {
   local dashboard_bin
   # Prefer the installed copy, fall back to script-dir sibling
-  if command -v tkd-dashboard &>/dev/null; then
-    dashboard_bin="$(command -v tkd-dashboard)"
+  if command -v token-diet-dashboard &>/dev/null; then
+    dashboard_bin="$(command -v token-diet-dashboard)"
   else
-    local script_dir; script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-    dashboard_bin="$script_dir/tkd-dashboard"
+    dashboard_bin="$SCRIPT_DIR/token-diet-dashboard"
   fi
   if [ ! -f "$dashboard_bin" ]; then
-    echo "tkd-dashboard not found — run: bash install.sh" >&2; exit 1
+    echo "token-diet-dashboard not found — run: bash install.sh" >&2; exit 1
   fi
   exec python3 "$dashboard_bin" "$@"
+}
+
+cmd_health() {
+  local issues=0
+  echo -e "\n${BOLD}token-diet health${NC}\n"
+
+  # RTK
+  if check_cmd rtk && rtk gain --help &>/dev/null 2>&1; then
+    local rtk_ver; rtk_ver=$(rtk --version 2>/dev/null | awk '{print $2}') || true
+    ok "RTK ${rtk_ver}"
+  else
+    miss "RTK not found"
+    issues=$(( issues + 1 ))
+  fi
+
+  # tilth
+  if check_cmd tilth; then
+    local tilth_ver; tilth_ver=$(tilth --version 2>/dev/null | awk '{print $2}') || true
+    local tilth_hosts; tilth_hosts=$(hosts_registered "tilth")
+    ok "tilth ${tilth_ver}  (hosts: ${tilth_hosts})"
+  else
+    miss "tilth not found"
+    issues=$(( issues + 1 ))
+  fi
+
+  # Serena
+  if check_cmd uvx || docker image inspect token-diet/serena:latest &>/dev/null 2>&1; then
+    local serena_hosts; serena_hosts=$(hosts_registered "serena")
+    ok "Serena  (hosts: ${serena_hosts})"
+  else
+    miss "Serena not found  (uvx or Docker required)"
+    issues=$(( issues + 1 ))
+  fi
+
+  echo ""
+  if [ "$issues" -eq 0 ]; then
+    echo -e "  ${GREEN}${BOLD}All tools healthy${NC}"
+    echo ""
+    return 0
+  else
+    echo -e "  ${YELLOW}${BOLD}${issues} tool(s) missing — run: bash install.sh${NC}"
+    echo ""
+    return 1
+  fi
+}
+
+cmd_uninstall() {
+  bash "$SCRIPT_DIR/uninstall.sh" "$@"
+}
+
+# Find .token-budget walking up from cwd toward $HOME
+find_budget_file() {
+  local dir="$PWD"
+  while [[ "$dir" == "$HOME"* ]]; do
+    [ -f "$dir/.token-budget" ] && echo "$dir/.token-budget" && return 0
+    [ "$dir" = "$HOME" ] && break
+    dir="$(dirname "$dir")"
+  done
+  return 1
+}
+
+cmd_budget() {
+  local subcmd="${1:-status}"
+  shift || true
+
+  case "$subcmd" in
+    init)
+      local target="$PWD/.token-budget"
+      if [ -f "$target" ]; then
+        warn ".token-budget already exists at $target"
+        return 0
+      fi
+      python3 - "$target" << 'PY'
+import json, sys
+d = {"warn": 50000, "hard": 100000}
+with open(sys.argv[1], "w") as f:
+    json.dump(d, f, indent=2)
+    f.write("\n")
+PY
+      ok "Created $target  (warn: 50K, hard: 100K tokens)"
+      ;;
+
+    status)
+      local budget_file
+      if ! budget_file=$(find_budget_file); then
+        echo -e "  ${YELLOW}No .token-budget found in this project.${NC}"
+        echo -e "  Run: ${BOLD}token-diet budget init${NC}  to create one."
+        return 1
+      fi
+
+      local warn_t hard_t
+      warn_t=$(python3 -c "import json; d=json.load(open('$budget_file')); print(d['warn'])" 2>/dev/null) || warn_t=50000
+      hard_t=$(python3 -c "import json; d=json.load(open('$budget_file')); print(d['hard'])" 2>/dev/null) || hard_t=100000
+
+      local used=0
+      if check_cmd rtk && rtk gain --help &>/dev/null 2>&1; then
+        used=$(rtk gain --format json 2>/dev/null \
+          | python3 -c "import json,sys; d=json.load(sys.stdin); print(d['summary']['total_input'])" 2>/dev/null) || used=0
+      fi
+
+      local remaining=$(( hard_t - used ))
+      local pct=0
+      [ "$hard_t" -gt 0 ] && pct=$(( used * 100 / hard_t ))
+
+      echo -e "\n${BOLD}token-diet budget${NC}  ${DIM}($budget_file)${NC}\n"
+      printf "  %-20s %s\n" "Used:"      "$(human_tokens "$used")"
+      printf "  %-20s %s\n" "Warn at:"   "$(human_tokens "$warn_t")"
+      printf "  %-20s %s\n" "Hard stop:" "$(human_tokens "$hard_t")"
+      printf "  %-20s %s\n" "Remaining:" "$(human_tokens "$remaining")"
+      echo -e "  Burn-down:  ${CYAN}$(bar "$pct")${NC}  ${BOLD}${pct}%${NC}"
+      echo ""
+
+      if [ "$used" -ge "$hard_t" ]; then
+        echo -e "  ${RED}${BOLD}HARD STOP — budget exhausted (${pct}%)${NC}"
+        echo ""
+        return 3
+      elif [ "$used" -ge "$warn_t" ]; then
+        echo -e "  ${YELLOW}${BOLD}WARN — approaching hard stop (${pct}%)${NC}"
+        echo ""
+        return 2
+      else
+        echo -e "  ${GREEN}${BOLD}Budget OK${NC}"
+        echo ""
+        return 0
+      fi
+      ;;
+
+    *)
+      echo "Usage: token-diet budget <init|status>" >&2
+      return 1
+      ;;
+  esac
+}
+
+cmd_loops() {
+  if ! check_cmd rtk || ! rtk gain --help &>/dev/null 2>&1; then
+    echo -e "  ${RED}RTK not installed — loop detection requires RTK${NC}" >&2
+    return 1
+  fi
+
+  local json; json=$(rtk gain --history 2>/dev/null) || true
+  if [ -z "$json" ]; then
+    echo -e "  ${YELLOW}No RTK history yet${NC}"
+    return 0
+  fi
+
+  local threshold=3
+  local loops_found
+  loops_found=$(python3 - "$json" "$threshold" << 'PY'
+import json, sys
+data = json.loads(sys.argv[1])
+threshold = int(sys.argv[2])
+loops = [c for c in data.get("commands", []) if c.get("count", 0) >= threshold]
+loops_sorted = sorted(loops, key=lambda c: c["count"], reverse=True)
+for c in loops_sorted:
+    wasted = c.get("total_input", 0) - c.get("total_saved", 0)
+    print(f'{c["cmd"]}\t{c["count"]}\t{wasted}')
+PY
+  ) || true
+
+  echo -e "\n${BOLD}=== token-diet loops ===${NC}\n"
+
+  if [ -z "$loops_found" ]; then
+    echo -e "  ${GREEN}No loops detected — all commands run < ${threshold} times${NC}"
+    echo ""
+    return 0
+  fi
+
+  echo -e "${BOLD}Repeated commands  ${DIM}(≥${threshold} runs — potential agent loops)${NC}"
+  echo -e "${DIM}$(printf '%.0s─' {1..52})${NC}"
+  while IFS=$'\t' read -r cmd count wasted; do
+    echo -e "  ${RED}✗${NC}  ${BOLD}${cmd}${NC}  — ${count}x  (~$(human_tokens "$wasted") tokens lost to repetition)"
+  done <<< "$loops_found"
+  echo ""
+  echo -e "  ${YELLOW}Tip: instruct your agent to cache results or use tilth for repeated reads${NC}"
+  echo ""
+  return 1
+}
+
+cmd_breakdown() {
+  local limit=10
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --limit) limit="$2"; shift ;;
+      *) ;;
+    esac
+    shift
+  done
+
+  if ! check_cmd rtk || ! rtk gain --help &>/dev/null 2>&1; then
+    echo -e "  ${RED}RTK not installed — breakdown requires RTK${NC}" >&2
+    return 1
+  fi
+
+  local json; json=$(rtk gain --history 2>/dev/null) || true
+  if [ -z "$json" ]; then
+    echo -e "  ${YELLOW}No RTK history yet — run some commands first${NC}"
+    return 0
+  fi
+
+  echo -e "\n${BOLD}=== token-diet breakdown ===${NC}\n"
+  echo -e "${BOLD}Top commands by tokens saved${NC}  ${DIM}(limit: ${limit})${NC}"
+  echo -e "${DIM}$(printf '%.0s─' {1..52})${NC}"
+
+  python3 - "$json" "$limit" << 'PY'
+import json, sys
+data = json.loads(sys.argv[1])
+limit = int(sys.argv[2])
+cmds = data.get("commands", [])
+cmds_sorted = sorted(cmds, key=lambda c: c.get("total_saved", 0), reverse=True)[:limit]
+for i, c in enumerate(cmds_sorted, 1):
+    saved = c.get("total_saved", 0)
+    pct   = c.get("avg_pct", 0)
+    count = c.get("count", 0)
+    inp   = c.get("total_input", 0)
+    label = c["cmd"][:34]
+    saved_k = f"{saved/1000:.1f}K" if saved >= 1000 else str(saved)
+    inp_k   = f"{inp/1000:.1f}K"   if inp   >= 1000 else str(inp)
+    print(f"  {i:>2}. {label:<36} {saved_k:>7} saved  {pct:>5.1f}%  ({count}x, {inp_k} in)")
+PY
+
+  echo ""
+}
+
+cmd_explain() {
+  local target="$1"
+  if [ -z "$target" ]; then
+    echo "Usage: token-diet explain <command>" >&2
+    return 1
+  fi
+
+  if ! check_cmd rtk || ! rtk gain --help &>/dev/null 2>&1; then
+    echo -e "  ${RED}RTK not installed — explain requires RTK${NC}" >&2
+    return 1
+  fi
+
+  local json; json=$(rtk gain --history 2>/dev/null) || true
+  if [ -z "$json" ]; then
+    echo -e "  ${YELLOW}No RTK history yet — run some commands first${NC}"
+    return 1
+  fi
+
+  local result
+  result=$(python3 - "$json" "$target" << 'PY'
+import json, sys
+data   = json.loads(sys.argv[1])
+target = sys.argv[2]
+match  = next((c for c in data.get("commands", []) if c["cmd"] == target), None)
+if not match:
+    sys.exit(1)
+saved = match.get("total_saved", 0)
+inp   = match.get("total_input",  0)
+pct   = match.get("avg_pct",      0)
+count = match.get("count",        0)
+out   = inp - saved
+print(f"cmd={match['cmd']}")
+print(f"count={count}")
+print(f"input={inp}")
+print(f"output={out}")
+print(f"saved={saved}")
+print(f"pct={pct}")
+PY
+  ) || true
+
+  if [ -z "$result" ]; then
+    echo -e "  ${YELLOW}No data for '${target}' — not found in RTK history${NC}"
+    return 1
+  fi
+
+  local cmd count inp out saved pct
+  cmd=$(echo "$result"   | grep "^cmd="    | cut -d= -f2-)
+  count=$(echo "$result" | grep "^count="  | cut -d= -f2-)
+  inp=$(echo "$result"   | grep "^input="  | cut -d= -f2-)
+  out=$(echo "$result"   | grep "^output=" | cut -d= -f2-)
+  saved=$(echo "$result" | grep "^saved="  | cut -d= -f2-)
+  pct=$(echo "$result"   | grep "^pct="    | cut -d= -f2-)
+
+  echo -e "\n${BOLD}=== token-diet explain ===${NC}\n"
+  echo -e "${BOLD}${cmd}${NC}  ${DIM}(${count} runs)${NC}"
+  echo -e "${DIM}$(printf '%.0s─' {1..44})${NC}"
+  printf "  %-20s %s\n" "Tokens in:"    "$(human_tokens "$inp")"
+  printf "  %-20s %s\n" "Tokens out:"   "$(human_tokens "$out")"
+  printf "  %-20s %s  (${pct}%%)\n" "Tokens saved:" "$(human_tokens "$saved")"
+  echo -e "  Efficiency:  ${CYAN}$(bar "$pct")${NC}  ${BOLD}${pct}%${NC}"
+  echo ""
+}
+
+cmd_route() {
+  local task="${1:-}"
+  if [[ -z "$task" ]]; then
+    echo "Usage: token-diet route <task description>"
+    exit 1
+  fi
+
+  local lower
+  lower=$(echo "$task" | tr '[:upper:]' '[:lower:]')
+
+  if [[ "$lower" =~ (rename|refactor|reference|diagnostic|navigate|symbol|lsp|find.*def|go.to) ]]; then
+    echo -e "${BOLD}→ Serena${NC} (LSP navigation)"
+    echo "  Best for: rename, refactor, find references, diagnostics, symbol search"
+    echo "  Command:  use serena MCP tools (rename_symbol, find_referencing_symbols)"
+  elif [[ "$lower" =~ (run|build|test|install|npm|cargo|make|git|docker|pip|exec|deploy) ]]; then
+    echo -e "${BOLD}→ RTK${NC} (output compression)"
+    echo "  Best for: CLI commands whose output would flood context"
+    echo "  Command:  rtk <your-command>  (or let the Claude Code hook wrap it)"
+  elif [[ "$lower" =~ (read|search|find|list|outline|grep|cat|show|view|open|import|deps) ]]; then
+    echo -e "${BOLD}→ tilth${NC} (AST-aware reading)"
+    echo "  Best for: reading files, searching symbols, exploring structure"
+    echo "  Command:  use tilth MCP tools (tilth_read, tilth_search, tilth_files)"
+  else
+    echo -e "${BOLD}No clear match${NC} — all three tools may apply:"
+    echo ""
+    echo "  tilth   — reading/searching code (AST-aware, fast)"
+    echo "  Serena  — renaming/navigating symbols (LSP-powered)"
+    echo "  RTK     — running CLI commands (output compression)"
+  fi
+}
+
+cmd_leaks() {
+  if ! check_cmd rtk; then
+    miss "RTK not installed — leaks detection requires RTK history"
+    exit 1
+  fi
+
+  local raw
+  raw=$(rtk gain --history 2>/dev/null) || { miss "RTK history unavailable"; exit 1; }
+
+  local leaks
+  leaks=$(python3 - "$raw" << 'PY'
+import sys, json, re
+data = json.loads(sys.argv[1])
+cmds = data.get("commands", [])
+FILE_READ = re.compile(r'\b(?:cat|head|tail|tilth\s+read|tilth_read)\s+(\S+\.\w+)')
+found = []
+for c in cmds:
+    m = FILE_READ.search(c.get("cmd", ""))
+    if m and c.get("count", 0) >= 2:
+        found.append((m.group(1), c["count"], c.get("total_input", 0)))
+found.sort(key=lambda x: x[1], reverse=True)
+for f, cnt, tok in found:
+    print(f"{f}\t{cnt}\t{tok}")
+PY
+)
+
+  if [[ -z "$leaks" ]]; then
+    ok "No leaks detected — no files read multiple times"
+    exit 0
+  fi
+
+  echo -e "${BOLD}Context leaks — files read multiple times:${NC}"
+  echo ""
+  while IFS=$'\t' read -r filepath count total_input; do
+    warn "$filepath  (${count}×, ~$(human_tokens "$total_input") tokens)"
+  done <<< "$leaks"
+  echo ""
+  echo "  Tip: use tilth_read with offset/limit to read only changed sections"
+  exit 1
+}
+
+cmd_test_first() {
+  local file="${1:-}"
+  if [[ -z "$file" ]]; then
+    echo "Usage: token-diet test-first <file>"
+    exit 1
+  fi
+
+  local basename="${file##*/}"
+  local name="${basename%.*}"
+  local ext="${basename##*.}"
+  local dir="${file%/*}"
+  [[ "$dir" == "$file" ]] && dir="."
+
+  echo "Test candidates for ${BOLD}${file}${NC}:"
+  echo ""
+
+  case "$ext" in
+    py)
+      echo "  tests/test_${name}.py"
+      echo "  test_${name}.py"
+      echo "  ${dir}/test_${name}.py"
+      ;;
+    rs)
+      echo "  tests/${name}_test.rs"
+      echo "  tests/test_${name}.rs"
+      echo "  ${dir}/${name}_test.rs  (inline #[cfg(test)] module)"
+      ;;
+    ts|tsx)
+      echo "  ${dir}/${name}.test.ts"
+      echo "  ${dir}/${name}.spec.ts"
+      echo "  tests/${name}.test.ts"
+      ;;
+    js|jsx)
+      echo "  ${dir}/${name}.test.js"
+      echo "  ${dir}/${name}.spec.js"
+      echo "  tests/${name}.test.js"
+      ;;
+    go)
+      echo "  ${dir}/${name}_test.go"
+      ;;
+    *)
+      echo "  tests/test_${name}.${ext}"
+      echo "  ${dir}/test_${name}.${ext}"
+      ;;
+  esac
+
+  echo ""
+  echo "  Tip: read the test file first to understand expected behavior before the implementation"
+}
+
+cmd_strip() {
+  local STATS=false
+  local file=""
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --stats) STATS=true; shift ;;
+      -*)      echo "Unknown option: $1"; echo "Usage: token-diet strip [--stats] <file>"; exit 1 ;;
+      *)       file="$1"; shift ;;
+    esac
+  done
+
+  if [[ -z "$file" ]]; then
+    echo "Usage: token-diet strip [--stats] <file>"
+    exit 1
+  fi
+
+  if [[ ! -f "$file" ]]; then
+    echo "File not found: $file"
+    exit 1
+  fi
+
+  local ext="${file##*.}"
+  # Detect comment style from extension or shebang
+  local comment_char="#"
+  case "$ext" in
+    js|ts|jsx|tsx|java|c|cpp|h|cs|go|swift|kt)
+      # Strip // single-line comments
+      local stripped
+      stripped=$(python3 - "$file" << 'PY'
+import sys, re
+with open(sys.argv[1]) as f:
+    content = f.read()
+# Remove // line comments (not inside strings — best-effort)
+lines = []
+for line in content.splitlines():
+    # Remove // comment (simple: not string-aware)
+    cleaned = re.sub(r'\s*//.*$', '', line)
+    lines.append(cleaned)
+print('\n'.join(lines))
+PY
+)
+      ;;
+    *)
+      # Default: strip # comments (Python, bash, ruby, etc.)
+      local stripped
+      stripped=$(python3 - "$file" << 'PY'
+import sys, re
+with open(sys.argv[1]) as f:
+    lines = f.readlines()
+out = []
+for line in lines:
+    # Remove full-line comments
+    stripped = re.sub(r'^\s*#.*\n?', '', line)
+    # Remove inline comments (not inside strings — best-effort)
+    stripped = re.sub(r'\s+#[^!\n].*$', '', stripped.rstrip('\n'))
+    out.append(stripped)
+# Filter out lines that became empty due to comment removal
+# but preserve blank lines that were originally blank
+result = []
+for orig, s in zip(lines, out):
+    orig_stripped = orig.strip()
+    if orig_stripped.startswith('#'):
+        continue  # was a comment line — skip
+    result.append(s)
+print('\n'.join(result))
+PY
+)
+      ;;
+  esac
+
+  if [[ "$STATS" == true ]]; then
+    local orig_lines stripped_lines
+    orig_lines=$(wc -l < "$file")
+    stripped_lines=$(echo "$stripped" | wc -l)
+    local saved=$(( orig_lines - stripped_lines ))
+    local pct=0
+    if [[ $orig_lines -gt 0 ]]; then
+      pct=$(python3 -c "print(round($saved * 100 / $orig_lines, 1))")
+    fi
+    echo "$stripped"
+    echo ""
+    echo "Lines: $orig_lines → $stripped_lines  (saved $saved lines, ${pct}% reduction)"
+  else
+    echo "$stripped"
+  fi
+}
+
+cmd_diff_reads() {
+  local file="${1:-}"
+
+  if [[ -z "$file" ]]; then
+    echo "Usage: token-diet diff-reads <file>"
+    exit 1
+  fi
+
+  if [[ ! -f "$file" ]]; then
+    echo "File not found: $file"
+    exit 1
+  fi
+
+  # Find repo root
+  local repo_root
+  repo_root=$(git -C "$(dirname "$file")" rev-parse --show-toplevel 2>/dev/null) || {
+    echo "Not a git repository: $file"
+    exit 1
+  }
+
+  # Get changed line ranges from git diff (unstaged + staged)
+  local rel_path
+  rel_path=$(realpath --relative-to="$repo_root" "$file" 2>/dev/null || python3 -c "
+import os, sys
+print(os.path.relpath(sys.argv[1], sys.argv[2]))" "$file" "$repo_root")
+
+  # Combine staged and unstaged diffs
+  local ranges
+  ranges=$(git -C "$repo_root" diff HEAD -- "$rel_path" 2>/dev/null; \
+           git -C "$repo_root" diff --cached -- "$rel_path" 2>/dev/null)
+
+  if [[ -z "$ranges" ]]; then
+    # No uncommitted changes — check last commit
+    ranges=$(git -C "$repo_root" diff HEAD~1 HEAD -- "$rel_path" 2>/dev/null || true)
+  fi
+
+  if [[ -z "$ranges" ]]; then
+    echo "No recent changes detected for: $rel_path"
+    echo "Suggest reading the full file."
+    exit 0
+  fi
+
+  # Parse @@ -a,b +c,d @@ hunks to extract new-file line ranges
+  echo "Changed regions in $rel_path:"
+  echo ""
+  echo "$ranges" | python3 - << 'PY'
+import sys, re
+content = sys.stdin.read()
+hunks = re.findall(r'@@ [^@]+ \+(\d+)(?:,(\d+))? @@', content)
+if not hunks:
+    print("  (no line range info available)")
+else:
+    for start_s, count_s in hunks:
+        start = int(start_s)
+        count = int(count_s) if count_s else 1
+        end = start + count - 1
+        if count == 0:
+            print(f"  (deletion at line {start})")
+        elif start == end:
+            print(f"  line {start}")
+        else:
+            print(f"  lines {start}-{end}  (Read offset={start-1} limit={count})")
+PY
 }
 
 cmd_help() {
   cat << EOF
 
-${BOLD}tkd${NC} — token-diet stack dashboard
+${BOLD}token-diet${NC} — token optimization stack dashboard
 
 ${BOLD}USAGE${NC}
-  tkd [command]
+  token-diet [command]
 
 ${BOLD}COMMANDS${NC}
-  gain         Show token savings dashboard across RTK + tilth + Serena  (default)
-  dashboard    Open live browser dashboard  [--port N]
-  version      Show installed versions of all three tools
-  verify       Re-run installation verification
-  --help       Show this help
+  gain              Show token savings dashboard across RTK + tilth + Serena  (default)
+  health            Quick health check: tools responding + MCP hosts registered
+  breakdown         Top commands by tokens saved  [--limit N]
+  explain <cmd>     Token cost breakdown for a specific command
+  budget <init|status>  Per-project token budget with warn/hard thresholds
+  loops             Detect agent loop patterns (commands run 3+ times)
+  route <task>      Suggest which tool (tilth/Serena/RTK) best fits the task
+  leaks             Detect files read multiple times in RTK history
+  test-first <file> Suggest test file counterpart for an implementation file
+  strip [--stats] <file>  Strip comments from source file to reduce tokens
+  diff-reads <file> Suggest line ranges to read based on recent git diff
+  dashboard         Open live browser dashboard  [--port N]
+  version           Show installed versions of all three tools
+  verify            Re-run installation verification
+  uninstall         Remove all token-diet components  [--dry-run] [--force]
+  --help            Show this help
 
 ${BOLD}TOOLS${NC}
   RTK    Command output compression       60-90% savings (tracked)
@@ -248,9 +821,20 @@ EOF
 # --- Dispatch -----------------------------------------------------------------
 case "${1:-gain}" in
   gain)              cmd_gain ;;
+  health)            cmd_health ;;
+  breakdown)         shift; cmd_breakdown "$@" ;;
+  explain)           shift; cmd_explain "$@" ;;
+  budget)            shift; cmd_budget "$@" ;;
+  loops)             cmd_loops ;;
   dashboard)         shift; cmd_dashboard "$@" ;;
   version|versions)  cmd_version ;;
   verify)            cmd_verify ;;
+  route)             shift; cmd_route "$@" ;;
+  leaks)             cmd_leaks ;;
+  test-first)        shift; cmd_test_first "$@" ;;
+  strip)             shift; cmd_strip "$@" ;;
+  diff-reads)        shift; cmd_diff_reads "$@" ;;
+  uninstall)         shift; cmd_uninstall "$@" ;;
   --help|-h|help)    cmd_help ;;
   *)  echo "Unknown command: $1"; cmd_help; exit 1 ;;
 esac

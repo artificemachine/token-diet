@@ -11,4 +11,18 @@ REPO_ROOT="$(git rev-parse --show-toplevel)"
 echo "token-diet: verifying install.sh dry-run..."
 bash "$REPO_ROOT/scripts/install.sh" --dry-run --skip-tests 2>&1 | tail -5
 
+# Run bash tests if bats is available
+if command -v bats &>/dev/null && [ -d "$REPO_ROOT/tests" ]; then
+  echo "token-diet: running bats tests..."
+  bats "$REPO_ROOT/tests/"*.bats
+fi
+
+# Run Python tests if pytest is available
+if command -v python3 &>/dev/null && python3 -m pytest --version &>/dev/null 2>&1; then
+  if [ -d "$REPO_ROOT/tests" ] && ls "$REPO_ROOT/tests"/test_*.py &>/dev/null 2>&1; then
+    echo "token-diet: running pytest..."
+    python3 -m pytest "$REPO_ROOT/tests/" -q
+  fi
+fi
+
 echo "token-diet: pre-commit checks passed."

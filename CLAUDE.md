@@ -11,10 +11,21 @@ token-diet/
 │   ├── tilth/                # celstnblacc/tilth (Rust MCP server)
 │   └── serena/               # celstnblacc/serena (Python MCP server)
 ├── scripts/
-│   ├── install.sh            # macOS/Linux installer (--local for air-gapped)
-│   ├── Install.ps1           # Windows installer
+│   ├── install.sh            # macOS/Linux installer (--local for air-gapped, --verbose for full output)
+│   ├── Install.ps1           # Windows installer (-Verbose for full output)
+│   ├── uninstall.sh          # macOS/Linux uninstaller (--dry-run, --force, --include-data)
+│   ├── Uninstall.ps1         # Windows uninstaller (-DryRun, -Force, -IncludeData)
+│   ├── token-diet            # CLI entry point (gain, health, breakdown, explain, budget, loops, strip, diff-reads, route, leaks, test-first, uninstall, version, verify, dashboard)
+│   ├── token-diet-dashboard  # stdlib-only Python browser dashboard
 │   ├── playbook.yml          # Ansible playbook
 │   └── build.sh              # Build from forks (no internet)
+├── tests/
+│   ├── test_helper.bash      # Shared bats fixtures (sandboxed HOME/PATH, mock helpers)
+│   ├── token-diet.bats       # CLI tests (dispatch, health, uninstall)
+│   ├── install.bats          # Installer + uninstaller tests
+│   ├── Uninstall.Tests.ps1   # Pester v5 tests for Windows uninstaller
+│   ├── conftest.py           # pytest fixtures (dashboard_mod, tmp_home)
+│   └── test_dashboard.py     # Dashboard data layer tests
 ├── docker/
 │   ├── Dockerfile.serena     # Multi-stage, non-root, network_mode: none
 │   └── compose.yml
@@ -25,6 +36,7 @@ token-diet/
 │   ├── LICENSE-THIRD-PARTY.md
 │   └── security-audit.md
 └── docs/
+    ├── roadmap.md            # 5-iteration improvement roadmap
     └── comparison.md
 ```
 
@@ -38,6 +50,19 @@ bash scripts/build.sh --release
 docker build -f docker/Dockerfile.serena -t serena:local .
 ```
 
+## Test commands
+
+```bash
+# Bash tests (requires bats-core: brew install bats-core)
+bats tests/*.bats
+
+# Python tests (requires pytest)
+pytest tests/ -q
+
+# Full suite
+bats tests/*.bats && pytest tests/ -q
+```
+
 ## Install commands
 
 ```bash
@@ -49,6 +74,25 @@ bash scripts/install.sh --local
 
 # Verify installation
 bash scripts/install.sh --verify
+
+# Full output + log to ~/.local/share/token-diet/install.log
+bash scripts/install.sh --verbose
+```
+
+## Uninstall commands
+
+```bash
+# Preview what would be removed (no changes)
+bash scripts/uninstall.sh --dry-run
+
+# Remove everything (prompts for confirmation)
+bash scripts/uninstall.sh
+
+# Remove without prompts
+bash scripts/uninstall.sh --force
+
+# Also remove ~/.serena/memories
+bash scripts/uninstall.sh --force --include-data
 ```
 
 ## Submodule workflow

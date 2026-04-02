@@ -76,10 +76,23 @@ After installation, `token-diet` is available globally:
 
 ```bash
 token-diet                  # token savings summary (RTK + tilth + Serena)
+token-diet health           # quick health check: tools + MCP host registrations
+token-diet breakdown        # top commands by tokens saved  [--limit N]
+token-diet explain <cmd>    # per-command cost: tokens in/out/saved, efficiency
+token-diet budget init      # create .token-budget with warn/hard thresholds
+token-diet budget status    # usage vs budget (exits 0=OK, 2=WARN, 3=HARD STOP)
+token-diet loops            # detect agent loop patterns (commands run 3+ times)
+token-diet strip <file>     # strip comments from source file to reduce prompt tokens  [--stats]
+token-diet diff-reads <file> # suggest line ranges to read based on recent git diff
+token-diet route <task>     # suggest which tool (tilth/Serena/RTK) best fits the task
+token-diet leaks            # detect files read multiple times (context waste)
+token-diet test-first <file> # suggest test file counterpart before reading implementation
 token-diet dashboard        # live browser dashboard at http://127.0.0.1:7384
 token-diet dashboard --port 8080
 token-diet version          # show installed versions
 token-diet verify           # re-run installation verification
+token-diet uninstall        # remove all token-diet components
+token-diet uninstall --dry-run   # preview what would be removed
 ```
 
 The browser dashboard auto-refreshes every 30 s and shows cumulative RTK savings, a 14-day savings bar chart, tilth/Serena status, and registered MCP hosts.

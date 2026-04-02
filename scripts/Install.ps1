@@ -29,7 +29,8 @@ param(
     [string]$Tool = "All",
     [switch]$SkipDedup,
     [switch]$VerifyOnly,
-    [switch]$DryRun
+    [switch]$DryRun,
+    [switch]$Verbose
 )
 
 $ErrorActionPreference = "Stop"
@@ -46,6 +47,29 @@ function Write-Warn   { param($msg) Write-Host "[warn]  $msg" -ForegroundColor Y
 function Write-Fail   { param($msg) Write-Host "[fail]  $msg" -ForegroundColor Red; exit 1 }
 function Write-Header { param($msg) Write-Host "`n--- $msg ---`n" -ForegroundColor White }
 function Write-DryRun { param($msg) Write-Host "[dry-run] would run: $msg" -ForegroundColor Magenta }
+
+# Show-Output — filter build output.
+# -Verbose: pass everything through and tee to install.log.
+# Default:  show only last 5 lines.
+$LogFile = Join-Path $env:LOCALAPPDATA "Programs\token-diet\install.log"
+function Show-Output {
+    [CmdletBinding()] param([Parameter(ValueFromPipeline)]$InputObject)
+    process {
+        if ($Verbose) {
+            $InputObject
+            $InputObject | Out-File -Append -FilePath $LogFile -Encoding utf8 -ErrorAction SilentlyContinue
+        } else {
+            # Buffer and emit last 5 lines
+            $script:_buf += @($InputObject)
+        }
+    }
+    end {
+        if (-not $Verbose -and $script:_buf) {
+            $script:_buf | Select-Object -Last 5
+            $script:_buf = @()
+        }
+    }
+}
 
 function Test-Cmd { param([string]$Name) $null -ne (Get-Command $Name -ErrorAction SilentlyContinue) }
 
@@ -134,7 +158,7 @@ function Install-RTK {
     if ($DryRun) {
         Write-DryRun "cargo install --git $RTK_REPO --force"
     } else {
-        cargo install --git $RTK_REPO --force 2>&1 | Select-Object -Last 5
+        cargo install --git $RTK_REPO --force 2>&1 | Show-Output
         Write-Ok "RTK installed: $(rtk --version 2>$null)"
     }
 
@@ -168,7 +192,7 @@ function Install-Tilth {
     if ($DryRun) {
         Write-DryRun "cargo install --git $TILTH_REPO --force"
     } else {
-        cargo install --git $TILTH_REPO --force 2>&1 | Select-Object -Last 5
+        cargo install --git $TILTH_REPO --force 2>&1 | Show-Output
         Write-Ok "tilth installed: $(tilth --version 2>$null)"
     }
 

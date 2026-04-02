@@ -333,6 +333,16 @@ with open(sys.argv[1], "w") as f:
     f.write("\n")
 PY
       ok "Created $target  (warn: 50K, hard: 100K tokens)"
+      local gitignore="$PWD/.gitignore"
+      if [ -f "$gitignore" ]; then
+        if ! grep -qxF '.token-budget' "$gitignore"; then
+          printf '\n.token-budget\n' >> "$gitignore"
+          ok "Added .token-budget to .gitignore"
+        fi
+      elif git rev-parse --git-dir &>/dev/null 2>&1; then
+        printf '.token-budget\n' > "$gitignore"
+        ok "Created .gitignore with .token-budget"
+      fi
       ;;
 
     status)

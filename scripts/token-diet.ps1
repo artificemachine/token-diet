@@ -257,6 +257,17 @@ function Invoke-Budget([string[]]$Remaining) {
             if (Test-Path $target) { Write-Output "  .token-budget already exists at $target"; return }
             @{ warn=50000; hard=100000 } | ConvertTo-Json | Set-Content $target -Encoding UTF8
             Write-Output "  [OK] Created $target  (warn: 50K, hard: 100K tokens)"
+            $gitignore = Join-Path (Get-Location) '.gitignore'
+            if (Test-Path $gitignore) {
+                $lines = Get-Content $gitignore
+                if ($lines -notcontains '.token-budget') {
+                    Add-Content $gitignore "`n.token-budget"
+                    Write-Output "  [OK] Added .token-budget to .gitignore"
+                }
+            } elseif (& git rev-parse --git-dir 2>$null) {
+                Set-Content $gitignore '.token-budget' -Encoding UTF8
+                Write-Output "  [OK] Created .gitignore with .token-budget"
+            }
         }
         'status' {
             $budgetFile = $null

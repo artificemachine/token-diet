@@ -177,6 +177,34 @@ Describe 'token-diet.ps1 — budget' {
         }
     }
 
+    It 'budget init adds .token-budget to existing .gitignore' {
+        $proj = Join-Path $TestDrive 'proj-gitignore'
+        New-Item -ItemType Directory -Path $proj -Force | Out-Null
+        Set-Content (Join-Path $proj '.gitignore') '' -Encoding UTF8
+        Push-Location $proj
+        try {
+            & pwsh -NoProfile -File $script:PS1 'budget' 'init' 2>&1 | Out-Null
+            $LASTEXITCODE | Should -Be 0
+            Get-Content (Join-Path $proj '.gitignore') | Should -Contain '.token-budget'
+        } finally {
+            Pop-Location
+        }
+    }
+
+    It 'budget init does not duplicate .token-budget in .gitignore' {
+        $proj = Join-Path $TestDrive 'proj-nodup'
+        New-Item -ItemType Directory -Path $proj -Force | Out-Null
+        Set-Content (Join-Path $proj '.gitignore') '.token-budget' -Encoding UTF8
+        Push-Location $proj
+        try {
+            & pwsh -NoProfile -File $script:PS1 'budget' 'init' 2>&1 | Out-Null
+            $count = (Get-Content (Join-Path $proj '.gitignore') | Where-Object { $_ -eq '.token-budget' }).Count
+            $count | Should -Be 1
+        } finally {
+            Pop-Location
+        }
+    }
+
     It 'budget status exits 1 with hint when no .token-budget found' {
         # Use a fresh temp dir guaranteed to have no .token-budget
         $cleanDir = Join-Path $TestDrive 'clean'

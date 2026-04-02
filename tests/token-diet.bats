@@ -195,6 +195,40 @@ load test_helper
   [ -f "$TMP_HOME/.token-budget" ]
 }
 
+@test "budget init: adds .token-budget to existing .gitignore" {
+  local proj
+  proj=$(mktemp -d)
+  touch "$proj/.gitignore"
+  cd "$proj"
+  run "$SCRIPTS_DIR/token-diet" budget init
+  [ "$status" -eq 0 ]
+  grep -qxF '.token-budget' "$proj/.gitignore"
+  rm -rf "$proj"
+}
+
+@test "budget init: creates .gitignore when in a git repo and none exists" {
+  local proj
+  proj=$(mktemp -d)
+  git -C "$proj" init -q
+  cd "$proj"
+  run "$SCRIPTS_DIR/token-diet" budget init
+  [ "$status" -eq 0 ]
+  [ -f "$proj/.gitignore" ]
+  grep -qxF '.token-budget' "$proj/.gitignore"
+  rm -rf "$proj"
+}
+
+@test "budget init: does not duplicate .token-budget in .gitignore" {
+  local proj
+  proj=$(mktemp -d)
+  echo '.token-budget' > "$proj/.gitignore"
+  cd "$proj"
+  run "$SCRIPTS_DIR/token-diet" budget init
+  [ "$status" -eq 0 ]
+  [ "$(grep -c '\.token-budget' "$proj/.gitignore")" -eq 1 ]
+  rm -rf "$proj"
+}
+
 @test "budget init: .token-budget contains warn and hard thresholds" {
   cd "$TMP_HOME"
   run "$SCRIPTS_DIR/token-diet" budget init

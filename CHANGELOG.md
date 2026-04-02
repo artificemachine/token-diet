@@ -147,3 +147,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 * `token-diet leaks` — detects files read multiple times in RTK command history; exits 1 with flagged file paths and token waste estimate
 * `token-diet test-first <file>` — suggests conventional test file counterpart for Python, Rust, TypeScript, Go, and JS source files; encourages reading tests before implementation
 * 12 new bats tests (cycles 14.1-14.4, 15.1-15.3, 16.1-16.3); 77 tests total passing
+
+## [1.2.0] — 2026-04-02
+
+### Added
+
+* **`token-diet health`** — lightweight diagnostic: checks RTK/tilth/Serena presence and MCP host registrations
+* **`token-diet uninstall`** — clean removal of all token-diet components (binaries, MCP entries, hooks, doc files); `--dry-run`, `--force`, `--include-data`
+* **`token-diet breakdown`** — top commands by tokens saved from RTK history; `--limit N`
+* **`token-diet explain <cmd>`** — per-command token cost: tokens in/out/saved, efficiency bar
+* **`token-diet budget init/status`** — per-project `.token-budget` with warn/hard thresholds; exits 0 (OK), 2 (WARN), 3 (HARD STOP)
+* **`token-diet loops`** — detects agent loop patterns (commands run ≥3 times in RTK history)
+* **`token-diet strip <file>`** — strips single-line comments from Python/bash/JS/TS files to reduce prompt size; `--stats` flag
+* **`token-diet diff-reads <file>`** — parses git diff hunks and prints changed line ranges with Read offset/limit hints
+* **`token-diet route <task>`** — keyword router: suggests tilth (read/search), Serena (rename/refactor), or RTK (run/build/test)
+* **`token-diet leaks`** — detects files read multiple times in RTK history; exits 1 with flagged paths
+* **`token-diet test-first <file>`** — suggests conventional test file counterpart for Python, Rust, TypeScript, Go, JS
+* **`scripts/uninstall.sh`** — standalone bash uninstaller (macOS/Linux)
+* **`scripts/Uninstall.ps1`** — PowerShell uninstaller (Windows); `-DryRun`, `-Force`, `-IncludeData`
+* **`scripts/install.sh --verbose`** — full build output instead of `tail -5`; logs to `~/.local/share/token-diet/install.log`
+* **Test suite** — 61 bats tests + 16 pytest tests; pre-commit hook runs full suite on every commit

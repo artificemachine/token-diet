@@ -63,3 +63,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 * Submodule forks (rtk, tilth, serena) point to security-patched versions with `## This Fork` documentation
 * `.gitmodules` — removed `branch =` tracking lines; submodules pinned to exact commits for reproducible builds
 * `.gitignore` — added `.serena/`, `.vscode/`, `dist/`, `excalidraw.log`
+
+## [1.1.3] - 2026-04-02
+
+### Changed
+
+* `scripts/tkd` renamed to `scripts/token-diet` — binary is now `token-diet` (was `tkd`)
+* `scripts/tkd-dashboard` renamed to `scripts/token-diet-dashboard`
+* `install.sh` — `install_tkd()` renamed to `install_token_diet()`; writes `token-diet.md` to `~/.claude/` and `~/.codex/` and registers `@token-diet.md` in host instruction files
+* `README.md` — Dashboard & CLI section and project structure updated to reflect `token-diet` binary name
+
+### Added
+
+* `~/.claude/token-diet.md` and `~/.codex/token-diet.md` — unified token-diet CLI reference injected into AI host configs on install
+* `.project-hooks/pre-commit` — project-level pre-commit hook running `install.sh --dry-run`

@@ -203,7 +203,42 @@ cmd_version() {
 }
 
 cmd_verify() {
-  bash "$SCRIPT_DIR/install.sh" --verify
+  # Prefer install.sh next to this script (source tree or ~/.local/bin copy)
+  local install_sh
+  for install_sh in "$SCRIPT_DIR/install.sh" "$SCRIPT_DIR/token-diet-install.sh"; do
+    if [[ -f "$install_sh" ]]; then
+      bash "$install_sh" --verify
+      return
+    fi
+  done
+
+  # Inline fallback — used when running from ~/.local/bin (install.sh not copied there)
+  local all_ok=true
+  echo "=== Token Stack Verification ==="
+  if command -v rtk &>/dev/null && rtk --version &>/dev/null 2>&1; then
+    printf "  ${GREEN}✓${NC} RTK ........... %s\n" "$(rtk --version 2>/dev/null)"
+  else
+    printf "  ${YELLOW}✗${NC} RTK ........... not installed\n"; all_ok=false
+  fi
+  if command -v tilth &>/dev/null; then
+    printf "  ${GREEN}✓${NC} tilth ......... %s\n" "$(tilth --version 2>/dev/null || echo 'installed')"
+  else
+    printf "  ${YELLOW}✗${NC} tilth ......... not installed\n"; all_ok=false
+  fi
+  if docker image inspect token-diet/serena:latest &>/dev/null 2>&1; then
+    printf "  ${GREEN}✓${NC} Serena ........ Docker image loaded\n"
+  elif command -v uv &>/dev/null; then
+    printf "  ${GREEN}✓${NC} Serena (uv) ... %s\n" "$(uv --version 2>/dev/null)"
+  else
+    printf "  ${YELLOW}✗${NC} Serena ........ not installed\n"; all_ok=false
+  fi
+  echo ""
+  if $all_ok; then
+    printf "  ${GREEN}✓${NC} All tools installed. Token diet active.\n"
+  else
+    printf "  ${YELLOW}⚠${NC}  Some tools missing. Re-run: bash scripts/install.sh\n"
+  fi
+  echo ""
 }
 
 cmd_dashboard() {

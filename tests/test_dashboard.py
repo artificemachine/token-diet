@@ -192,6 +192,7 @@ def test_budget_stats_returns_thresholds_when_file_exists(dashboard_mod, tmp_hom
 
 def test_budget_stats_returns_none_when_no_budget_file(dashboard_mod, tmp_home):
     """budget_stats() returns None when no .token-budget file exists."""
-    with patch.object(dashboard_mod, "run", return_value=None):
+    with patch.object(dashboard_mod, "run", return_value=None), \
+         patch.object(dashboard_mod.pathlib.Path, "cwd", return_value=tmp_home):
         result = dashboard_mod.budget_stats()
     assert result is None

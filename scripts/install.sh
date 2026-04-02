@@ -604,6 +604,9 @@ install_token_diet() {
     ok "token-diet-dashboard installed: $bin_dir/token-diet-dashboard"
   fi
 
+  # Copy installer so `token-diet verify` works from ~/.local/bin
+  install -m755 "$SCRIPT_DIR/install.sh" "$bin_dir/token-diet-install.sh"
+
   # Nudge if ~/.local/bin not in PATH
   if ! echo "$PATH" | grep -q "$HOME/.local/bin"; then
     info "Add to your shell: export PATH=\"\$HOME/.local/bin:\$PATH\""

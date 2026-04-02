@@ -363,24 +363,34 @@ PY
           | python3 -c "import json,sys; d=json.load(sys.stdin); print(d['summary']['total_input'])" 2>/dev/null) || used=0
       fi
 
-      local remaining=$(( hard_t - used ))
-      local pct=0
-      [ "$hard_t" -gt 0 ] && pct=$(( used * 100 / hard_t ))
+      # hard_t=0 means unlimited — skip hard-stop logic
+      local unlimited=false
+      [ "$hard_t" -eq 0 ] && unlimited=true
+
+      local remaining pct=0
+      if $unlimited; then
+        remaining="unlimited"
+      else
+        remaining=$(( hard_t - used ))
+        [ "$hard_t" -gt 0 ] && pct=$(( used * 100 / hard_t ))
+      fi
 
       echo -e "\n${BOLD}token-diet budget${NC}  ${DIM}($budget_file)${NC}\n"
       printf "  %-20s %s\n" "Used:"      "$(human_tokens "$used")"
       printf "  %-20s %s\n" "Warn at:"   "$(human_tokens "$warn_t")"
-      printf "  %-20s %s\n" "Hard stop:" "$(human_tokens "$hard_t")"
-      printf "  %-20s %s\n" "Remaining:" "$(human_tokens "$remaining")"
-      echo -e "  Burn-down:  ${CYAN}$(bar "$pct")${NC}  ${BOLD}${pct}%${NC}"
+      printf "  %-20s %s\n" "Hard stop:" "$(if $unlimited; then echo 'unlimited'; else human_tokens "$hard_t"; fi)"
+      printf "  %-20s %s\n" "Remaining:" "$(if $unlimited; then echo 'unlimited'; else human_tokens "$remaining"; fi)"
+      if ! $unlimited; then
+        echo -e "  Burn-down:  ${CYAN}$(bar "$pct")${NC}  ${BOLD}${pct}%${NC}"
+      fi
       echo ""
 
-      if [ "$used" -ge "$hard_t" ]; then
+      if ! $unlimited && [ "$used" -ge "$hard_t" ]; then
         echo -e "  ${RED}${BOLD}HARD STOP — budget exhausted (${pct}%)${NC}"
         echo ""
         return 3
       elif [ "$used" -ge "$warn_t" ]; then
-        echo -e "  ${YELLOW}${BOLD}WARN — approaching hard stop (${pct}%)${NC}"
+        echo -e "  ${YELLOW}${BOLD}WARN — approaching warn threshold (${pct}%)${NC}"
         echo ""
         return 2
       else

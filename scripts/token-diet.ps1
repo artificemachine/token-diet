@@ -284,20 +284,21 @@ function Invoke-Budget([string[]]$Remaining) {
                 Write-Output '  Run: token-diet.ps1 budget init  to create one.'
                 exit 1
             }
-            $cfg   = Get-Content $budgetFile -Raw | ConvertFrom-Json
-            $warnT = [long]$cfg.warn; $hardT = [long]$cfg.hard
-            $s     = Get-RtkSummary; $used = if ($s) { [long]$s.total_input } else { 0L }
-            $pct   = if ($hardT -gt 0) { [int]($used * 100 / $hardT) } else { 0 }
+            $cfg      = Get-Content $budgetFile -Raw | ConvertFrom-Json
+            $warnT    = [long]$cfg.warn; $hardT = [long]$cfg.hard
+            $unlimited = $hardT -eq 0
+            $s        = Get-RtkSummary; $used = if ($s) { [long]$s.total_input } else { 0L }
+            $pct      = if (-not $unlimited -and $hardT -gt 0) { [int]($used * 100 / $hardT) } else { 0 }
             Write-Output "`ntoken-diet budget  ($budgetFile)`n"
             Write-Output ('  Used:      {0}' -f (Format-Tokens $used))
             Write-Output ('  Warn at:   {0}' -f (Format-Tokens $warnT))
-            Write-Output ('  Hard stop: {0}' -f (Format-Tokens $hardT))
-            Write-Output ('  Remaining: {0}' -f (Format-Tokens ($hardT - $used)))
-            Write-Output ('  Burn-down: {0}%' -f $pct)
+            Write-Output ('  Hard stop: {0}' -f (if ($unlimited) { 'unlimited' } else { Format-Tokens $hardT }))
+            Write-Output ('  Remaining: {0}' -f (if ($unlimited) { 'unlimited' } else { Format-Tokens ($hardT - $used) }))
+            if (-not $unlimited) { Write-Output ('  Burn-down: {0}%' -f $pct) }
             Write-Output ''
-            if ($used -ge $hardT)   { Write-Output "  HARD STOP — budget exhausted ($pct%)"; exit 3 }
-            elseif ($used -ge $warnT) { Write-Output "  WARN — approaching hard stop ($pct%)"; exit 2 }
-            else                    { Write-Output '  Budget OK' }
+            if (-not $unlimited -and $used -ge $hardT) { Write-Output "  HARD STOP — budget exhausted ($pct%)"; exit 3 }
+            elseif ($used -ge $warnT) { Write-Output "  WARN — approaching warn threshold ($pct%)"; exit 2 }
+            else                      { Write-Output '  Budget OK' }
         }
         default { Write-Output 'Usage: token-diet budget <init|status>'; exit 1 }
     }

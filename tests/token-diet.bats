@@ -276,6 +276,15 @@ PY
   [[ "$output" == *"WARN"* ]] || [[ "$output" == *"warn"* ]]
 }
 
+@test "budget status: hard=0 treated as unlimited — exits 0 even when usage exceeds warn" {
+  cd "$TMP_HOME"
+  printf '{"warn":100,"hard":0}\n' > "$TMP_HOME/.token-budget"
+  mock_cmd_with_history
+  run "$SCRIPTS_DIR/token-diet" budget status
+  [[ "$output" == *"unlimited"* ]]
+  [ "$status" -ne 3 ]
+}
+
 # ---------------------------------------------------------------------------
 # Cycle 9.4 — budget: listed in --help
 # ---------------------------------------------------------------------------

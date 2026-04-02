@@ -180,7 +180,8 @@ def test_budget_stats_returns_thresholds_when_file_exists(dashboard_mod, tmp_hom
                     "total_saved": 20000, "avg_savings_pct": 66.0, "total_time_ms": 100},
         "daily": []
     })
-    with patch.object(dashboard_mod, "run", return_value=fake_summary):
+    with patch.object(dashboard_mod, "run", return_value=fake_summary), \
+         patch.object(dashboard_mod.pathlib.Path, "cwd", return_value=tmp_home):
         result = dashboard_mod.budget_stats()
 
     assert result is not None

@@ -434,7 +434,7 @@ PYEOF
   # On macOS, web_dashboard:true spawns a native pywebview app process per host.
   # With Serena registered in multiple hosts (claude-code, opencode, codex),
   # this causes multiple dashboard windows on every startup.
-  # Users get a dashboard via `tkd dashboard` instead.
+  # Users get a dashboard via `token-diet dashboard` instead.
   local serena_cfg="$HOME/.serena/serena_config.yml"
   if [ "${DRY_RUN:-false}" = "true" ]; then
     dryrun "Set web_dashboard: false + web_dashboard_open_on_launch: false in $serena_cfg"
@@ -555,33 +555,32 @@ verify_stack() {
 EOF
 }
 
-# --- tkd dashboard command ----------------------------------------------------
-install_tkd() {
+# --- token-diet dashboard command ----------------------------------------------------
+install_token_diet() {
   local bin_dir="$HOME/.local/bin"
-  local src_tkd="$SCRIPT_DIR/tkd"
-  local src_dash="$SCRIPT_DIR/tkd-dashboard"
+  local src_bin="$SCRIPT_DIR/token-diet"
+  local src_dash="$SCRIPT_DIR/token-diet-dashboard"
 
-  if [ ! -f "$src_tkd" ]; then
-    warn "scripts/tkd not found — skipping tkd install"
+  if [ ! -f "$src_bin" ]; then
+    warn "scripts/token-diet not found — skipping token-diet install"
     return 0
   fi
 
   if [ "${DRY_RUN:-false}" = "true" ]; then
-    dryrun "install -m755 $src_tkd $bin_dir/tkd + symlink token-diet"
-    [ -f "$src_dash" ] && dryrun "install -m755 $src_dash $bin_dir/tkd-dashboard"
+    dryrun "install -m755 $src_bin $bin_dir/token-diet"
+    [ -f "$src_dash" ] && dryrun "install -m755 $src_dash $bin_dir/token-diet-dashboard"
     dryrun "write ~/.claude/token-diet.md + add @token-diet.md to ~/.claude/CLAUDE.md"
     dryrun "write ~/.codex/token-diet.md + add @token-diet.md to ~/.codex/AGENTS.md"
     return 0
   fi
 
   mkdir -p "$bin_dir"
-  install -m755 "$src_tkd" "$bin_dir/tkd"
-  ln -sf "$bin_dir/tkd" "$bin_dir/token-diet"
-  ok "tkd + token-diet installed: $bin_dir"
+  install -m755 "$src_bin" "$bin_dir/token-diet"
+  ok "token-diet installed: $bin_dir/token-diet"
 
   if [ -f "$src_dash" ]; then
-    install -m755 "$src_dash" "$bin_dir/tkd-dashboard"
-    ok "tkd-dashboard installed: $bin_dir/tkd-dashboard"
+    install -m755 "$src_dash" "$bin_dir/token-diet-dashboard"
+    ok "token-diet-dashboard installed: $bin_dir/token-diet-dashboard"
   fi
 
   # Nudge if ~/.local/bin not in PATH
@@ -591,42 +590,42 @@ install_tkd() {
 
   # Write token-diet.md into each AI host config dir and ensure it is referenced.
   # Idempotent: skips if token-diet.md already exists and is up to date.
-  write_tkd_md() {
+  write_token-diet_md() {
     local config_dir="$1"
     local instruction_file="$2"  # CLAUDE.md or AGENTS.md
 
     [ -d "$config_dir" ] || return 0  # host not installed — skip silently
 
-    local tkd_file="$config_dir/token-diet.md"
-    cat > "$tkd_file" << 'TKDDOC'
+    local token-diet_file="$config_dir/token-diet.md"
+    cat > "$token-diet_file" << 'TKDDOC'
 # TKD — token-diet unified CLI
 
-`tkd` (`~/.local/bin/tkd`) is the top-level command for the token-diet stack (RTK + tilth + Serena).
+`token-diet` (`~/.local/bin/token-diet`) is the top-level command for the token-diet stack (RTK + tilth + Serena).
 
 ## Commands
 
 ```bash
-tkd gain       # Combined savings dashboard: RTK + tilth + Serena
-tkd version    # Installed versions of all three tools
-tkd verify     # Re-run installation verification
-tkd dashboard  # Open live browser dashboard
+token-diet gain       # Combined savings dashboard: RTK + tilth + Serena
+token-diet version    # Installed versions of all three tools
+token-diet verify     # Re-run installation verification
+token-diet dashboard  # Open live browser dashboard
 ```
 
 ## Rules
 
-- **`tkd` is a real binary.** Never assume it is a typo for `rtk`.
-- Run `which tkd` if unsure whether it is installed.
-- `tkd gain` shows RTK tracked savings + tilth/Serena structural savings.
+- **`token-diet` is a real binary.** Never assume it is a typo for `rtk`.
+- Run `which token-diet` if unsure whether it is installed.
+- `token-diet gain` shows RTK tracked savings + tilth/Serena structural savings.
   RTK savings are exact (output compression). tilth + Serena savings are
   structural (smaller prompts, fewer turns) and shown as estimates.
 TKDDOC
-    ok "token-diet.md written: $tkd_file"
+    ok "token-diet.md written: $token-diet_file"
 
     # Add @token-diet.md reference to instruction file if not already present
     if [ -f "$instruction_file" ] && ! grep -q "@token-diet.md" "$instruction_file"; then
       # Insert before @RTK.md if present, otherwise append
       if grep -q "@RTK.md" "$instruction_file"; then
-        sed -i.bak "s|@RTK.md|@token-diet.md\n@RTK.md|" "$instruction_file" && rm -f "${instruction_file}.bak"
+        awk '/^@RTK\.md$/{print "@token-diet.md"}1' "$instruction_file" > "${instruction_file}.tmp" && mv "${instruction_file}.tmp" "$instruction_file"
       else
         printf "\n@token-diet.md\n" >> "$instruction_file"
       fi
@@ -634,8 +633,8 @@ TKDDOC
     fi
   }
 
-  write_tkd_md "$HOME/.claude" "$HOME/.claude/CLAUDE.md"
-  write_tkd_md "$HOME/.codex" "$HOME/.codex/AGENTS.md"
+  write_token-diet_md "$HOME/.claude" "$HOME/.claude/CLAUDE.md"
+  write_token-diet_md "$HOME/.codex" "$HOME/.codex/AGENTS.md"
 }
 
 # --- Main ---------------------------------------------------------------------
@@ -795,8 +794,8 @@ main() {
     configure_dedup
   fi
 
-  # Install tkd dashboard command
-  install_tkd
+  # Install token-diet dashboard command
+  install_token_diet
 
   verify_stack
 }

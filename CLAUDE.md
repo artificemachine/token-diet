@@ -15,7 +15,8 @@ token-diet/
 │   ├── Install.ps1           # Windows installer (-Verbose for full output)
 │   ├── uninstall.sh          # macOS/Linux uninstaller (--dry-run, --force, --include-data)
 │   ├── Uninstall.ps1         # Windows uninstaller (-DryRun, -Force, -IncludeData)
-│   ├── token-diet            # CLI entry point (gain, health, breakdown, explain, budget, loops, strip, diff-reads, route, leaks, test-first, uninstall, version, verify, dashboard)
+│   ├── token-diet            # CLI entry point — macOS/Linux (bash)
+│   ├── token-diet.ps1        # CLI entry point — Windows (PowerShell)
 │   ├── token-diet-dashboard  # stdlib-only Python browser dashboard
 │   ├── playbook.yml          # Ansible playbook
 │   └── build.sh              # Build from forks (no internet)
@@ -23,6 +24,7 @@ token-diet/
 │   ├── test_helper.bash      # Shared bats fixtures (sandboxed HOME/PATH, mock helpers)
 │   ├── token-diet.bats       # CLI tests (dispatch, health, uninstall)
 │   ├── install.bats          # Installer + uninstaller tests
+│   ├── token-diet.Tests.ps1  # Pester v5 tests for Windows CLI (token-diet.ps1)
 │   ├── Uninstall.Tests.ps1   # Pester v5 tests for Windows uninstaller
 │   ├── conftest.py           # pytest fixtures (dashboard_mod, tmp_home)
 │   └── test_dashboard.py     # Dashboard data layer tests
@@ -59,8 +61,11 @@ bats tests/*.bats
 # Python tests (requires pytest)
 pytest tests/ -q
 
+# PowerShell tests (requires pwsh + Pester v5)
+pwsh -NoProfile -Command "Import-Module Pester -Force; Invoke-Pester tests/ -Output Minimal"
+
 # Full suite
-bats tests/*.bats && pytest tests/ -q
+bats tests/*.bats && pytest tests/ -q && pwsh -NoProfile -Command "Import-Module Pester -Force; Invoke-Pester tests/ -Output Minimal"
 ```
 
 ## Install commands

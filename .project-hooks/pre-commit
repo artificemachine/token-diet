@@ -25,4 +25,21 @@ if command -v python3 &>/dev/null && python3 -m pytest --version &>/dev/null 2>&
   fi
 fi
 
+# Run PowerShell tests if pwsh + Pester are available
+if command -v pwsh &>/dev/null && pwsh -NoProfile -Command "Get-Module -ListAvailable Pester" &>/dev/null 2>&1; then
+  if ls "$REPO_ROOT/tests/"*.Tests.ps1 &>/dev/null 2>&1; then
+    echo "token-diet: running Pester tests..."
+    pwsh -NoProfile -Command "
+      \$env:USERPROFILE = if (\$env:USERPROFILE) { \$env:USERPROFILE } else { \$env:HOME }
+      \$env:APPDATA     = if (\$env:APPDATA)     { \$env:APPDATA     } else { \$env:HOME }
+      Import-Module Pester -Force
+      \$cfg = New-PesterConfiguration
+      \$cfg.Run.Path = '$REPO_ROOT/tests'
+      \$cfg.Run.Exit = \$true
+      \$cfg.Output.Verbosity = 'Minimal'
+      Invoke-Pester -Configuration \$cfg
+    "
+  fi
+fi
+
 echo "token-diet: pre-commit checks passed."

@@ -227,3 +227,4 @@ if ($DryRun) {
     Write-Host "  token-diet uninstalled" -ForegroundColor Green
 }
 Write-Host ""
+exit 0

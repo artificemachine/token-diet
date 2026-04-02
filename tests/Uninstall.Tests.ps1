@@ -43,7 +43,7 @@ AfterAll {
 
 Describe "Uninstall.ps1 -DryRun" {
     It "exits 0 and prints dry-run" {
-        $output = & $ScriptPath -DryRun -Force 2>&1
+        $output = (& pwsh -NoProfile -File $ScriptPath -DryRun -Force 2>&1) -join ' '
         $LASTEXITCODE | Should -Be 0
         $output | Should -Match "(?i)dry.run"
     }

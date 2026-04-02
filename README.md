@@ -95,6 +95,16 @@ token-diet uninstall        # remove all token-diet components
 token-diet uninstall --dry-run   # preview what would be removed
 ```
 
+On Windows, use the PowerShell equivalent (`scripts/token-diet.ps1`), which supports all the same commands:
+
+```powershell
+.\scripts\token-diet.ps1 gain
+.\scripts\token-diet.ps1 health
+.\scripts\token-diet.ps1 budget init
+.\scripts\token-diet.ps1 dashboard
+# ... same command surface as the bash CLI
+```
+
 The browser dashboard auto-refreshes every 30 s and shows cumulative RTK savings, a 14-day savings bar chart, weekly token projection, budget usage vs warn/hard thresholds, top-commands breakdown, loop and leak alerts, tilth/Serena status, and registered MCP hosts with missing-host hints.
 
 ## Enterprise / Air-Gapped Deployment

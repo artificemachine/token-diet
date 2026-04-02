@@ -620,8 +620,8 @@ install_token_diet() {
 
     [ -d "$config_dir" ] || return 0  # host not installed — skip silently
 
-    local token-diet_file="$config_dir/token-diet.md"
-    cat > "$token-diet_file" << 'TKDDOC'
+    local tkd_doc_file="$config_dir/token-diet.md"
+    cat > "$tkd_doc_file" << 'TKDDOC'
 # TKD — token-diet unified CLI
 
 `token-diet` (`~/.local/bin/token-diet`) is the top-level command for the token-diet stack (RTK + tilth + Serena).
@@ -643,7 +643,7 @@ token-diet dashboard  # Open live browser dashboard
   RTK savings are exact (output compression). tilth + Serena savings are
   structural (smaller prompts, fewer turns) and shown as estimates.
 TKDDOC
-    ok "token-diet.md written: $token-diet_file"
+    ok "token-diet.md written: $tkd_doc_file"
 
     # Add @token-diet.md reference to instruction file if not already present
     if [ -f "$instruction_file" ] && ! grep -q "@token-diet.md" "$instruction_file"; then

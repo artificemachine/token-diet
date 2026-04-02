@@ -140,7 +140,7 @@ def test_breakdown_stats_returns_top_commands(dashboard_mod, tmp_home):
     })
 
     def fake_run(cmd, **kw):
-        if "--history" in cmd:
+        if "-H" in cmd:
             return fake_history
         return None
 

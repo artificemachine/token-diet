@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""tkd-dashboard — live browser dashboard for the token-diet stack.
+"""token-diet-dashboard — live browser dashboard for the token-diet stack.
 stdlib only. Starts a local HTTP server, opens browser, Ctrl+C to stop.
 
-Usage: tkd dashboard [--port N]
+Usage: token-diet dashboard [--port N]
 """
-import http.server, json, os, pathlib, subprocess, sys, threading, webbrowser
+import http.server, json, os, pathlib, re, subprocess, sys, threading, webbrowser
 from urllib.parse import urlparse
 
 PORT = int(sys.argv[2]) if len(sys.argv) > 2 and sys.argv[1:2] == ["--port"] else 7384
@@ -69,10 +69,15 @@ def _registered_hosts(tool):
         found.append("codex")
     return list(dict.fromkeys(found))  # dedup, preserve order
 
+_ALL_HOSTS = ["claude-code", "claude-desktop", "opencode", "codex"]
+
+def _missing_hosts(tool):
+    registered = set(_registered_hosts(tool))
+    return [h for h in _ALL_HOSTS if h not in registered]
+
 def budget_stats():
     """Read .token-budget from cwd (or home), cross-reference with RTK usage."""
     budget_file = None
-    # Walk from home looking for .token-budget
     home = pathlib.Path.home()
     for candidate in [pathlib.Path.cwd(), home]:
         p = candidate / ".token-budget"
@@ -89,7 +94,6 @@ def budget_stats():
     warn = cfg.get("warn", 50000)
     hard = cfg.get("hard", 100000)
 
-    # Get current usage from RTK
     used = 0
     raw = run(["rtk", "gain", "--format", "json"])
     if raw:
@@ -100,34 +104,104 @@ def budget_stats():
 
     remaining = hard - used
     pct = round(used * 100 / hard, 1) if hard > 0 else 0
+    warn_pct = round(warn * 100 / hard, 1) if hard > 0 else 0
     status = "ok" if used < warn else ("warn" if used < hard else "hard")
 
     return {
-        "warn": warn,
-        "hard": hard,
-        "used": used,
-        "remaining": remaining,
-        "pct": pct,
-        "status": status,
-        "file": str(budget_file),
+        "warn": warn, "hard": hard, "used": used,
+        "remaining": remaining, "pct": pct, "warn_pct": warn_pct,
+        "status": status, "file": str(budget_file),
     }
 
 def breakdown_stats(limit=10):
-    raw = run(["rtk", "gain", "--history"])
+    raw = run(["rtk", "gain", "-H", "--format", "json"])
     if not raw:
         return None
-    d = json.loads(raw)
+    try:
+        d = json.loads(raw)
+    except Exception:
+        return None
     cmds = d.get("commands", [])
+    if not cmds:
+        return None
     top = sorted(cmds, key=lambda c: c.get("total_saved", 0), reverse=True)[:limit]
     return {"top_commands": top}
 
+def loops_stats():
+    """Commands run 3+ times — agent loop pattern detection."""
+    raw = run(["rtk", "gain", "-H", "--format", "json"])
+    if not raw:
+        return None
+    try:
+        d = json.loads(raw)
+        cmds = d.get("commands", [])
+        loops = [c for c in cmds if c.get("count", 0) >= 3]
+        return {"loops": sorted(loops, key=lambda x: x["count"], reverse=True)}
+    except Exception:
+        return None
+
+def leaks_stats():
+    """Files read multiple times — context leak detection."""
+    raw = run(["rtk", "gain", "-H", "--format", "json"])
+    if not raw:
+        return None
+    try:
+        d = json.loads(raw)
+        cmds = d.get("commands", [])
+        FILE_READ = re.compile(r'\b(?:cat|head|tail|tilth\s+read|tilth_read)\s+(\S+\.\w+)')
+        leaks = []
+        for c in cmds:
+            m = FILE_READ.search(c.get("cmd", ""))
+            if m and c.get("count", 0) >= 2:
+                leaks.append({
+                    "file": m.group(1),
+                    "count": c["count"],
+                    "total_input": c.get("total_input", 0),
+                })
+        return {"leaks": sorted(leaks, key=lambda x: x["count"], reverse=True)}
+    except Exception:
+        return None
+
+def projection_stats():
+    """Weekly token savings projection based on last 7 days of RTK daily data."""
+    raw = run(["rtk", "gain", "--daily", "--format", "json"])
+    if not raw:
+        return None
+    try:
+        d = json.loads(raw)
+        daily = d.get("daily", [])
+        if not daily:
+            return None
+        recent = daily[-7:]
+        avg_saved = sum(day.get("saved_tokens", 0) for day in recent) / len(recent)
+        avg_pct   = sum(day.get("savings_pct",  0) for day in recent) / len(recent)
+        return {
+            "avg_daily_saved":  round(avg_saved),
+            "weekly_projection": round(avg_saved * 7),
+            "avg_pct":          round(avg_pct, 1),
+            "days_sampled":     len(recent),
+        }
+    except Exception:
+        return None
+
+def missing_hosts_stats():
+    """Hosts where tilth/serena are not yet registered as MCP servers."""
+    return {
+        "tilth":  _missing_hosts("tilth"),
+        "serena": _missing_hosts("serena"),
+    }
+
 def collect():
     return {
-        "rtk":       rtk_stats(),
-        "tilth":     tilth_stats(),
-        "serena":    serena_stats(),
-        "breakdown": breakdown_stats(),
-        "budget":    budget_stats(),
+        "rtk":           rtk_stats(),
+        "tilth":         tilth_stats(),
+        "serena":        serena_stats(),
+        "breakdown":     breakdown_stats(),
+        "budget":        budget_stats(),
+        "loops":         loops_stats(),
+        "leaks":         leaks_stats(),
+        "projection":    projection_stats(),
+        "missing_hosts": missing_hosts_stats(),
     }
 
 # ---------------------------------------------------------------------------
@@ -141,13 +215,13 @@ HTML = """<!doctype html><html lang=en><head><meta charset=utf-8>
 *{box-sizing:border-box;margin:0;padding:0}
 body{background:#0d1117;color:#e6edf3;font:14px/1.5 'Segoe UI',system-ui,sans-serif;padding:24px}
 h1{font-size:20px;font-weight:600;color:#58a6ff;margin-bottom:4px}
-.sub{color:#8b949e;font-size:12px;margin-bottom:24px}
+.sub{color:#8b949e;font-size:12px;margin-bottom:16px}
 .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px;margin-bottom:24px}
 .card{background:#161b22;border:1px solid #30363d;border-radius:8px;padding:20px}
 .card h2{font-size:13px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:#8b949e;margin-bottom:12px}
-.card .tool{font-size:18px;font-weight:700;margin-bottom:4px}
+.card .tool{font-size:18px;font-weight:700;margin-bottom:8px}
 .badge{display:inline-block;padding:2px 8px;border-radius:12px;font-size:11px;font-weight:600}
-.ok  {background:#1a3a1a;color:#39d353}.warn{background:#3a2a00;color:#e3b341}.off{background:#2d1b1b;color:#f85149}
+.ok{background:#1a3a1a;color:#39d353}.warn{background:#3a2a00;color:#e3b341}.off{background:#2d1b1b;color:#f85149}
 .stat{display:flex;justify-content:space-between;align-items:center;padding:4px 0;border-bottom:1px solid #21262d}
 .stat:last-child{border:none}.sv{font-weight:600;color:#e6edf3}.sl{color:#8b949e;font-size:12px}
 .bar-wrap{margin-top:14px}.bar-label{font-size:11px;color:#8b949e;margin-bottom:6px}
@@ -159,35 +233,66 @@ h1{font-size:20px;font-weight:600;color:#58a6ff;margin-bottom:4px}
      font-size:11px;white-space:nowrap;z-index:10;color:#e6edf3}
 .hosts{margin-top:10px;display:flex;flex-wrap:wrap;gap:6px}
 .host{background:#1c2128;border:1px solid #30363d;border-radius:4px;padding:2px 8px;font-size:11px;color:#8b949e}
-.summary{background:#161b22;border:1px solid #30363d;border-radius:8px;padding:20px;margin-bottom:24px;
+.missing-hosts{margin-top:8px;font-size:11px;color:#e3b341}
+.summary{background:#161b22;border:1px solid #30363d;border-radius:8px;padding:20px;margin-bottom:16px;
          display:flex;gap:32px;flex-wrap:wrap}
-.metric{flex:1;min-width:120px}.metric .v{font-size:28px;font-weight:700;color:#58a6ff}
+.metric{flex:1;min-width:110px}.metric .v{font-size:26px;font-weight:700;color:#58a6ff}
 .metric .l{font-size:12px;color:#8b949e;margin-top:2px}
-.refresh{color:#8b949e;font-size:11px;text-align:right;margin-top:12px}
 .eff-bar{height:8px;background:#21262d;border-radius:4px;margin-top:6px;overflow:hidden}
 .eff-fill{height:100%;background:linear-gradient(90deg,#388bfd,#39d353);border-radius:4px;transition:width .5s}
 .none{color:#8b949e;font-style:italic}
+.refresh{color:#8b949e;font-size:11px;text-align:right;margin-top:12px}
+/* Alert banner */
+.alerts{margin-bottom:16px;display:flex;flex-direction:column;gap:8px}
+.alert{padding:10px 14px;border-radius:6px;font-size:13px;border-left:3px solid}
+.alert-warn{background:#2a2000;border-color:#e3b341;color:#e3b341}
+.alert-danger{background:#2d1b1b;border-color:#f85149;color:#f85149}
+/* Budget bar */
+.budget-track{position:relative;height:10px;background:#21262d;border-radius:5px;margin-top:8px;overflow:visible}
+.budget-fill{height:100%;border-radius:5px;transition:width .5s}
+.budget-warn-line{position:absolute;top:-3px;width:2px;height:16px;background:#e3b341;border-radius:1px}
+/* Breakdown table */
+.cmd-table{width:100%;border-collapse:collapse;margin-top:10px;font-size:12px}
+.cmd-table th{color:#8b949e;font-weight:600;text-align:left;padding:4px 6px 6px;border-bottom:1px solid #30363d}
+.cmd-table td{padding:5px 6px;border-bottom:1px solid #21262d;color:#e6edf3}
+.cmd-table tr:last-child td{border:none}
+.cmd-name{font-family:monospace;font-size:11px;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 </style></head><body>
 <h1>token-diet</h1>
-<p class=sub id=ts>Loading…</p>
+<p class=sub id=ts>Loading\u2026</p>
+<div class=alerts id=alerts></div>
 <div class=summary id=summary></div>
 <div class=grid id=cards></div>
 <p class=refresh id=rf></p>
 <script>
-function fmt(n){if(n>=1e6)return(n/1e6).toFixed(1)+'M';if(n>=1e3)return(n/1e3).toFixed(1)+'K';return n}
+function fmt(n){if(n>=1e6)return(n/1e6).toFixed(1)+'M';if(n>=1e3)return(n/1e3).toFixed(1)+'K';return String(n)}
 function fmtMs(ms){if(ms>=3600000)return Math.floor(ms/3600000)+'h '+Math.floor((ms%3600000)/60000)+'m';
   if(ms>=60000)return Math.floor(ms/60000)+'m '+Math.floor((ms%60000)/1000)+'s';
   if(ms>=1000)return (ms/1000).toFixed(1)+'s';return ms+'ms'}
 function badge(ok){return ok?'<span class="badge ok">active</span>':'<span class="badge off">not installed</span>'}
 function hosts(arr){if(!arr||!arr.length)return '<span class=none>none detected</span>';
   return arr.map(h=>'<span class=host>'+h+'</span>').join('')}
+function missingHint(arr){if(!arr||!arr.length)return '';
+  return '<div class=missing-hosts>\u26a0 Not registered in: '+arr.join(', ')+'</div>'}
 
 function render(d){
   document.getElementById('ts').textContent='Last updated: '+new Date().toLocaleTimeString();
-  const r=d.rtk, t=d.tilth, s=d.serena;
+  const r=d.rtk, t=d.tilth, s=d.serena, p=d.projection;
 
-  // Summary bar
-  let sh='<div class=summary>';
+  // --- Alert banner ---
+  let alerts='';
+  if(d.loops&&d.loops.loops&&d.loops.loops.length){
+    const names=d.loops.loops.slice(0,3).map(l=>`<code>${l.cmd}</code> (${l.count}\xd7)`).join(', ');
+    alerts+=`<div class="alert alert-danger">\u26a0\ufe0f ${d.loops.loops.length} loop pattern${d.loops.loops.length>1?'s':''} detected \u2014 ${names}</div>`;
+  }
+  if(d.leaks&&d.leaks.leaks&&d.leaks.leaks.length){
+    const names=d.leaks.leaks.slice(0,3).map(l=>`<code>${l.file}</code> (${l.count}\xd7)`).join(', ');
+    alerts+=`<div class="alert alert-warn">\u26a0 ${d.leaks.leaks.length} file${d.leaks.leaks.length>1?'s':''} read multiple times \u2014 ${names}</div>`;
+  }
+  document.getElementById('alerts').innerHTML=alerts;
+
+  // --- Summary bar (fix: keep id=summary on replacement) ---
+  let sh='<div class="summary" id=summary>';
   if(r){
     const sm=r.summary;
     sh+=`<div class=metric><div class=v>${fmt(sm.total_saved)}</div><div class=l>tokens saved (RTK)</div></div>`;
@@ -196,18 +301,21 @@ function render(d){
          <div class=eff-bar><div class=eff-fill style="width:${sm.avg_savings_pct.toFixed(1)}%"></div></div></div>`;
     sh+=`<div class=metric><div class=v>${fmtMs(sm.total_time_ms)}</div><div class=l>total exec time</div></div>`;
   } else {
-    sh+='<div class=metric><div class=v style="color:#f85149">—</div><div class=l>RTK not installed</div></div>';
+    sh+='<div class=metric><div class=v style="color:#f85149">\u2014</div><div class=l>RTK not installed</div></div>';
+  }
+  if(p){
+    sh+=`<div class=metric><div class=v style="color:#39d353">${fmt(p.weekly_projection)}</div><div class=l>est. weekly savings</div></div>`;
   }
   const active=[r,t,s].filter(Boolean).length;
   sh+=`<div class=metric><div class=v style="color:${active===3?'#39d353':'#e3b341'}">${active}/3</div><div class=l>tools active</div></div>`;
   sh+='</div>';
   document.getElementById('summary').outerHTML=sh;
 
-  // Cards
+  // --- Cards ---
   let cards='';
 
   // RTK card
-  cards+='<div class=card><h2>RTK — output compression</h2>';
+  cards+='<div class=card><h2>RTK \u2014 output compression</h2>';
   if(r){
     const sm=r.summary;
     cards+=`<div class=tool>${badge(true)} RTK</div>`;
@@ -229,18 +337,19 @@ function render(d){
   cards+='</div>';
 
   // tilth card
-  cards+='<div class=card><h2>tilth — AST code reading</h2>';
+  cards+='<div class=card><h2>tilth \u2014 AST code reading</h2>';
   if(t){
     cards+=`<div class=tool>${badge(true)} tilth ${t.version}</div>`;
     cards+=`<div class=stat><span class=sl>Version</span><span class=sv>${t.version}</span></div>`;
     cards+=`<div class=stat><span class=sl>Layer</span><span class=sv>tree-sitter (fast)</span></div>`;
     cards+=`<div class=stat><span class=sl>Savings type</span><span class=sv>structural (prompt size)</span></div>`;
     cards+='<div class=hosts>'+hosts(t.hosts)+'</div>';
+    if(d.missing_hosts) cards+=missingHint(d.missing_hosts.tilth);
   } else { cards+=badge(false)+'<p class=none style="margin-top:8px">Run: bash install.sh --tilth-only</p>'; }
   cards+='</div>';
 
   // Serena card
-  cards+='<div class=card><h2>Serena — LSP navigation</h2>';
+  cards+='<div class=card><h2>Serena \u2014 LSP navigation</h2>';
   if(s){
     cards+=`<div class=tool>${badge(true)} Serena (${s.mode})</div>`;
     cards+=`<div class=stat><span class=sl>Mode</span><span class=sv>${s.mode}</span></div>`;
@@ -248,11 +357,49 @@ function render(d){
     cards+=`<div class=stat><span class=sl>Session logs</span><span class=sv>${s.log_days} days</span></div>`;
     cards+=`<div class=stat><span class=sl>Savings type</span><span class=sv>structural (fewer turns)</span></div>`;
     cards+='<div class=hosts>'+hosts(s.hosts)+'</div>';
+    if(d.missing_hosts) cards+=missingHint(d.missing_hosts.serena);
   } else { cards+=badge(false)+'<p class=none style="margin-top:8px">Run: bash install.sh --serena-only</p>'; }
   cards+='</div>';
 
+  // Budget card
+  cards+='<div class=card><h2>Token Budget</h2>';
+  if(d.budget){
+    const b=d.budget;
+    const sc=b.status==='ok'?'ok':b.status==='warn'?'warn':'off';
+    const bc=b.status==='ok'?'#39d353':b.status==='warn'?'#e3b341':'#f85149';
+    cards+=`<div class=tool><span class="badge ${sc}">${b.status.toUpperCase()}</span></div>`;
+    cards+=`<div class=stat><span class=sl>Used</span><span class=sv>${fmt(b.used)}</span></div>`;
+    cards+=`<div class=stat><span class=sl>Warn at</span><span class=sv>${fmt(b.warn)}</span></div>`;
+    cards+=`<div class=stat><span class=sl>Hard stop</span><span class=sv>${fmt(b.hard)}</span></div>`;
+    cards+=`<div class=stat><span class=sl>Remaining</span><span class=sv>${fmt(Math.max(0,b.remaining))}</span></div>`;
+    const fillW=Math.min(100,b.pct);
+    cards+=`<div class=bar-wrap><div class=bar-label>${b.pct}% of budget used</div>`;
+    cards+=`<div class=budget-track><div class=budget-fill style="width:${fillW}%;background:${bc}"></div>`;
+    cards+=`<div class=budget-warn-line style="left:${b.warn_pct}%"></div></div></div>`;
+  } else {
+    cards+='<p class=none style="margin-top:8px">No budget set</p>';
+    cards+='<p style="margin-top:8px;font-size:12px;color:#8b949e">Run: <code>token-diet budget init</code></p>';
+  }
+  cards+='</div>';
+
+  // Breakdown card (top 5 commands)
+  cards+='<div class=card><h2>Top commands by tokens saved</h2>';
+  if(d.breakdown&&d.breakdown.top_commands&&d.breakdown.top_commands.length){
+    cards+='<table class=cmd-table><tr><th>Command</th><th>Saved</th><th>Eff</th><th>Runs</th></tr>';
+    d.breakdown.top_commands.slice(0,5).forEach(c=>{
+      const pct=c.avg_pct||0;
+      const col=pct>=80?'#39d353':pct>=60?'#e3b341':'#f85149';
+      const label=c.cmd.length>26?c.cmd.slice(0,23)+'\u2026':c.cmd;
+      cards+=`<tr><td class=cmd-name>${label}</td><td>${fmt(c.total_saved)}</td><td style="color:${col}">${pct.toFixed(0)}%</td><td>${c.count}\xd7</td></tr>`;
+    });
+    cards+='</table>';
+  } else {
+    cards+='<p class=none style="margin-top:8px">No RTK history yet</p>';
+  }
+  cards+='</div>';
+
   document.getElementById('cards').innerHTML=cards;
-  document.getElementById('rf').textContent='Auto-refreshes every 30s — Ctrl+C in terminal to stop';
+  document.getElementById('rf').textContent='Auto-refreshes every 30s \u2014 Ctrl+C in terminal to stop';
 }
 
 async function refresh(){
@@ -297,7 +444,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
 def main():
     server = http.server.HTTPServer(("127.0.0.1", PORT), Handler)
     url = f"http://127.0.0.1:{PORT}"
-    print(f"  token-diet dashboard → {url}")
+    print(f"  token-diet dashboard \u2192 {url}")
     print(f"  Ctrl+C to stop\n")
     threading.Timer(0.4, lambda: webbrowser.open(url)).start()
     try:

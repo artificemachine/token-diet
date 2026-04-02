@@ -167,3 +167,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 * **`scripts/Uninstall.ps1`** — PowerShell uninstaller (Windows); `-DryRun`, `-Force`, `-IncludeData`
 * **`scripts/install.sh --verbose`** — full build output instead of `tail -5`; logs to `~/.local/share/token-diet/install.log`
 * **Test suite** — 61 bats tests + 16 pytest tests; pre-commit hook runs full suite on every commit
+
+## [1.2.1] — 2026-04-02
+
+### Added
+* **Dashboard — budget card** with progress bar and warn/hard threshold markers
+* **Dashboard — breakdown card** showing top commands by tokens saved
+* **Dashboard — loop/leak alerts** — banner warnings when loops (≥3 repeats) or file-read leaks are detected
+* **Dashboard — weekly token projection** metric in the summary bar
+* **Dashboard — missing-host hints** on tilth/Serena cards showing unregistered MCP hosts
+
+### Fixed
+* `breakdown_stats()` / `loops_stats()` / `leaks_stats()` now use correct RTK flag (`-H --format json`); return `None` gracefully when `commands` key is absent
+* Dashboard JS `outerHTML` replacement now preserves element `id`, preventing null-reference on subsequent refreshes
+* `budget_stats()` test isolation: stray `.token-budget` in project root no longer pollutes test sandbox

@@ -15,3 +15,5 @@ __pycache__/
 *.pyc
 *.p12
 *.env.*
+
+.token-budget

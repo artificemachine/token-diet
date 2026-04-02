@@ -8,6 +8,7 @@ credentials.json
 target/
 .serena/
 .vscode/
+!.vscode/mcp.json
 dist/
 excalidraw.log
 __pycache__/

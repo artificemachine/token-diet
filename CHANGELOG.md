@@ -188,3 +188,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 * `token-diet verify` no longer crashes when run from `~/.local/bin` (inline fallback when `install.sh` is absent)
 * `scripts/install.sh` now copies itself as `token-diet-install.sh` to `~/.local/bin` so future verify calls can delegate to it
 * `test_budget_stats_returns_none_when_no_budget_file` now mocks `Path.cwd()` to prevent a stray `.token-budget` in the project root from breaking test isolation
+
+## [1.2.3] — 2026-04-02
+
+### Added
+* `.vscode/mcp.json` — add Serena MCP server for GitHub Copilot / VS Code

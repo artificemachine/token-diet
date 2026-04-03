@@ -126,12 +126,13 @@ MOCK
   chmod +x "$TMP_BIN/rtk"
 }
 
-# mock_mcp_config "host" "tool"
+# mock_mcp_config "host" "tool" ["command"]
 # Writes a fake MCP config file for the given host with the tool registered.
 # Safe to call multiple times — merges into existing JSON.
 mock_mcp_config() {
   local host="$1"
   local tool="$2"
+  local command_value="${3:-$tool}"
   local cfg
 
   case "$host" in
@@ -154,7 +155,7 @@ mock_mcp_config() {
     codex)
       mkdir -p "$TMP_HOME/.codex"
       # Codex uses TOML — append a block
-      printf '\n[mcp_servers.%s]\ncommand = "%s"\n' "$tool" "$tool" >> "$TMP_HOME/.codex/config.toml"
+      printf '\n[mcp_servers.%s]\ncommand = "%s"\n' "$tool" "$command_value" >> "$TMP_HOME/.codex/config.toml"
       return 0
       ;;
     vscode)
@@ -169,12 +170,12 @@ mock_mcp_config() {
 
   # Merge tool into existing JSON or create fresh
   if [ -f "$cfg" ]; then
-    python3 - "$cfg" "$tool" << 'PY'
+    python3 - "$cfg" "$tool" "$command_value" << 'PY'
 import json, sys
-cfg_path, tool_name = sys.argv[1], sys.argv[2]
+cfg_path, tool_name, command_value = sys.argv[1], sys.argv[2], sys.argv[3]
 with open(cfg_path) as f:
     d = json.load(f)
-d.setdefault("mcpServers", {})[tool_name] = {"command": tool_name}
+d.setdefault("mcpServers", {})[tool_name] = {"command": command_value}
 with open(cfg_path, "w") as f:
     json.dump(d, f, indent=2)
     f.write("\n")
@@ -182,7 +183,7 @@ PY
   else
     local dir; dir="$(dirname "$cfg")"
     mkdir -p "$dir"
-    printf '{"mcpServers":{"%s":{"command":"%s"}}}\n' "$tool" "$tool" > "$cfg"
+    printf '{"mcpServers":{"%s":{"command":"%s"}}}\n' "$tool" "$command_value" > "$cfg"
   fi
 }
 

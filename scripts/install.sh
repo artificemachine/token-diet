@@ -91,6 +91,47 @@ verify_local_build() {
 # --- Prerequisite checks -----------------------------------------------------
 check_command() { command -v "$1" &>/dev/null; }
 
+# Extract the configured command for [mcp_servers.<tool>] from Codex TOML.
+codex_mcp_command() {
+  local tool="$1"
+  local codex="$HOME/.codex/config.toml"
+  check_command python3 || return 1
+  [ -f "$codex" ] || return 1
+
+  python3 - "$codex" "$tool" << 'PY'
+import pathlib, re, sys
+
+cfg_path = pathlib.Path(sys.argv[1])
+tool = sys.argv[2]
+text = cfg_path.read_text()
+block = re.search(r'(?ms)^\[mcp_servers\.%s\]\s*(.*?)(?=^\[|\Z)' % re.escape(tool), text)
+if not block:
+    raise SystemExit(1)
+command = re.search(r'(?m)^command\s*=\s*["\']([^"\']+)["\']\s*$', block.group(1))
+if not command:
+    raise SystemExit(1)
+print(command.group(1))
+PY
+}
+
+mcp_command_exists() {
+  local command_value="$1"
+  if [[ "$command_value" == */* ]]; then
+    [ -x "$command_value" ]
+  else
+    check_command "$command_value"
+  fi
+}
+
+codex_tilth_issue() {
+  local command_value
+  command_value="$(codex_mcp_command "tilth")" || return 0
+  if ! mcp_command_exists "$command_value"; then
+    echo "Codex tilth MCP command missing: ${command_value}"
+  fi
+  return 0
+}
+
 ensure_git() {
   check_command git || fail "git is required. Install it first."
   ok "git found: $(git --version)"
@@ -520,6 +561,12 @@ verify_stack() {
 
   if check_command tilth; then
     ok "tilth ........... $(tilth --version 2>/dev/null || echo 'installed')"
+    local tilth_codex_issue
+    tilth_codex_issue="$(codex_tilth_issue)"
+    if [ -n "$tilth_codex_issue" ]; then
+      warn "$tilth_codex_issue"
+      all_ok=false
+    fi
   else
     warn "tilth ........... not installed"
     all_ok=false
@@ -554,7 +601,7 @@ verify_stack() {
   if $all_ok; then
     ok "All tools installed. Token diet active."
   else
-    warn "Some tools missing. Re-run to install."
+    warn "Some tools or MCP registrations need attention. Re-run install or repair the host config."
   fi
 
   echo ""

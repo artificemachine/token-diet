@@ -78,6 +78,69 @@ Describe 'token-diet.ps1 — version' {
     }
 }
 
+Describe 'token-diet.ps1 — health: Codex stale detection' {
+    BeforeEach {
+        # Provide APPDATA (null on macOS) so Get-HostsRegistered does not throw
+        $script:FakeAppData = Join-Path $TestDrive 'AppData'
+        New-Item -ItemType Directory -Path $script:FakeAppData -Force | Out-Null
+    }
+
+    It 'health: exits 1 when Codex tilth MCP path is stale' {
+        $fakeHome = Join-Path $TestDrive 'home-stale'
+        New-Item -ItemType Directory -Path (Join-Path $fakeHome '.codex') -Force | Out-Null
+        Set-Content (Join-Path $fakeHome '.codex\config.toml') @"
+[mcp_servers.tilth]
+command = "C:\missing\tilth.exe"
+"@ -Encoding UTF8
+
+        $out = (& pwsh -NoProfile -Command `
+            "`$env:USERPROFILE='$fakeHome'; `$env:APPDATA='$script:FakeAppData'; & '$($script:PS1)' health" 2>&1) -join ' '
+        $LASTEXITCODE | Should -Be 1
+        $out | Should -Match 'MCP command missing'
+    }
+
+    It 'health: single-quoted Codex TOML command is detected as registered' {
+        $fakeHome = Join-Path $TestDrive 'home-squote'
+        New-Item -ItemType Directory -Path (Join-Path $fakeHome '.codex') -Force | Out-Null
+        Set-Content (Join-Path $fakeHome '.codex\config.toml') @"
+[mcp_servers.tilth]
+command = 'tilth'
+"@ -Encoding UTF8
+
+        $out = (& pwsh -NoProfile -Command `
+            "`$env:PATH='$script:MockBin;$env:PATH'; `$env:USERPROFILE='$fakeHome'; `$env:APPDATA='$script:FakeAppData'; & '$($script:PS1)' health" 2>&1) -join ' '
+        $LASTEXITCODE | Should -Be 0
+        $out | Should -Match 'codex'
+    }
+
+    It 'health: stale single-quoted Codex TOML path is flagged' {
+        $fakeHome = Join-Path $TestDrive 'home-squote-stale'
+        New-Item -ItemType Directory -Path (Join-Path $fakeHome '.codex') -Force | Out-Null
+        Set-Content (Join-Path $fakeHome '.codex\config.toml') @"
+[mcp_servers.tilth]
+command = 'C:\missing\tilth.exe'
+"@ -Encoding UTF8
+
+        $out = (& pwsh -NoProfile -Command `
+            "`$env:USERPROFILE='$fakeHome'; `$env:APPDATA='$script:FakeAppData'; & '$($script:PS1)' health" 2>&1) -join ' '
+        $out | Should -Match 'MCP command missing'
+    }
+
+    It 'verify: exits 1 when Codex tilth MCP path is stale' {
+        $fakeHome = Join-Path $TestDrive 'home-verify-stale'
+        New-Item -ItemType Directory -Path (Join-Path $fakeHome '.codex') -Force | Out-Null
+        Set-Content (Join-Path $fakeHome '.codex\config.toml') @"
+[mcp_servers.tilth]
+command = "C:\missing\tilth.exe"
+"@ -Encoding UTF8
+
+        $out = (& pwsh -NoProfile -Command `
+            "`$env:USERPROFILE='$fakeHome'; `$env:APPDATA='$script:FakeAppData'; & '$($script:PS1)' verify" 2>&1) -join ' '
+        $LASTEXITCODE | Should -Be 1
+        $out | Should -Match 'MCP command missing'
+    }
+}
+
 Describe 'token-diet.ps1 — route' {
     It 'exits 1 with usage when no task given' {
         & pwsh -NoProfile -File $script:PS1 'route' 2>&1 | Out-Null

@@ -163,3 +163,28 @@ PY
   [ "$status" -eq 0 ]
   [[ "$output" == *"--verbose"* ]]
 }
+
+@test "install.sh --verify warns when Codex tilth MCP path is stale" {
+  mock_cmd_with_gain
+  mock_cmd tilth
+  mock_cmd uv
+  mock_cmd codex
+  mock_mcp_config codex tilth "/missing/tilth"
+
+  run bash "$SCRIPTS_DIR/install.sh" --verify
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Codex tilth MCP command missing: /missing/tilth"* ]]
+}
+
+@test "install.sh --verify: stale single-quoted TOML path is flagged" {
+  mock_cmd_with_gain
+  mock_cmd tilth
+  mock_cmd uv
+  mock_cmd codex
+  mkdir -p "$TMP_HOME/.codex"
+  printf '\n[mcp_servers.tilth]\ncommand = '"'"'/missing/tilth'"'"'\n' >> "$TMP_HOME/.codex/config.toml"
+
+  run bash "$SCRIPTS_DIR/install.sh" --verify
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Codex tilth MCP command missing: /missing/tilth"* ]]
+}

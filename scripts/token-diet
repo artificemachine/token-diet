@@ -56,6 +56,48 @@ bar() {
 
 check_cmd() { command -v "$1" &>/dev/null; }
 
+# Extract the configured command for [mcp_servers.<tool>] from Codex TOML.
+codex_mcp_command() {
+  local tool="$1"
+  local codex="$HOME/.codex/config.toml"
+  check_cmd python3 || return 1
+  [ -f "$codex" ] || return 1
+
+  python3 - "$codex" "$tool" << 'PY'
+import pathlib, re, sys
+
+cfg_path = pathlib.Path(sys.argv[1])
+tool = sys.argv[2]
+text = cfg_path.read_text()
+block = re.search(r'(?ms)^\[mcp_servers\.%s\]\s*(.*?)(?=^\[|\Z)' % re.escape(tool), text)
+if not block:
+    raise SystemExit(1)
+command = re.search(r'(?m)^command\s*=\s*["\']([^"\']+)["\']\s*$', block.group(1))
+if not command:
+    raise SystemExit(1)
+print(command.group(1))
+PY
+}
+
+mcp_command_exists() {
+  local command_value="$1"
+  if [[ "$command_value" == */* ]]; then
+    [ -x "$command_value" ]
+  else
+    check_cmd "$command_value"
+  fi
+}
+
+codex_mcp_command_issue() {
+  local tool="$1"
+  local command_value
+  command_value="$(codex_mcp_command "$tool")" || return 0
+  if ! mcp_command_exists "$command_value"; then
+    echo "Codex ${tool} MCP command missing: ${command_value}"
+  fi
+  return 0
+}
+
 # Scan common MCP config files for a tool name
 hosts_registered() {
   local tool="$1"
@@ -77,8 +119,7 @@ hosts_registered() {
     fi
   done
   # Codex
-  local codex="$HOME/.codex/config.toml"
-  [ -f "$codex" ] && grep -q "$tool" "$codex" 2>/dev/null && found+=("codex")
+  codex_mcp_command "$tool" >/dev/null 2>&1 && found+=("codex")
   # VS Code
   local vscode_cfg="$HOME/.config/Code/User/settings.json"
   [ -f "$vscode_cfg" ] && grep -q "$tool" "$vscode_cfg" 2>/dev/null && found+=("vscode")
@@ -222,6 +263,11 @@ cmd_verify() {
   fi
   if command -v tilth &>/dev/null; then
     printf "  ${GREEN}✓${NC} tilth ......... %s\n" "$(tilth --version 2>/dev/null || echo 'installed')"
+    local tilth_codex_issue; tilth_codex_issue=$(codex_mcp_command_issue "tilth")
+    if [ -n "$tilth_codex_issue" ]; then
+      printf "  ${YELLOW}✗${NC} %s\n" "$tilth_codex_issue"
+      all_ok=false
+    fi
   else
     printf "  ${YELLOW}✗${NC} tilth ......... not installed\n"; all_ok=false
   fi
@@ -235,10 +281,12 @@ cmd_verify() {
   echo ""
   if $all_ok; then
     printf "  ${GREEN}✓${NC} All tools installed. Token diet active.\n"
+    echo ""
   else
-    printf "  ${YELLOW}⚠${NC}  Some tools missing. Re-run: bash scripts/install.sh\n"
+    printf "  ${YELLOW}⚠${NC}  Some tools or MCP registrations need attention.\n"
+    echo ""
+    return 1
   fi
-  echo ""
 }
 
 cmd_dashboard() {
@@ -273,6 +321,11 @@ cmd_health() {
     local tilth_ver; tilth_ver=$(tilth --version 2>/dev/null | awk '{print $2}') || true
     local tilth_hosts; tilth_hosts=$(hosts_registered "tilth")
     ok "tilth ${tilth_ver}  (hosts: ${tilth_hosts})"
+    local tilth_codex_issue; tilth_codex_issue=$(codex_mcp_command_issue "tilth")
+    if [ -n "$tilth_codex_issue" ]; then
+      warn "$tilth_codex_issue"
+      issues=$(( issues + 1 ))
+    fi
   else
     miss "tilth not found"
     issues=$(( issues + 1 ))
@@ -293,7 +346,7 @@ cmd_health() {
     echo ""
     return 0
   else
-    echo -e "  ${YELLOW}${BOLD}${issues} tool(s) missing — run: bash install.sh${NC}"
+    echo -e "  ${YELLOW}${BOLD}${issues} issue(s) found — reinstall tools or repair MCP registrations${NC}"
     echo ""
     return 1
   fi

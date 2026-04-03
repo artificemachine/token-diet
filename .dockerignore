@@ -1,0 +1,44 @@
+# Exclude secrets and sensitive files
+.env
+.env.*
+*.env.*
+*.pem
+*.key
+*.p12
+credentials.*
+*token*
+
+# Exclude VCS and IDE
+.git
+.gitmodules
+.gitignore
+.github
+.vscode
+.idea
+
+# Exclude tests and CI
+tests/
+*.bats
+*.Tests.ps1
+conftest.py
+
+# Exclude docs and compliance (not needed in image)
+docs/
+compliance/
+CHANGELOG.md
+CLAUDE.md
+AGENTS.md
+README.md
+*.md
+
+# Exclude other scripts and configs (only forks/serena is needed)
+scripts/
+config/
+forks/rtk
+forks/tilth
+
+# Exclude Python cache
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/

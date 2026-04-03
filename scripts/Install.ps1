@@ -73,6 +73,33 @@ function Show-Output {
 
 function Test-Cmd { param([string]$Name) $null -ne (Get-Command $Name -ErrorAction SilentlyContinue) }
 
+# Extract the configured command for [mcp_servers.<tool>] from Codex TOML.
+function Get-CodexMcpCommand([string]$Tool) {
+    $codexCfg = Join-Path $env:USERPROFILE '.codex\config.toml'
+    if (-not (Test-Path $codexCfg)) { return $null }
+    $text = Get-Content $codexCfg -Raw -ErrorAction SilentlyContinue
+    if (-not $text) { return $null }
+    $escaped = [regex]::Escape($Tool)
+    $blockMatch = [regex]::Match($text, "(?ms)^\[mcp_servers\.$escaped\]\s*(.*?)(?=^\[|\z)")
+    if (-not $blockMatch.Success) { return $null }
+    $block = $blockMatch.Groups[1].Value
+    if ($block -match '(?m)^command\s*=\s*"([^"]+)"\s*$') { return $Matches[1] }
+    if ($block -match "(?m)^command\s*=\s*'([^']+)'\s*`$") { return $Matches[1] }
+    return $null
+}
+
+function Test-McpCommandExists([string]$CommandValue) {
+    if ($CommandValue -match '[/\\]') { return (Test-Path $CommandValue -PathType Leaf) }
+    return [bool](Get-Command $CommandValue -ErrorAction SilentlyContinue)
+}
+
+function Get-CodexMcpCommandIssue([string]$Tool) {
+    $cmd = Get-CodexMcpCommand $Tool
+    if (-not $cmd) { return $null }
+    if (-not (Test-McpCommandExists $cmd)) { return "Codex $Tool MCP command missing: $cmd" }
+    return $null
+}
+
 # --- Prerequisites ------------------------------------------------------------
 function Ensure-Git {
     if (-not (Test-Cmd "git")) { Write-Fail "git is required. Install from https://git-scm.com" }
@@ -338,6 +365,8 @@ function Verify-Stack {
 
     if (Test-Cmd "tilth") {
         Write-Ok "tilth ........... $(tilth --version 2>$null)"
+        $tilthIssue = Get-CodexMcpCommandIssue 'tilth'
+        if ($tilthIssue) { Write-Warn $tilthIssue; $allOk = $false }
     } else { Write-Warn "tilth ........... not installed"; $allOk = $false }
 
     if (Test-Cmd "uv") {

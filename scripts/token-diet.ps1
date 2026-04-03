@@ -80,10 +80,36 @@ function Get-HostsRegistered([string]$Tool) {
             } catch { }
         }
     }
-    $codexCfg = Join-Path $env:USERPROFILE '.codex\config.toml'
-    if ((Test-Path $codexCfg) -and ((Get-Content $codexCfg -Raw) -match $Tool)) { $hosts += 'codex' }
+    if ($null -ne (Get-CodexMcpCommand $Tool)) { $hosts += 'codex' }
     if ($hosts.Count -eq 0) { return 'none' }
     return $hosts -join ','
+}
+
+# Extract the configured command for [mcp_servers.<tool>] from Codex TOML.
+function Get-CodexMcpCommand([string]$Tool) {
+    $codexCfg = Join-Path $env:USERPROFILE '.codex\config.toml'
+    if (-not (Test-Path $codexCfg)) { return $null }
+    $text = Get-Content $codexCfg -Raw -ErrorAction SilentlyContinue
+    if (-not $text) { return $null }
+    $escaped = [regex]::Escape($Tool)
+    $blockMatch = [regex]::Match($text, "(?ms)^\[mcp_servers\.$escaped\]\s*(.*?)(?=^\[|\z)")
+    if (-not $blockMatch.Success) { return $null }
+    $block = $blockMatch.Groups[1].Value
+    if ($block -match '(?m)^command\s*=\s*"([^"]+)"\s*$') { return $Matches[1] }
+    if ($block -match "(?m)^command\s*=\s*'([^']+)'\s*`$") { return $Matches[1] }
+    return $null
+}
+
+function Test-McpCommandExists([string]$CommandValue) {
+    if ($CommandValue -match '[/\\]') { return (Test-Path $CommandValue -PathType Leaf) }
+    return [bool](Get-Command $CommandValue -ErrorAction SilentlyContinue)
+}
+
+function Get-CodexMcpCommandIssue([string]$Tool) {
+    $cmd = Get-CodexMcpCommand $Tool
+    if (-not $cmd) { return $null }
+    if (-not (Test-McpCommandExists $cmd)) { return "Codex $Tool MCP command missing: $cmd" }
+    return $null
 }
 
 function Get-RtkSummary {
@@ -162,15 +188,18 @@ function Invoke-Verify {
     $allOk = $true
     if (Test-Tool 'rtk')   { Write-Output "  [OK] RTK ........... $(& rtk --version 2>$null)" }
     else                   { Write-Output '  [!]  RTK ........... not installed'; $allOk = $false }
-    if (Test-Tool 'tilth') { Write-Output "  [OK] tilth ......... $(& tilth --version 2>$null)" }
-    else                   { Write-Output '  [!]  tilth ......... not installed'; $allOk = $false }
+    if (Test-Tool 'tilth') {
+        Write-Output "  [OK] tilth ......... $(& tilth --version 2>$null)"
+        $tilthIssue = Get-CodexMcpCommandIssue 'tilth'
+        if ($tilthIssue) { Write-Output "  [!]  $tilthIssue"; $allOk = $false }
+    } else { Write-Output '  [!]  tilth ......... not installed'; $allOk = $false }
     if ((Test-Tool 'uvx') -or (Test-Tool 'uv')) {
         $v = if (Test-Tool 'uvx') { & uvx --version 2>$null } else { & uv --version 2>$null }
         Write-Output "  [OK] Serena (uv) ... $v"
     } else { Write-Output '  [!]  Serena ........ not installed'; $allOk = $false }
     Write-Output ''
     if ($allOk) { Write-Output '  [OK] All tools installed. Token diet active.' }
-    else        { Write-Output '  [W]  Some tools missing. Re-run: Install.ps1' }
+    else        { Write-Output '  [W]  Some tools or MCP registrations need attention.'; Write-Output ''; exit 1 }
     Write-Output ''
 }
 
@@ -182,13 +211,15 @@ function Invoke-Health {
     } else { Write-Miss 'RTK not found'; $issues++ }
     if (Test-Tool 'tilth') {
         Write-Ok "tilth $(& tilth --version 2>$null)  (hosts: $(Get-HostsRegistered 'tilth'))"
+        $tilthIssue = Get-CodexMcpCommandIssue 'tilth'
+        if ($tilthIssue) { Write-Warn $tilthIssue; $issues++ }
     } else { Write-Miss 'tilth not found'; $issues++ }
     if ((Test-Tool 'uvx') -or (Test-Tool 'uv')) {
         Write-Ok "Serena  (hosts: $(Get-HostsRegistered 'serena'))"
     } else { Write-Miss 'Serena not found  (uvx or uv required)'; $issues++ }
     Write-Output ''
     if ($issues -eq 0) { Write-Output '  All tools healthy'; Write-Output ''; return }
-    Write-Output "  $issues tool(s) missing — run: Install.ps1"
+    Write-Output "  $issues issue(s) found — reinstall tools or repair MCP registrations"
     Write-Output ''
     exit 1
 }

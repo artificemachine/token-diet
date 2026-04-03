@@ -89,7 +89,8 @@ token-diet leaks            # detect files read multiple times (context waste)
 token-diet test-first <file> # suggest test file counterpart before reading implementation
 token-diet dashboard        # live browser dashboard at http://127.0.0.1:7384
 token-diet dashboard --port 8080
-token-diet version          # show installed versions
+token-diet version          # show installed versions of RTK, tilth, Serena
+token-diet --version        # show token-diet self version (e.g. 1.2.12)
 token-diet verify           # re-run installation verification
 token-diet uninstall        # remove all token-diet components
 token-diet uninstall --dry-run   # preview what would be removed

@@ -613,6 +613,12 @@ MOCK
 # UX fix: verify inline fallback exits 1 when issues found
 # ---------------------------------------------------------------------------
 
+@test "--version: prints token-diet version and exits 0" {
+  run "$SCRIPTS_DIR/token-diet" --version
+  [ "$status" -eq 0 ]
+  [[ "$output" == token-diet\ * ]]
+}
+
 @test "verify (inline fallback): exits 1 when tools are missing" {
   # Copy token-diet to a dir without install.sh to force inline fallback
   local tmp_bin

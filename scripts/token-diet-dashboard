@@ -191,8 +191,16 @@ def missing_hosts_stats():
         "serena": _missing_hosts("serena"),
     }
 
+def token_diet_version():
+    """Self-version of the token-diet CLI."""
+    raw = run(["token-diet", "--version"])
+    if not raw:
+        return None
+    return raw.split()[-1]
+
 def collect():
     return {
+        "version":       token_diet_version(),
         "rtk":           rtk_stats(),
         "tilth":         tilth_stats(),
         "serena":        serena_stats(),
@@ -276,6 +284,8 @@ function missingHint(arr){if(!arr||!arr.length)return '';
   return '<div class=missing-hosts>\u26a0 Not registered in: '+arr.join(', ')+'</div>'}
 
 function render(d){
+  const verLabel=d.version?'v'+d.version:'';
+  document.querySelector('h1').textContent='token-diet'+(verLabel?' '+verLabel:'');
   document.getElementById('ts').textContent='Last updated: '+new Date().toLocaleTimeString();
   const r=d.rtk, t=d.tilth, s=d.serena, p=d.projection;
 

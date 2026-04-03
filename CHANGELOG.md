@@ -260,3 +260,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ### Changed
 * `scripts/token-diet.ps1` — Codex registration in `Get-HostsRegistered` now uses TOML section parsing instead of plain-text grep (matches bash parity)
 * `scripts/token-diet.ps1` — `health` exit message updated from "tool(s) missing" to "issue(s) found — reinstall tools or repair MCP registrations"
+
+## [1.2.12] — 2026-04-03
+
+### Added
+* `scripts/token-diet` — `--version` flag prints self-version (`token-diet 1.2.12`)
+* `scripts/token-diet-dashboard` — dashboard header now displays the token-diet version on load
+* `scripts/token-diet-dashboard` — `token_diet_version()` data function collects self-version via `token-diet --version`
+* `tests/test_dashboard.py` — 3 pytest tests: version string parsing, None when not installed, `collect()` includes `version` key
+* `tests/token-diet.bats` — `--version` bats test (72 bats total)
+* `README.md` — `token-diet --version` documented in commands table

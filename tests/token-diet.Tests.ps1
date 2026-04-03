@@ -76,6 +76,12 @@ Describe 'token-diet.ps1 — version' {
         & pwsh -NoProfile -File $script:PS1 'version' 2>&1 | Out-Null
         $LASTEXITCODE | Should -Be 0
     }
+
+    It '--version prints token-diet self-version and exits 0' {
+        $out = (& pwsh -NoProfile -File $script:PS1 '--version' 2>&1) -join ' '
+        $LASTEXITCODE | Should -Be 0
+        $out | Should -Match '^token-diet \d+\.\d+\.\d+'
+    }
 }
 
 Describe 'token-diet.ps1 — health: Codex stale detection' {

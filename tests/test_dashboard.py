@@ -197,3 +197,28 @@ def test_budget_stats_returns_none_when_no_budget_file(dashboard_mod, tmp_home):
          patch.object(dashboard_mod.pathlib.Path, "cwd", return_value=tmp_home):
         result = dashboard_mod.budget_stats()
     assert result is None
+
+
+# ---------------------------------------------------------------------------
+# token-diet self version
+# ---------------------------------------------------------------------------
+
+def test_token_diet_version_returns_version_string(dashboard_mod):
+    """token_diet_version() parses the version from 'token-diet --version' output."""
+    with patch.object(dashboard_mod, "run", return_value="token-diet 1.2.11"):
+        result = dashboard_mod.token_diet_version()
+    assert result == "1.2.11"
+
+
+def test_token_diet_version_returns_none_when_not_installed(dashboard_mod):
+    """token_diet_version() returns None when token-diet is not on PATH."""
+    with patch.object(dashboard_mod, "run", return_value=None):
+        result = dashboard_mod.token_diet_version()
+    assert result is None
+
+
+def test_collect_includes_version_key(dashboard_mod):
+    """collect() includes a 'version' key for token-diet self-version."""
+    with patch.object(dashboard_mod, "run", return_value=None):
+        result = dashboard_mod.collect()
+    assert "version" in result

@@ -9,7 +9,10 @@
     .\token-diet.ps1 health
     .\token-diet.ps1 route 'search for the function'
 #>
-param([string]$Command = 'gain')
+param(
+    [string]$Command = 'gain',
+    [switch]$Version
+)
 # Collect all remaining positional args (including dash-prefixed flags like --stats)
 # $args is PowerShell's automatic variable for unbound arguments
 [string[]]$SubArgs = $args
@@ -17,6 +20,8 @@ param([string]$Command = 'gain')
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
+$script:TD_VERSION = '1.2.12'
+if ($Version) { Write-Output "token-diet $script:TD_VERSION"; exit 0 }
 $ScriptDir = $PSScriptRoot
 
 # --- Helpers ------------------------------------------------------------------

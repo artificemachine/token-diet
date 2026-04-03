@@ -12,6 +12,7 @@
 
 set -euo pipefail
 
+readonly TD_VERSION="1.2.12"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # --- Colors -------------------------------------------------------------------
@@ -944,5 +945,6 @@ case "${1:-gain}" in
   diff-reads)        shift; cmd_diff_reads "$@" ;;
   uninstall)         shift; cmd_uninstall "$@" ;;
   --help|-h|help)    cmd_help ;;
+  --version)         echo "token-diet $TD_VERSION" ;;
   *)  echo "Unknown command: $1"; cmd_help; exit 1 ;;
 esac

@@ -183,7 +183,8 @@ PY
   else
     local dir; dir="$(dirname "$cfg")"
     mkdir -p "$dir"
-    printf '{"mcpServers":{"%s":{"command":"%s"}}}\n' "$tool" "$command_value" > "$cfg"
+    jq -n --arg t "$tool" --arg c "$command_value" \
+      '{"mcpServers": {($t): {"command": $c}}}' > "$cfg"
   fi
 }
 

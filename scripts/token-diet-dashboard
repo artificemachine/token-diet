@@ -4,7 +4,15 @@ stdlib only. Starts a local HTTP server, opens browser, Ctrl+C to stop.
 
 Usage: token-diet dashboard [--port N]
 """
-import http.server, json, os, pathlib, re, subprocess, sys, threading, webbrowser
+import datetime
+import http.server
+import json
+import os
+import pathlib
+import subprocess
+import sys
+import threading
+import webbrowser
 from urllib.parse import urlparse
 
 PORT = int(sys.argv[2]) if len(sys.argv) > 2 and sys.argv[1:2] == ["--port"] else 7384
@@ -20,12 +28,12 @@ def run(cmd, **kw):
     except Exception:
         return None
 
-def rtk_stats():
-    raw = run(["rtk", "gain", "--daily", "--format", "json"])
-    if not raw:
+def rtk_stats(data=None):
+    if data is None:
+        data = _get_rtk_daily()
+    if not data:
         return None
-    d = json.loads(raw)
-    return {"summary": d["summary"], "daily": d.get("daily", [])[-14:]}
+    return {"summary": data["summary"], "daily": data.get("daily", [])[-14:]}
 
 def tilth_stats():
     ver = run(["tilth", "--version"])
@@ -75,111 +83,181 @@ def _missing_hosts(tool):
     registered = set(_registered_hosts(tool))
     return [h for h in _ALL_HOSTS if h not in registered]
 
-def budget_stats():
-    """Read .token-budget from cwd (or home), cross-reference with RTK usage."""
-    budget_file = None
-    home = pathlib.Path.home()
-    for candidate in [pathlib.Path.cwd(), home]:
-        p = candidate / ".token-budget"
+def _find_project_budget(home):
+    """Walk up from cwd toward home looking for .token-budget. Returns Path or None."""
+    d = pathlib.Path.cwd()
+    while True:
+        p = d / ".token-budget"
         if p.exists():
-            budget_file = p
+            return p
+        if d == home:
             break
-    if budget_file is None:
-        return None
+        parent = d.parent
+        if parent == d:
+            break
+        d = parent
+    return None
+
+def _read_budget_file(path):
     try:
-        cfg = json.loads(budget_file.read_text())
+        return json.loads(path.read_text())
     except Exception:
         return None
 
-    warn = cfg.get("warn", 50000)
-    hard = cfg.get("hard", 100000)
-
-    used = 0
+def _get_rtk_total():
+    """Fetch total input tokens from RTK. Returns 0 if RTK unavailable."""
     raw = run(["rtk", "gain", "--format", "json"])
-    if raw:
-        try:
-            used = json.loads(raw)["summary"]["total_input"]
-        except Exception:
-            pass
-
-    remaining = hard - used
-    pct = round(used * 100 / hard, 1) if hard > 0 else 0
-    warn_pct = round(warn * 100 / hard, 1) if hard > 0 else 0
-    status = "ok" if used < warn else ("warn" if used < hard else "hard")
-
-    return {
-        "warn": warn, "hard": hard, "used": used,
-        "remaining": remaining, "pct": pct, "warn_pct": warn_pct,
-        "status": status, "file": str(budget_file),
-    }
-
-def breakdown_stats(limit=10):
-    raw = run(["rtk", "gain", "-H", "--format", "json"])
     if not raw:
-        return None
+        return 0
     try:
-        d = json.loads(raw)
+        return json.loads(raw)["summary"]["total_input"]
     except Exception:
-        return None
-    cmds = d.get("commands", [])
-    if not cmds:
-        return None
-    top = sorted(cmds, key=lambda c: c.get("total_saved", 0), reverse=True)[:limit]
-    return {"top_commands": top}
+        return 0
 
-def loops_stats():
-    """Commands run 3+ times — agent loop pattern detection."""
-    raw = run(["rtk", "gain", "-H", "--format", "json"])
-    if not raw:
-        return None
-    try:
-        d = json.loads(raw)
-        cmds = d.get("commands", [])
-        loops = [c for c in cmds if c.get("count", 0) >= 3]
-        return {"loops": sorted(loops, key=lambda x: x["count"], reverse=True)}
-    except Exception:
-        return None
-
-def leaks_stats():
-    """Files read multiple times — context leak detection."""
-    raw = run(["rtk", "gain", "-H", "--format", "json"])
-    if not raw:
-        return None
-    try:
-        d = json.loads(raw)
-        cmds = d.get("commands", [])
-        FILE_READ = re.compile(r'\b(?:cat|head|tail|tilth\s+read|tilth_read)\s+(\S+\.\w+)')
-        leaks = []
-        for c in cmds:
-            m = FILE_READ.search(c.get("cmd", ""))
-            if m and c.get("count", 0) >= 2:
-                leaks.append({
-                    "file": m.group(1),
-                    "count": c["count"],
-                    "total_input": c.get("total_input", 0),
-                })
-        return {"leaks": sorted(leaks, key=lambda x: x["count"], reverse=True)}
-    except Exception:
-        return None
-
-def projection_stats():
-    """Weekly token savings projection based on last 7 days of RTK daily data."""
+def _get_rtk_daily():
+    """Fetch full RTK daily JSON. Returns parsed dict or None if RTK unavailable."""
     raw = run(["rtk", "gain", "--daily", "--format", "json"])
     if not raw:
         return None
     try:
-        d = json.loads(raw)
-        daily = d.get("daily", [])
+        return json.loads(raw)
+    except Exception:
+        return None
+
+def _budget_entry(cfg, total_input, file_path):
+    warn         = cfg.get("warn", 1500000)
+    hard         = cfg.get("hard", 0)
+    baseline     = cfg.get("baseline_tokens", 0)
+    installed_at = cfg.get("installed_at", None)
+    used         = max(0, total_input - baseline)
+    unlimited    = hard == 0
+    remaining    = None if unlimited else max(0, hard - used)
+    pct          = round(used * 100 / hard, 1) if hard > 0 else 0
+    warn_pct     = round(warn * 100 / hard, 1) if hard > 0 else 0
+    status       = "ok" if used < warn else ("warn" if unlimited or used < hard else "hard")
+    return {
+        "warn": warn, "hard": hard, "used": used,
+        "remaining": remaining, "pct": pct, "warn_pct": warn_pct,
+        "status": status, "file": str(file_path),
+        "installed_at": installed_at,
+    }
+
+def budget_stats(total_input=None):
+    """Return active budget (project or global) plus global reference when an override is active.
+    Auto-creates ~/.token-budget with defaults if missing."""
+    home = pathlib.Path.home()
+    global_path = home / ".token-budget"
+
+    if total_input is None:
+        total_input = _get_rtk_total()
+
+    # Auto-create global if missing
+    if not global_path.exists():
+        global_path.write_text(
+            json.dumps({
+                "warn": 1500000, "hard": 0,
+                "installed_at": datetime.date.today().isoformat(),
+                "baseline_tokens": total_input,
+            }, indent=2) + "\n"
+        )
+
+    project_path = _find_project_budget(home)
+    # project_path == global_path means we found it AT $HOME, not a real override
+    is_override = project_path is not None and project_path != global_path
+
+    active_path = project_path if is_override else global_path
+    active_cfg  = _read_budget_file(active_path)
+    if active_cfg is None:
+        return None
+
+    result = _budget_entry(active_cfg, total_input, active_path)
+    result["is_override"] = is_override
+
+    if is_override:
+        global_cfg = _read_budget_file(global_path)
+        if global_cfg:
+            g = _budget_entry(global_cfg, total_input, global_path)
+            result["global"] = {
+                "file": g["file"], "warn": g["warn"], "hard": g["hard"],
+            }
+
+    return result
+
+def all_budget_files(total_input=None):
+    """Scan home directory (max 3 levels) for all .token-budget files.
+    Returns list of {file, warn, hard, status, used} sorted by path depth."""
+    home = pathlib.Path.home()
+    _SKIP = {'node_modules', '__pycache__', 'venv', '.venv', 'dist', 'build',
+             'Library', '.Trash', '.cache', '.npm', '.cargo', '.rustup'}
+
+    found = []
+    for dirpath, dirnames, filenames in os.walk(str(home)):
+        depth = dirpath[len(str(home)):].count(os.sep)
+        if depth >= 3:
+            dirnames.clear()
+            continue
+        dirnames[:] = [d for d in dirnames if not d.startswith('.') and d not in _SKIP]
+        if '.token-budget' in filenames:
+            found.append(pathlib.Path(dirpath) / '.token-budget')
+
+    if not found:
+        return []
+
+    if total_input is None:
+        total_input = _get_rtk_total()
+
+    rows = []
+    for p in sorted(found, key=lambda x: len(x.parts)):
+        cfg = _read_budget_file(p)
+        if not cfg:
+            continue
+        entry = _budget_entry(cfg, total_input, p)
+        entry["file"]      = str(p).replace(str(home), "~")
+        entry["unlimited"] = cfg.get("hard", 0) == 0
+        rows.append(entry)
+    return rows
+
+def breakdown_stats(data=None, limit=10):
+    """Top days by tokens saved — uses RTK daily data (per-command JSON not available)."""
+    if data is None:
+        data = _get_rtk_daily()
+    if not data:
+        return None
+    try:
+        daily = data.get("daily", [])
+        if not daily:
+            return None
+        top = sorted(daily, key=lambda x: x.get("saved_tokens", 0), reverse=True)[:limit]
+        return {"top_days": top}
+    except Exception:
+        return None
+
+def loops_stats():
+    """Per-command JSON not available in this RTK version."""
+    return None
+
+def leaks_stats():
+    """Per-command JSON not available in this RTK version."""
+    return None
+
+def projection_stats(data=None):
+    """Weekly token savings projection based on last 7 days of RTK daily data."""
+    if data is None:
+        data = _get_rtk_daily()
+    if not data:
+        return None
+    try:
+        daily = data.get("daily", [])
         if not daily:
             return None
         recent = daily[-7:]
         avg_saved = sum(day.get("saved_tokens", 0) for day in recent) / len(recent)
         avg_pct   = sum(day.get("savings_pct",  0) for day in recent) / len(recent)
         return {
-            "avg_daily_saved":  round(avg_saved),
+            "avg_daily_saved":   round(avg_saved),
             "weekly_projection": round(avg_saved * 7),
-            "avg_pct":          round(avg_pct, 1),
-            "days_sampled":     len(recent),
+            "avg_pct":           round(avg_pct, 1),
+            "days_sampled":      len(recent),
         }
     except Exception:
         return None
@@ -199,16 +277,19 @@ def token_diet_version():
     return raw.split()[-1]
 
 def collect():
+    daily_data  = _get_rtk_daily()
+    total_input = daily_data["summary"]["total_input"] if daily_data else 0
     return {
         "version":       token_diet_version(),
-        "rtk":           rtk_stats(),
+        "rtk":           rtk_stats(daily_data),
         "tilth":         tilth_stats(),
         "serena":        serena_stats(),
-        "breakdown":     breakdown_stats(),
-        "budget":        budget_stats(),
+        "breakdown":     breakdown_stats(daily_data),
+        "budget":        budget_stats(total_input),
+        "budgets":       all_budget_files(total_input),
         "loops":         loops_stats(),
         "leaks":         leaks_stats(),
-        "projection":    projection_stats(),
+        "projection":    projection_stats(daily_data),
         "missing_hosts": missing_hosts_stats(),
     }
 
@@ -265,6 +346,16 @@ h1{font-size:20px;font-weight:600;color:#58a6ff;margin-bottom:4px}
 .cmd-table td{padding:5px 6px;border-bottom:1px solid #21262d;color:#e6edf3}
 .cmd-table tr:last-child td{border:none}
 .cmd-name{font-family:monospace;font-size:11px;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* Card header tooltips */
+.card h2{position:relative;cursor:default}
+.card h2[data-tip]::after{
+  content:attr(data-tip);
+  display:none;position:absolute;bottom:calc(100% + 8px);left:0;
+  background:#1c2128;border:1px solid #388bfd;border-radius:6px;
+  color:#e6edf3;font-size:12px;font-weight:400;text-transform:none;letter-spacing:0;
+  padding:8px 12px;width:260px;line-height:1.5;z-index:100;white-space:normal;
+  box-shadow:0 4px 16px rgba(0,0,0,.5)}
+.card h2[data-tip]:hover::after{display:block}
 </style></head><body>
 <h1>token-diet</h1>
 <p class=sub id=ts>Loading\u2026</p>
@@ -285,7 +376,7 @@ function missingHint(arr){if(!arr||!arr.length)return '';
 
 function render(d){
   const verLabel=d.version?'v'+d.version:'';
-  document.querySelector('h1').textContent='token-diet'+(verLabel?' '+verLabel:'');
+  document.querySelector('h1').innerHTML='token-diet'+(verLabel?` <span style="font-size:13px;font-weight:500;color:#8b949e;background:#21262d;border:1px solid #30363d;border-radius:10px;padding:2px 8px;vertical-align:middle">${verLabel}</span>`:'');
   document.getElementById('ts').textContent='Last updated: '+new Date().toLocaleTimeString();
   const r=d.rtk, t=d.tilth, s=d.serena, p=d.projection;
 
@@ -325,7 +416,7 @@ function render(d){
   let cards='';
 
   // RTK card
-  cards+='<div class=card><h2>RTK \u2014 output compression</h2>';
+  cards+='<div class=card><h2 data-tip="Wraps every CLI command and filters/truncates its output before it reaches the LLM. Saves 60\u201390% of tokens on git, test runners, build tools, and any verbose command output.">RTK \u2014 output compression</h2>';
   if(r){
     const sm=r.summary;
     cards+=`<div class=tool>${badge(true)} RTK</div>`;
@@ -347,7 +438,7 @@ function render(d){
   cards+='</div>';
 
   // tilth card
-  cards+='<div class=card><h2>tilth \u2014 AST code reading</h2>';
+  cards+='<div class=card><h2 data-tip="AST = Abstract Syntax Tree. Instead of raw text, the parser understands code structure: functions, classes, imports and their boundaries. tilth uses tree-sitter to extract symbol outlines (names + signatures) without sending full file bodies. Reduces prompt size by 38\u201344%. Fast \u2014 no language server needed.">tilth \u2014 AST code reading</h2>';
   if(t){
     cards+=`<div class=tool>${badge(true)} tilth ${t.version}</div>`;
     cards+=`<div class=stat><span class=sl>Version</span><span class=sv>${t.version}</span></div>`;
@@ -359,7 +450,7 @@ function render(d){
   cards+='</div>';
 
   // Serena card
-  cards+='<div class=card><h2>Serena \u2014 LSP navigation</h2>';
+  cards+='<div class=card><h2 data-tip="LSP = Language Server Protocol. A language server understands your codebase deeply: go-to-definition, find-references, call graphs, cross-file symbols. Serena exposes this to the LLM so it navigates by meaning instead of reading whole files \u2014 fewer turns, smaller prompts.">Serena \u2014 LSP navigation</h2>';
   if(s){
     cards+=`<div class=tool>${badge(true)} Serena (${s.mode})</div>`;
     cards+=`<div class=stat><span class=sl>Mode</span><span class=sv>${s.mode}</span></div>`;
@@ -371,36 +462,43 @@ function render(d){
   } else { cards+=badge(false)+'<p class=none style="margin-top:8px">Run: bash install.sh --serena-only</p>'; }
   cards+='</div>';
 
-  // Budget card
-  cards+='<div class=card><h2>Token Budget</h2>';
-  if(d.budget){
-    const b=d.budget;
-    const sc=b.status==='ok'?'ok':b.status==='warn'?'warn':'off';
-    const bc=b.status==='ok'?'#39d353':b.status==='warn'?'#e3b341':'#f85149';
-    cards+=`<div class=tool><span class="badge ${sc}">${b.status.toUpperCase()}</span></div>`;
-    cards+=`<div class=stat><span class=sl>Used</span><span class=sv>${fmt(b.used)}</span></div>`;
-    cards+=`<div class=stat><span class=sl>Warn at</span><span class=sv>${fmt(b.warn)}</span></div>`;
-    cards+=`<div class=stat><span class=sl>Hard stop</span><span class=sv>${fmt(b.hard)}</span></div>`;
-    cards+=`<div class=stat><span class=sl>Remaining</span><span class=sv>${fmt(Math.max(0,b.remaining))}</span></div>`;
-    const fillW=Math.min(100,b.pct);
-    cards+=`<div class=bar-wrap><div class=bar-label>${b.pct}% of budget used</div>`;
-    cards+=`<div class=budget-track><div class=budget-fill style="width:${fillW}%;background:${bc}"></div>`;
-    cards+=`<div class=budget-warn-line style="left:${b.warn_pct}%"></div></div></div>`;
+  // One full card per .token-budget file
+  if(d.budgets&&d.budgets.length){
+    d.budgets.forEach(b=>{
+      const sc=b.status==='ok'?'ok':b.status==='warn'?'warn':'off';
+      const bc=b.status==='ok'?'#39d353':b.status==='warn'?'#e3b341':'#f85149';
+      const hard=b.unlimited?'unlimited':fmt(b.hard);
+      const remaining=b.unlimited?'unlimited':fmt(Math.max(0,b.hard-b.used));
+      cards+=`<div class=card><h2 data-tip="Per-project token spending limit. Warn threshold triggers a yellow alert. Hard stop (0 = unlimited) blocks further usage. Stored in .token-budget — cascades from project folder up to ~/.token-budget global default.">Token Budget</h2>`;
+      cards+=`<div class=tool><span class="badge ${sc}">${b.status.toUpperCase()}</span></div>`;
+      cards+=`<div class=stat><span class=sl>Used</span><span class=sv>${fmt(b.used)}</span></div>`;
+      cards+=`<div class=stat><span class=sl>Warn at</span><span class=sv>${fmt(b.warn)}</span></div>`;
+      cards+=`<div class=stat><span class=sl>Hard stop</span><span class=sv>${hard}</span></div>`;
+      cards+=`<div class=stat><span class=sl>Remaining</span><span class=sv>${remaining}</span></div>`;
+      if(!b.unlimited){
+        const fillW=Math.min(100,b.pct);
+        cards+=`<div class=bar-wrap><div class=bar-label>${b.pct}% of budget used</div>`;
+        cards+=`<div class=budget-track><div class=budget-fill style="width:${fillW}%;background:${bc}"></div></div></div>`;
+      }
+      const since=b.installed_at?` \u2014 since ${b.installed_at}`:'';
+      cards+=`<div style="margin-top:10px;font-size:11px;color:#8b949e">${b.file}${since}</div>`;
+      cards+='</div>';
+    });
   } else {
+    cards+='<div class=card><h2>Token Budget</h2>';
     cards+='<p class=none style="margin-top:8px">No budget set</p>';
     cards+='<p style="margin-top:8px;font-size:12px;color:#8b949e">Run: <code>token-diet budget init</code></p>';
+    cards+='</div>';
   }
-  cards+='</div>';
 
-  // Breakdown card (top 5 commands)
-  cards+='<div class=card><h2>Top commands by tokens saved</h2>';
-  if(d.breakdown&&d.breakdown.top_commands&&d.breakdown.top_commands.length){
-    cards+='<table class=cmd-table><tr><th>Command</th><th>Saved</th><th>Eff</th><th>Runs</th></tr>';
-    d.breakdown.top_commands.slice(0,5).forEach(c=>{
-      const pct=c.avg_pct||0;
+  // Breakdown card (top days by tokens saved)
+  cards+='<div class=card><h2 data-tip="Top days ranked by RTK tokens saved. Each bar in the RTK card represents one day. Green = 80%+ efficiency, yellow = 60\u201380%, red = below 60%.">Top days by tokens saved</h2>';
+  if(d.breakdown&&d.breakdown.top_days&&d.breakdown.top_days.length){
+    cards+='<table class=cmd-table><tr><th>Date</th><th>Saved</th><th>Eff</th><th>Cmds</th></tr>';
+    d.breakdown.top_days.slice(0,5).forEach(day=>{
+      const pct=day.savings_pct||0;
       const col=pct>=80?'#39d353':pct>=60?'#e3b341':'#f85149';
-      const label=c.cmd.length>26?c.cmd.slice(0,23)+'\u2026':c.cmd;
-      cards+=`<tr><td class=cmd-name>${label}</td><td>${fmt(c.total_saved)}</td><td style="color:${col}">${pct.toFixed(0)}%</td><td>${c.count}\xd7</td></tr>`;
+      cards+=`<tr><td class=cmd-name>${day.date}</td><td>${fmt(day.saved_tokens)}</td><td style="color:${col}">${pct.toFixed(0)}%</td><td>${day.commands}</td></tr>`;
     });
     cards+='</table>';
   } else {
@@ -452,10 +550,18 @@ class Handler(http.server.BaseHTTPRequestHandler):
 # ---------------------------------------------------------------------------
 
 def main():
-    server = http.server.HTTPServer(("127.0.0.1", PORT), Handler)
+    try:
+        server = http.server.HTTPServer(("127.0.0.1", PORT), Handler)
+    except OSError as exc:
+        if exc.errno == 48 or exc.errno == 98:  # EADDRINUSE (macOS=48, Linux=98)
+            print(f"  Port {PORT} already in use — dashboard may already be running.")
+            print(f"  Open http://127.0.0.1:{PORT} or stop the existing instance first.")
+            print("  Use --port N to choose a different port.")
+            sys.exit(1)
+        raise
     url = f"http://127.0.0.1:{PORT}"
     print(f"  token-diet dashboard \u2192 {url}")
-    print(f"  Ctrl+C to stop\n")
+    print("  Ctrl+C to stop\n")
     threading.Timer(0.4, lambda: webbrowser.open(url)).start()
     try:
         server.serve_forever()

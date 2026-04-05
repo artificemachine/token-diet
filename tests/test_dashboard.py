@@ -1,6 +1,6 @@
 """test_dashboard.py — pytest tests for token-diet-dashboard data layer."""
 import json
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 
 # ---------------------------------------------------------------------------
@@ -126,31 +126,26 @@ def test_collect_includes_breakdown_key(dashboard_mod):
     assert "breakdown" in result
 
 
-def test_breakdown_stats_returns_top_commands(dashboard_mod, tmp_home):
-    """breakdown_stats() returns top_commands list from RTK history."""
-    fake_history = json.dumps({
+def test_breakdown_stats_returns_top_days(dashboard_mod, tmp_home):
+    """breakdown_stats() returns top_days list from RTK daily history."""
+    fake_daily = json.dumps({
         "summary": {"total_commands": 10, "total_input": 65000,
                     "total_saved": 50000, "avg_savings_pct": 76.9, "total_time_ms": 300},
-        "commands": [
-            {"cmd": "cargo test", "count": 5, "total_input": 50000,
-             "total_saved": 40000, "avg_pct": 80.0},
-            {"cmd": "git log", "count": 3, "total_input": 12000,
-             "total_saved": 9000, "avg_pct": 75.0},
+        "daily": [
+            {"date": "2026-04-01", "commands": 50, "saved_tokens": 40000, "savings_pct": 80.0,
+             "input_tokens": 50000, "output_tokens": 5000, "total_time_ms": 200},
+            {"date": "2026-04-02", "commands": 30, "saved_tokens": 20000, "savings_pct": 66.7,
+             "input_tokens": 30000, "output_tokens": 3000, "total_time_ms": 100},
         ]
     })
 
-    def fake_run(cmd, **kw):
-        if "-H" in cmd:
-            return fake_history
-        return None
-
-    with patch.object(dashboard_mod, "run", side_effect=fake_run):
+    with patch.object(dashboard_mod, "run", return_value=fake_daily):
         result = dashboard_mod.breakdown_stats()
 
     assert result is not None
-    assert "top_commands" in result
-    assert len(result["top_commands"]) == 2
-    assert result["top_commands"][0]["cmd"] == "cargo test"
+    assert "top_days" in result
+    assert len(result["top_days"]) == 2
+    assert result["top_days"][0]["date"] == "2026-04-01"  # highest saved_tokens first
 
 
 def test_breakdown_stats_returns_none_when_rtk_missing(dashboard_mod, tmp_home):
@@ -191,12 +186,43 @@ def test_budget_stats_returns_thresholds_when_file_exists(dashboard_mod, tmp_hom
     assert result["remaining"] == 70000
 
 
-def test_budget_stats_returns_none_when_no_budget_file(dashboard_mod, tmp_home):
-    """budget_stats() returns None when no .token-budget file exists."""
+def test_budget_stats_auto_creates_global_when_no_budget_file(dashboard_mod, tmp_home):
+    """budget_stats() auto-creates $HOME/.token-budget with defaults when no file exists."""
     with patch.object(dashboard_mod, "run", return_value=None), \
          patch.object(dashboard_mod.pathlib.Path, "cwd", return_value=tmp_home):
         result = dashboard_mod.budget_stats()
-    assert result is None
+    global_budget = tmp_home / ".token-budget"
+    assert global_budget.exists(), "global .token-budget should be auto-created"
+    cfg = json.loads(global_budget.read_text())
+    assert cfg["warn"] == 1500000
+    assert cfg["hard"] == 0
+    assert result is not None
+    assert result["warn"] == 1500000
+    assert result["used"] == 0
+
+
+# ---------------------------------------------------------------------------
+# loops_stats / leaks_stats — stub functions
+# ---------------------------------------------------------------------------
+
+def test_loops_stats_returns_none(dashboard_mod):
+    """loops_stats() is a stub returning None (RTK per-command data not yet available)."""
+    assert dashboard_mod.loops_stats() is None
+
+
+def test_leaks_stats_returns_none(dashboard_mod):
+    """leaks_stats() is a stub returning None (RTK per-file data not yet available)."""
+    assert dashboard_mod.leaks_stats() is None
+
+
+def test_collect_includes_loops_and_leaks_keys(dashboard_mod):
+    """collect() includes 'loops' and 'leaks' keys even when stubs return None."""
+    with patch.object(dashboard_mod, "run", return_value=None):
+        result = dashboard_mod.collect()
+    assert "loops" in result
+    assert "leaks" in result
+    assert result["loops"] is None
+    assert result["leaks"] is None
 
 
 # ---------------------------------------------------------------------------

@@ -164,6 +164,16 @@ load test_helper
 }
 
 # ---------------------------------------------------------------------------
+# Cycle 7.0 — explain: no argument
+# ---------------------------------------------------------------------------
+
+@test "explain: exits 1 with usage when no arg given" {
+  run "$SCRIPTS_DIR/token-diet" explain
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Usage"* ]] || [[ "$output" == *"usage"* ]]
+}
+
+# ---------------------------------------------------------------------------
 # Cycle 7.1 — explain: no data for unknown command
 # ---------------------------------------------------------------------------
 
@@ -267,11 +277,11 @@ PY
   [[ "$output" == *"200"* ]] || [[ "$output" == *"500"* ]]
 }
 
-@test "budget status: exits 1 with hint when no .token-budget found" {
+@test "budget status: auto-creates global .token-budget and exits 0 when none found" {
   cd "$TMP_HOME"
   run "$SCRIPTS_DIR/token-diet" budget status
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"budget init"* ]]
+  [ "$status" -eq 0 ] || [ "$status" -eq 2 ]  # 0=OK, 2=WARN (usage may exceed default warn)
+  [ -f "$TMP_HOME/.token-budget" ]
 }
 
 # ---------------------------------------------------------------------------

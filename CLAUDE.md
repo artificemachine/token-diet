@@ -113,3 +113,4 @@ git submodule update --remote             # pull latest from forks
 - Security audit checklist: compliance/security-audit.md
 - SBOM must be regenerated on each release: compliance/SBOM.template.json
 - CHANGELOG.md is append-only — never edit existing entries.
+- **Version bump rule**: before every commit that ships a new feature or fix, increment `TD_VERSION` in `scripts/token-diet` AND `$script:TD_VERSION` in `scripts/token-diet.ps1`. The pre-commit hook warns when the version matches the latest git tag. Patch = bug fix, Minor = new command/feature, Major = breaking change.

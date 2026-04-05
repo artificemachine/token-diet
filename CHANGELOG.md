@@ -270,3 +270,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 * `tests/test_dashboard.py` — 3 pytest tests: version string parsing, None when not installed, `collect()` includes `version` key
 * `tests/token-diet.bats` — `--version` bats test (72 bats total)
 * `README.md` — `token-diet --version` documented in commands table
+
+## [1.2.13] — 2026-04-05
+
+### Fixed
+* `scripts/token-diet` — `explain` with no argument crashed with `unbound variable`; fixed with `${1:-}`
+* `scripts/token-diet` — `breakdown --limit` with no value crashed with `unbound variable`; fixed with `${2:-$limit}`
+* `scripts/token-diet` — `service` with no argument exited 0 instead of 1
+* `scripts/token-diet-dashboard` — port-in-use showed raw Python traceback; now prints a friendly message and exits 1
+
+### Security
+* `docker/Dockerfile.serena` — base images pinned to SHA256 digests (`python:3.12-slim`, `uv`)
+* `docker/Dockerfile.serena` — removed `2>/dev/null` suppression on `npm install` so build errors are visible
+* `tests/test_helper.bash` — replaced `printf` JSON construction with `jq` (SHELL-005)
+
+### Changed
+* `scripts/token-diet` — reduced python3 subprocess count: 5→1 in `cmd_gain`, 3→1 in `_print_budget_section`, 2→1 in `cmd_budget status`
+* `scripts/token-diet-dashboard` — reduced RTK subprocess count: 4→1 per `collect()` cycle via `_get_rtk_daily()` helper
+* `scripts/token-diet.ps1` — hoisted `$rtkSummary` in `Show-BudgetSection` to eliminate redundant `Get-RtkSummary` call
+* `scripts/token-diet` — removed dead `BLUE` color variable and unused `comment_char` local
+
+### Added
+* `tests/test_dashboard.py` — 3 pytest tests: `loops_stats()`/`leaks_stats()` return None, `collect()` includes `loops`/`leaks` keys
+* `tests/token-diet.bats` — test: `explain` exits 1 with usage when no arg given

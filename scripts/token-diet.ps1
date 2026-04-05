@@ -20,7 +20,7 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-$script:TD_VERSION = '1.2.12'
+$script:TD_VERSION = '1.2.13'
 if ($Version) { Write-Output "token-diet $script:TD_VERSION"; exit 0 }
 $ScriptDir = $PSScriptRoot
 
@@ -237,6 +237,72 @@ function Invoke-Dashboard([string[]]$Remaining) {
     & $py $dashBin @Remaining
 }
 
+function Invoke-Service([string[]]$Remaining) {
+    $sub      = if ($Remaining.Count -gt 0) { $Remaining[0] } else { 'help' }
+    $taskName = 'token-diet-dashboard'
+    $logDir   = Join-Path $env:LOCALAPPDATA 'token-diet'
+    $logFile  = Join-Path $logDir 'dashboard.log'
+    $py       = Find-Python
+    $dashBin  = Join-Path $ScriptDir 'token-diet-dashboard'
+    if (-not (Test-Path $dashBin)) {
+        $dashBin = (Get-Command 'token-diet-dashboard' -ErrorAction SilentlyContinue)?.Source
+    }
+
+    switch ($sub) {
+        'install' {
+            if (-not $py)      { Write-Error 'python3/python not found'; exit 1 }
+            if (-not $dashBin) { Write-Error 'token-diet-dashboard not found — run: Install.ps1'; exit 1 }
+            New-Item -ItemType Directory -Force -Path $logDir | Out-Null
+            # Remove stale task if present
+            schtasks /Delete /TN $taskName /F 2>$null | Out-Null
+            $action  = "cmd /c `"$py `"$dashBin`" >> `"$logFile`" 2>&1`""
+            $trigger = 'ONLOGON'
+            schtasks /Create /TN $taskName /TR $action /SC $trigger /RL HIGHEST /F | Out-Null
+            schtasks /Run /TN $taskName | Out-Null
+            Write-Ok  "Service installed (Windows Task Scheduler) — runs on every login"
+            Write-Ok  "Log: $logFile"
+            Write-Ok  "Dashboard: http://127.0.0.1:7384"
+        }
+        'uninstall' {
+            schtasks /End  /TN $taskName 2>$null | Out-Null
+            schtasks /Delete /TN $taskName /F 2>$null | Out-Null
+            Write-Ok "Service removed (Windows Task Scheduler)"
+        }
+        'start' {
+            schtasks /Run /TN $taskName
+            Write-Ok "Dashboard started"
+        }
+        'stop' {
+            schtasks /End /TN $taskName
+            Write-Ok "Dashboard stopped"
+        }
+        'status' {
+            $info = schtasks /Query /TN $taskName /FO LIST 2>$null
+            if ($LASTEXITCODE -eq 0) {
+                Write-Ok "Service registered (Task Scheduler)"
+                $info | Select-String 'Status|Last Run|Next Run' | ForEach-Object { Write-Output "  $_" }
+                $proc = Get-Process -Name python* -ErrorAction SilentlyContinue |
+                        Where-Object { $_.CommandLine -like "*token-diet-dashboard*" }
+                if ($proc) { Write-Ok "Running — PID $($proc.Id) — http://127.0.0.1:7384" }
+                else       { Write-Warn "Registered but process not found" }
+            } else {
+                Write-Miss "Not installed — run: token-diet.ps1 service install"
+            }
+        }
+        default {
+            Write-Output @'
+Usage: token-diet.ps1 service <subcommand>
+
+  install     Register dashboard as a Task Scheduler job (runs on login, restarts on failure)
+  uninstall   Remove the scheduled task
+  start       Start the dashboard now
+  stop        Stop the running dashboard
+  status      Show task and process status
+'@
+        }
+    }
+}
+
 function Invoke-Breakdown([string[]]$Remaining) {
     $limit = 10
     for ($i = 0; $i -lt $Remaining.Count; $i++) {
@@ -289,10 +355,15 @@ function Invoke-Budget([string[]]$Remaining) {
     $subcmd = if ($Remaining.Count -gt 0) { $Remaining[0] } else { 'status' }
     switch ($subcmd) {
         'init' {
-            $target = Join-Path (Get-Location) '.token-budget'
+            $isGlobal = $Remaining -contains '--global'
+            $target   = if ($isGlobal) { Join-Path $env:USERPROFILE '.token-budget' } else { Join-Path (Get-Location) '.token-budget' }
             if (Test-Path $target) { Write-Output "  .token-budget already exists at $target"; return }
-            @{ warn=50000; hard=100000 } | ConvertTo-Json | Set-Content $target -Encoding UTF8
-            Write-Output "  [OK] Created $target  (warn: 50K, hard: 100K tokens)"
+            $baseline = 0L
+            $s = Get-RtkSummary; if ($s) { $baseline = [long]$s.total_input }
+            @{ warn=1500000; hard=0; installed_at=(Get-Date -Format 'yyyy-MM-dd'); baseline_tokens=$baseline } |
+                ConvertTo-Json | Set-Content $target -Encoding UTF8
+            $label = if ($isGlobal) { "global $target" } else { $target }
+            Write-Output "  [OK] Created $label  (warn: 1.5M, hard: unlimited, baseline: $(Format-Tokens $baseline))"
             $gitignore = Join-Path (Get-Location) '.gitignore'
             if (Test-Path $gitignore) {
                 $lines = Get-Content $gitignore
@@ -306,35 +377,55 @@ function Invoke-Budget([string[]]$Remaining) {
             }
         }
         'status' {
+            $globalBudget = Join-Path $env:USERPROFILE '.token-budget'
+            $rtkSummary   = Get-RtkSummary
+            if (-not (Test-Path $globalBudget)) {
+                $bl = if ($rtkSummary) { [long]$rtkSummary.total_input } else { 0L }
+                @{ warn=1500000; hard=0; installed_at=(Get-Date -Format 'yyyy-MM-dd'); baseline_tokens=$bl } |
+                    ConvertTo-Json | Set-Content $globalBudget -Encoding UTF8
+            }
+            # Walk up from cwd to find project override
             $budgetFile = $null
-            $dir = (Get-Location).Path; $home = $env:USERPROFILE
-            while ($dir -and $dir.StartsWith($home, [StringComparison]::OrdinalIgnoreCase)) {
+            $dir = (Get-Location).Path; $homeDir = $env:USERPROFILE
+            while ($dir -and $dir.StartsWith($homeDir, [StringComparison]::OrdinalIgnoreCase)) {
                 $c = Join-Path $dir '.token-budget'
                 if (Test-Path $c) { $budgetFile = $c; break }
                 $p = Split-Path $dir -Parent
                 if ($p -eq $dir) { break }
                 $dir = $p
             }
-            if (-not $budgetFile) {
-                Write-Output '  No .token-budget found in this project.'
-                Write-Output '  Run: token-diet.ps1 budget init  to create one.'
-                exit 1
+            if (-not $budgetFile) { $budgetFile = $globalBudget }
+            $isOverride = ($budgetFile -ne $globalBudget)
+
+            function Show-BudgetSection([string]$file, [string]$label, $summary) {
+                $cfg      = Get-Content $file -Raw | ConvertFrom-Json
+                $warnT    = [long]$cfg.warn; $hardT = [long]$cfg.hard
+                $unlimited = $hardT -eq 0
+                $baseline = if ($cfg.PSObject.Properties['baseline_tokens']) { [long]$cfg.baseline_tokens } else { 0L }
+                $rawTotal = if ($summary) { [long]$summary.total_input } else { 0L }
+                $used     = [Math]::Max(0L, $rawTotal - $baseline)
+                $pct      = if (-not $unlimited -and $hardT -gt 0) { [int]($used * 100 / $hardT) } else { 0 }
+                Write-Output "`ntoken-diet budget  [$label]  ($file)`n"
+                Write-Output ('  Used:      {0}' -f (Format-Tokens $used))
+                Write-Output ('  Warn at:   {0}' -f (Format-Tokens $warnT))
+                Write-Output ('  Hard stop: {0}' -f (if ($unlimited) { 'unlimited' } else { Format-Tokens $hardT }))
+                Write-Output ('  Remaining: {0}' -f (if ($unlimited) { 'unlimited' } else { Format-Tokens ($hardT - $used) }))
+                if (-not $unlimited) { Write-Output ('  Burn-down: {0}%' -f $pct) }
+                Write-Output ''
+                if (-not $unlimited -and $used -ge $hardT) { Write-Output "  HARD STOP ($pct%)"; return 3 }
+                elseif ($used -ge $warnT)                  { Write-Output "  WARN ($pct%)";      return 2 }
+                else                                       { Write-Output '  Budget OK' }
             }
-            $cfg      = Get-Content $budgetFile -Raw | ConvertFrom-Json
-            $warnT    = [long]$cfg.warn; $hardT = [long]$cfg.hard
-            $unlimited = $hardT -eq 0
-            $s        = Get-RtkSummary; $used = if ($s) { [long]$s.total_input } else { 0L }
-            $pct      = if (-not $unlimited -and $hardT -gt 0) { [int]($used * 100 / $hardT) } else { 0 }
-            Write-Output "`ntoken-diet budget  ($budgetFile)`n"
-            Write-Output ('  Used:      {0}' -f (Format-Tokens $used))
-            Write-Output ('  Warn at:   {0}' -f (Format-Tokens $warnT))
-            Write-Output ('  Hard stop: {0}' -f (if ($unlimited) { 'unlimited' } else { Format-Tokens $hardT }))
-            Write-Output ('  Remaining: {0}' -f (if ($unlimited) { 'unlimited' } else { Format-Tokens ($hardT - $used) }))
-            if (-not $unlimited) { Write-Output ('  Burn-down: {0}%' -f $pct) }
-            Write-Output ''
-            if (-not $unlimited -and $used -ge $hardT) { Write-Output "  HARD STOP — budget exhausted ($pct%)"; exit 3 }
-            elseif ($used -ge $warnT) { Write-Output "  WARN — approaching warn threshold ($pct%)"; exit 2 }
-            else                      { Write-Output '  Budget OK' }
+
+            Show-BudgetSection $budgetFile (if ($isOverride) { 'project' } else { 'global' }) $rtkSummary
+            if ($isOverride -and (Test-Path $globalBudget)) {
+                $gc = Get-Content $globalBudget -Raw | ConvertFrom-Json
+                $gw = [long]$gc.warn; $gh = [long]$gc.hard
+                Write-Output "  global ($globalBudget)"
+                Write-Output ('    Warn at:   {0}' -f (Format-Tokens $gw))
+                Write-Output ('    Hard stop: {0}' -f (if ($gh -eq 0) { 'unlimited' } else { Format-Tokens $gh }))
+                Write-Output ''
+            }
         }
         default { Write-Output 'Usage: token-diet budget <init|status>'; exit 1 }
     }
@@ -526,6 +617,7 @@ COMMANDS
   strip [--stats] <file>  Strip comments from source file to reduce tokens
   diff-reads <file>       Suggest line ranges to read based on recent git diff
   dashboard               Open live browser dashboard  [--port N]
+  service <sub>           Always-on dashboard daemon  (install|uninstall|start|stop|status)
   version                 Show installed versions of all three tools
   verify                  Re-run installation verification
   uninstall               Remove all token-diet components  [-DryRun] [-Force]
@@ -552,6 +644,7 @@ switch ($Command) {
     'budget'                            { Invoke-Budget     $SubArgs }
     'loops'                             { Invoke-Loops }
     'dashboard'                         { Invoke-Dashboard  $SubArgs }
+    'service'                           { Invoke-Service    $SubArgs }
     { $_ -in 'version','versions' }     { Invoke-Version }
     'verify'                            { Invoke-Verify }
     'route'                             { Invoke-Route      $SubArgs }

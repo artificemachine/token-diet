@@ -4,6 +4,15 @@ All notable changes to token-diet will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [1.2.15] — 2026-04-06
+
+### Added
+- `tests/token-diet.bats`: 4 tests for `serena-gc` (clean state, list-only, `--force` kills, help text)
+
+### Fixed
+- `forks/serena` submodule pointer updated to include merged SIGTERM/SIGHUP fix — uvx now fetches the patched version
+- `forks/serena/.project-hooks/pre-commit`: use `uv sync --extra dev` so pytest installs from optional-dependencies correctly
+
 ## [1.2.14] — 2026-04-06
 
 ### Added

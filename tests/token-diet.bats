@@ -629,6 +629,110 @@ MOCK
   [[ "$output" == token-diet\ * ]]
 }
 
+# ---------------------------------------------------------------------------
+# serena-gc — orphan process garbage collector
+# ---------------------------------------------------------------------------
+
+@test "serena-gc: exits 0 with clean message when no orphaned processes found" {
+  # Mock pgrep to return nothing for all patterns
+  cat > "$TMP_BIN/pgrep" << 'MOCK'
+#!/usr/bin/env bash
+exit 1
+MOCK
+  chmod +x "$TMP_BIN/pgrep"
+
+  run "$SCRIPTS_DIR/token-diet" serena-gc
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"No orphaned"* ]]
+}
+
+@test "serena-gc: lists orphaned process without killing when no --force" {
+  # Spawn a background sleep and re-parent it to init (ppid=1) by disowning
+  # We can't truly set ppid=1 in a test, but we can mock pgrep to return a PID
+  # whose parent we control. Instead, use a process whose parent we kill.
+  local child_pid parent_pid
+
+  # Start a grandchild: bash → sleep. Kill bash → sleep is orphaned (ppid=1)
+  bash -c 'sleep 60 & echo $!' > "$TMP_HOME/child_pid" &
+  parent_pid=$!
+  sleep 0.2
+  child_pid=$(cat "$TMP_HOME/child_pid" 2>/dev/null) || child_pid=""
+
+  # Kill the parent so child becomes orphan (ppid → 1)
+  kill "$parent_pid" 2>/dev/null || true
+  sleep 0.2
+
+  # Write a mock pgrep that returns our orphaned sleep PID for "serena" pattern
+  cat > "$TMP_BIN/pgrep" << MOCK
+#!/usr/bin/env bash
+case "\$2" in
+  serena) echo "${child_pid:-99999}" ;;
+  *)      exit 1 ;;
+esac
+MOCK
+  chmod +x "$TMP_BIN/pgrep"
+
+  # Mock ps to report ppid=1 for the child
+  cat > "$TMP_BIN/ps" << MOCK
+#!/usr/bin/env bash
+if [[ "\$*" == *"ppid="* ]]; then echo "1"; exit 0; fi
+if [[ "\$*" == *"args="* ]]; then echo "sleep 60"; exit 0; fi
+exit 0
+MOCK
+  chmod +x "$TMP_BIN/ps"
+
+  run "$SCRIPTS_DIR/token-diet" serena-gc
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"orphaned"* ]]
+  [[ "$output" == *"--force"* ]]
+
+  # Cleanup
+  kill "$child_pid" 2>/dev/null || true
+}
+
+@test "serena-gc --force: kills orphaned process" {
+  # Start a real background process — serena-gc will actually kill it
+  bash -c 'sleep 300' &
+  local real_pid=$!
+
+  # Mock pgrep to report this real PID for the "serena" pattern
+  cat > "$TMP_BIN/pgrep" << MOCK
+#!/usr/bin/env bash
+case "\$2" in
+  serena) echo "$real_pid" ;;
+  *)      exit 1 ;;
+esac
+MOCK
+  chmod +x "$TMP_BIN/pgrep"
+
+  # Mock ps to report ppid=1 (orphan) and a fake cmdline
+  cat > "$TMP_BIN/ps" << 'MOCK'
+#!/usr/bin/env bash
+if [[ "$*" == *"ppid="* ]]; then echo "1"; exit 0; fi
+if [[ "$*" == *"args="* ]]; then echo "uvx serena start-mcp-server"; exit 0; fi
+exit 0
+MOCK
+  chmod +x "$TMP_BIN/ps"
+
+  # Verify the process is alive before running gc
+  kill -0 "$real_pid" 2>/dev/null
+
+  run "$SCRIPTS_DIR/token-diet" serena-gc --force
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Sent SIGTERM"* ]]
+
+  # Process should be dead after SIGTERM + 2s wait
+  sleep 2.5
+  run kill -0 "$real_pid"
+  [ "$status" -ne 0 ]
+}
+
+@test "help text includes serena-gc command" {
+  run "$SCRIPTS_DIR/token-diet" --help
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"serena-gc"* ]]
+}
+
 @test "verify (inline fallback): exits 1 when tools are missing" {
   # Copy token-diet to a dir without install.sh to force inline fallback
   local tmp_bin

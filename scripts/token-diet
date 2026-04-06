@@ -12,7 +12,7 @@
 
 set -euo pipefail
 
-readonly TD_VERSION="1.2.13"
+readonly TD_VERSION="1.2.14"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # --- Colors -------------------------------------------------------------------
@@ -1112,6 +1112,74 @@ else:
 PY
 }
 
+cmd_serena_gc() {
+  local force=false
+  [[ "${1:-}" == "--force" ]] && force=true
+
+  echo -e "\n${BOLD}token-diet serena-gc${NC}  — orphan/zombie process cleanup\n"
+
+  # Patterns known to be spawned by Serena (MCP server + language servers)
+  local -a patterns=("serena" "pylsp" "pyright-langserver" "jdtls" "rust-analyzer" "gopls" "typescript-language-server" "clangd" "solargraph")
+
+  local -a found_pids=()
+  local -a found_cmds=()
+
+  for pat in "${patterns[@]}"; do
+    local raw
+    raw=$(pgrep -f "$pat" 2>/dev/null) || continue
+    while IFS= read -r pid; do
+      [[ -z "$pid" ]] && continue
+      [[ "$pid" == "$$" ]] && continue  # skip self
+      local ppid cmd
+      ppid=$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d ' ') || continue
+      cmd=$(ps -o args= -p "$pid" 2>/dev/null | cut -c1-72) || cmd="(unknown)"
+      # Orphan = parent is init (ppid=1) or parent process is dead
+      local is_orphan=false
+      if [[ "$ppid" == "1" ]]; then
+        is_orphan=true
+      elif ! kill -0 "$ppid" 2>/dev/null; then
+        is_orphan=true
+      fi
+      if $is_orphan; then
+        found_pids+=("$pid")
+        found_cmds+=("$cmd")
+      fi
+    done <<< "$raw"
+  done
+
+  if [[ ${#found_pids[@]} -eq 0 ]]; then
+    ok "No orphaned Serena or language server processes found"
+    echo ""
+    return 0
+  fi
+
+  echo -e "  ${YELLOW}${BOLD}${#found_pids[@]} orphaned process(es) found:${NC}"
+  echo ""
+  for i in "${!found_pids[@]}"; do
+    printf "  ${RED}✗${NC}  PID %-8s %s\n" "${found_pids[$i]}" "${found_cmds[$i]}"
+  done
+  echo ""
+
+  if $force; then
+    # Graceful SIGTERM first, then SIGKILL after 2s
+    for pid in "${found_pids[@]}"; do
+      kill -TERM "$pid" 2>/dev/null || true
+    done
+    sleep 2
+    local killed=0
+    for pid in "${found_pids[@]}"; do
+      if kill -0 "$pid" 2>/dev/null; then
+        kill -9 "$pid" 2>/dev/null || true
+        killed=$(( killed + 1 ))
+      fi
+    done
+    ok "Sent SIGTERM to ${#found_pids[@]} process(es)$([ $killed -gt 0 ] && echo ", SIGKILL to ${killed} that did not exit")"
+  else
+    echo -e "  Run ${BOLD}token-diet serena-gc --force${NC} to terminate them"
+  fi
+  echo ""
+}
+
 cmd_help() {
   cat << EOF
 
@@ -1132,6 +1200,7 @@ ${BOLD}COMMANDS${NC}
   test-first <file> Suggest test file counterpart for an implementation file
   strip [--stats] <file>  Strip comments from source file to reduce tokens
   diff-reads <file> Suggest line ranges to read based on recent git diff
+  serena-gc         Detect and kill orphaned Serena/LSP processes  [--force]
   dashboard         Open live browser dashboard  [--port N]
   service <sub>     Manage always-on dashboard daemon  (install|uninstall|start|stop|status)
   version           Show installed versions of all three tools
@@ -1168,6 +1237,7 @@ case "${1:-gain}" in
   test-first)        shift; cmd_test_first "$@" ;;
   strip)             shift; cmd_strip "$@" ;;
   diff-reads)        shift; cmd_diff_reads "$@" ;;
+  serena-gc)         shift; cmd_serena_gc "$@" ;;
   uninstall)         shift; cmd_uninstall "$@" ;;
   --help|-h|help)    cmd_help ;;
   --version)         echo "token-diet $TD_VERSION" ;;

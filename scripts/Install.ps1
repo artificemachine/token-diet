@@ -300,6 +300,66 @@ function Install-RTK {
     if ($script:HasCopilot) {
         Write-Ok "RTK: Copilot CLI (uses same hooks as Claude Code)"
     }
+
+    # Cowork (Claude Desktop) — no hook mechanism, inject awareness doc instead.
+    # RTK works via shell hooks that rewrite Bash tool calls. Cowork/Claude Desktop
+    # does not support the same hook dispatch, so we write an awareness markdown
+    # that instructs the LLM to manually prefix commands with `rtk`.
+    if ($script:HasCowork) {
+        $coworkRtkDoc = @"
+# RTK - Rust Token Killer (Cowork / Claude Desktop)
+
+**Usage**: Token-optimized CLI proxy for shell commands (60-90% savings).
+
+## Rule
+
+Always prefix shell commands with ``rtk``. RTK compresses output to save tokens.
+If RTK has no filter for a command, it passes through unchanged — always safe to use.
+
+Examples:
+
+``````bash
+rtk git status
+rtk cargo test
+rtk npm run build
+rtk pytest -q
+rtk docker ps
+rtk ls -la
+``````
+
+Even in command chains with ``&&``, prefix each command:
+``````bash
+rtk git add . && rtk git commit -m "msg" && rtk git push
+``````
+
+## Meta Commands
+
+``````bash
+rtk gain            # Token savings analytics
+rtk gain --history  # Recent command savings history
+rtk discover        # Analyze sessions for missed RTK usage
+rtk proxy <cmd>     # Run raw command without filtering (debugging)
+``````
+
+## Verification
+
+``````bash
+rtk --version
+rtk gain
+where.exe rtk
+``````
+"@
+        $coworkConfigDir = Join-Path $env:APPDATA "Claude"
+        $coworkRtkFile = Join-Path $coworkConfigDir "rtk-awareness.md"
+        if ($DryRun) {
+            Write-DryRun "Write RTK awareness doc to $coworkRtkFile"
+        } else {
+            if (-not (Test-Path $coworkConfigDir)) { New-Item -ItemType Directory -Path $coworkConfigDir -Force | Out-Null }
+            Set-Content -Path $coworkRtkFile -Value $coworkRtkDoc -Encoding UTF8
+            Write-Ok "RTK: Cowork awareness doc written ($coworkRtkFile)"
+            Write-Info "  Cowork has no hook support — LLM instructed to prefix commands with 'rtk'"
+        }
+    }
 }
 
 # --- tilth --------------------------------------------------------------------

@@ -4,6 +4,14 @@ All notable changes to token-diet will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [1.2.14] — 2026-04-06
+
+### Added
+- `token-diet serena-gc` — detect and kill orphaned Serena/LSP processes; SIGTERM → 2s wait → SIGKILL fallback (`--force` to apply)
+
+### Fixed
+- Serena fork (`forks/serena`): SIGTERM and SIGHUP now trigger graceful shutdown via `SystemExit`, ensuring `server_lifespan` finally-block runs and language-server children are cleaned up instead of orphaned
+
 ## [Unreleased]
 
 ### Added

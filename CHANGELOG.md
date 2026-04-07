@@ -310,3 +310,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ### Added
 * `tests/test_dashboard.py` — 3 pytest tests: `loops_stats()`/`leaks_stats()` return None, `collect()` includes `loops`/`leaks` keys
 * `tests/token-diet.bats` — test: `explain` exits 1 with usage when no arg given
+
+## [1.3.0] — 2026-04-07
+
+### Added
+* `scripts/install.sh` — Cowork (Claude Desktop) support: auto-detected via `~/Library/Application Support/Claude/claude_desktop_config.json`
+* `scripts/install.sh` — RTK awareness doc written to Claude Desktop config dir (LLM instructed to prefix commands with `rtk`; no hook mechanism available)
+* `scripts/install.sh` — Serena + tilth MCP entries injected into `claude_desktop_config.json` (stdlib `python3`, supports both normal and `--local` Docker mode)
+* `scripts/install.sh` — `token-diet.md` written to Claude Desktop config dir for Cowork sessions
+* `scripts/install.sh` — Cowork shown as 6th host in `verify_stack` output and architecture banner

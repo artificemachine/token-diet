@@ -319,3 +319,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 * `scripts/install.sh` — Serena + tilth MCP entries injected into `claude_desktop_config.json` (stdlib `python3`, supports both normal and `--local` Docker mode)
 * `scripts/install.sh` — `token-diet.md` written to Claude Desktop config dir for Cowork sessions
 * `scripts/install.sh` — Cowork shown as 6th host in `verify_stack` output and architecture banner
+
+## [1.3.1] — 2026-04-07
+
+### Fixed
+* `scripts/Install.ps1` — removed `-Verbose` reserved parameter conflict; replaced with `-FullOutput` switch
+* `scripts/Install.ps1` — repaired broken RTK detection (`if (Test-Cmd...); $LASTEXITCODE` semicolon bug)
+* `scripts/Install.ps1` — path resolution uses `$script:ProjectRoot` consistently (fixes submodule and config source paths)
+* `scripts/Install.ps1` — `--VerifyOnly` now runs `Detect-Hosts` before `Verify-Stack`
+
+### Added
+* `scripts/Install.ps1` — Copilot CLI, VS Code, and Cowork (Claude Desktop) host detection and integration
+* `scripts/Install.ps1` — `-Local` flag for air-gapped installs: builds RTK/tilth from `forks\` submodules, Serena via Docker
+* `scripts/Install.ps1` — `-SkipTests` flag to skip clippy + cargo test in local mode
+* `scripts/Install.ps1` — `Install-TokenDiet` function: copies `token-diet.ps1`, creates `.cmd` shim, manages PATH, writes `token-diet.md` to `~\.claude\` and `~\.codex\`
+* `scripts/Install.ps1` — RTK awareness doc written to `%APPDATA%\Claude\` for Cowork sessions
+* `scripts/Install.ps1` — Serena + tilth MCP entries injected into `claude_desktop_config.json` for Cowork
+* `scripts/Install.ps1` — log rotation (512 KB cap on `install.log`)
+* `scripts/Install.ps1` — interactive wizard gains local-mode prompt

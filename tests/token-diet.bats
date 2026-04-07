@@ -746,3 +746,45 @@ MOCK
   rm -rf "$tmp_bin"
   [ "$status" -eq 1 ]
 }
+
+# ---------------------------------------------------------------------------
+# no-rtk / use-rtk — RTK toggle
+# ---------------------------------------------------------------------------
+
+@test "no-rtk: creates sentinel file and exits 0" {
+  run env HOME="$TMP_HOME" "$SCRIPTS_DIR/token-diet" no-rtk
+  [ "$status" -eq 0 ]
+  [ -f "$TMP_HOME/.config/token-diet/rtk-disabled" ]
+}
+
+@test "no-rtk: output confirms RTK is disabled" {
+  run env HOME="$TMP_HOME" "$SCRIPTS_DIR/token-diet" no-rtk
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"RTK disabled"* ]]
+}
+
+@test "use-rtk: removes sentinel file and exits 0" {
+  mkdir -p "$TMP_HOME/.config/token-diet"
+  touch "$TMP_HOME/.config/token-diet/rtk-disabled"
+  run env HOME="$TMP_HOME" "$SCRIPTS_DIR/token-diet" use-rtk
+  [ "$status" -eq 0 ]
+  [ ! -f "$TMP_HOME/.config/token-diet/rtk-disabled" ]
+}
+
+@test "use-rtk: exits 0 and reports already enabled when sentinel absent" {
+  run env HOME="$TMP_HOME" "$SCRIPTS_DIR/token-diet" use-rtk
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"already enabled"* ]]
+}
+
+@test "no-rtk then use-rtk: sentinel created then removed" {
+  env HOME="$TMP_HOME" "$SCRIPTS_DIR/token-diet" no-rtk
+  [ -f "$TMP_HOME/.config/token-diet/rtk-disabled" ]
+  env HOME="$TMP_HOME" "$SCRIPTS_DIR/token-diet" use-rtk
+  [ ! -f "$TMP_HOME/.config/token-diet/rtk-disabled" ]
+}
+
+@test "help text includes no-rtk command" {
+  run "$SCRIPTS_DIR/token-diet" --help
+  [[ "$output" == *"no-rtk"* ]]
+}

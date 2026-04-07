@@ -191,7 +191,8 @@ ensure_docker() {
 }
 
 # --- Host detection -----------------------------------------------------------
-HAS_CLAUDE=false; HAS_CODEX=false; HAS_OPENCODE=false; HAS_COPILOT=false; HAS_VSCODE=false
+HAS_CLAUDE=false; HAS_CODEX=false; HAS_OPENCODE=false; HAS_COPILOT=false; HAS_VSCODE=false; HAS_COWORK=false
+COWORK_CFG="$HOME/Library/Application Support/Claude/claude_desktop_config.json"
 
 detect_hosts() {
   check_command claude     && HAS_CLAUDE=true
@@ -200,14 +201,17 @@ detect_hosts() {
   check_command github-copilot-cli && HAS_COPILOT=true
   # VS Code: check if 'code' CLI exists
   check_command code       && HAS_VSCODE=true
+  # Cowork (Claude Desktop): check for config file
+  [ -f "$COWORK_CFG" ] && HAS_COWORK=true
 
   if $HAS_CLAUDE;   then ok "Claude Code ..... found"; else warn "Claude Code ..... not found"; fi
   if $HAS_CODEX;    then ok "Codex CLI ....... found"; else warn "Codex CLI ....... not found"; fi
   if $HAS_OPENCODE; then ok "OpenCode ........ found"; else warn "OpenCode ........ not found"; fi
   if $HAS_COPILOT;  then ok "Copilot CLI ..... found"; else warn "Copilot CLI ..... not found"; fi
   if $HAS_VSCODE;   then ok "VS Code ......... found"; else warn "VS Code ......... not found"; fi
+  if $HAS_COWORK;   then ok "Cowork (Desktop)  found"; else warn "Cowork (Desktop)  not found"; fi
 
-  if ! $HAS_CLAUDE && ! $HAS_CODEX && ! $HAS_OPENCODE && ! $HAS_COPILOT && ! $HAS_VSCODE; then
+  if ! $HAS_CLAUDE && ! $HAS_CODEX && ! $HAS_OPENCODE && ! $HAS_COPILOT && ! $HAS_VSCODE && ! $HAS_COWORK; then
     warn "No AI host detected. Tools installed but integrations skipped."
   fi
 }
@@ -277,6 +281,66 @@ install_rtk() {
   if $HAS_COPILOT; then
     ok "RTK: Copilot CLI (uses same hooks as Claude Code)"
   fi
+
+  # Cowork (Claude Desktop) — no hook mechanism; write an awareness doc instead.
+  # RTK works via shell hooks that rewrite Bash tool calls. Claude Desktop does not
+  # support the same hook dispatch, so we write a markdown doc that instructs the
+  # LLM to manually prefix commands with `rtk`.
+  if $HAS_COWORK; then
+    local cowork_dir
+    cowork_dir="$(dirname "$COWORK_CFG")"
+    local rtk_doc="$cowork_dir/rtk-awareness.md"
+    if [ "${DRY_RUN:-false}" = "true" ]; then
+      dryrun "Write RTK awareness doc to $rtk_doc"
+    else
+      mkdir -p "$cowork_dir"
+      cat > "$rtk_doc" << 'RTKDOC'
+# RTK - Rust Token Killer (Cowork / Claude Desktop)
+
+**Usage**: Token-optimized CLI proxy for shell commands (60-90% savings).
+
+## Rule
+
+Always prefix shell commands with `rtk`. RTK compresses output to save tokens.
+If RTK has no filter for a command, it passes through unchanged — always safe to use.
+
+Examples:
+
+```bash
+rtk git status
+rtk cargo test
+rtk npm run build
+rtk pytest -q
+rtk docker ps
+rtk ls -la
+```
+
+Even in command chains with `&&`, prefix each command:
+```bash
+rtk git add . && rtk git commit -m "msg" && rtk git push
+```
+
+## Meta Commands
+
+```bash
+rtk gain            # Token savings analytics
+rtk gain --history  # Recent command savings history
+rtk discover        # Analyze sessions for missed RTK usage
+rtk proxy <cmd>     # Run raw command without filtering (debugging)
+```
+
+## Verification
+
+```bash
+rtk --version
+rtk gain
+which rtk
+```
+RTKDOC
+      ok "RTK: Cowork awareness doc written ($rtk_doc)"
+      info "  Cowork has no hook support — LLM instructed to prefix commands with 'rtk'"
+    fi
+  fi
 }
 
 # --- tilth --------------------------------------------------------------------
@@ -307,6 +371,8 @@ install_tilth() {
   fi
 
   # Host integration — tilth install <host>
+  # Note: Cowork (Claude Desktop) is handled via JSON injection in install_serena,
+  # not via tilth install, as it lacks a CLI integration path.
   local hosts=()
   $HAS_CLAUDE   && hosts+=("claude-code")
   $HAS_CODEX    && hosts+=("codex")
@@ -492,6 +558,72 @@ PYEOF
     ok "Serena: Copilot CLI uses VS Code MCP config (shared)"
   fi
 
+  # Cowork (Claude Desktop) — inject mcpServers.serena + mcpServers.tilth
+  if $HAS_COWORK; then
+    if [ "${DRY_RUN:-false}" = "true" ]; then
+      dryrun "Write mcpServers.serena + mcpServers.tilth to $COWORK_CFG"
+    else
+      if $LOCAL_MODE; then
+        python3 - "$COWORK_CFG" <<'PYEOF'
+import json, sys
+cfg = sys.argv[1]
+try:
+    with open(cfg) as f: data = json.load(f)
+except FileNotFoundError:
+    data = {}
+data.setdefault("mcpServers", {})
+data["mcpServers"]["serena"] = {
+    "command": "docker",
+    "args": ["run", "--rm", "-i", "-v", "$(pwd):/workspace:ro",
+             "--network", "none", "token-diet/serena:latest",
+             "--context=claude-code", "--project", "/workspace"]
+}
+with open(cfg, "w") as f:
+    json.dump(data, f, indent=2)
+    f.write("\n")
+PYEOF
+      else
+        python3 - "$COWORK_CFG" "${SERENA_REPO}" <<'PYEOF'
+import json, sys
+cfg, repo = sys.argv[1], sys.argv[2]
+try:
+    with open(cfg) as f: data = json.load(f)
+except FileNotFoundError:
+    data = {}
+data.setdefault("mcpServers", {})
+data["mcpServers"]["serena"] = {
+    "command": "uvx",
+    "args": ["--from", "git+" + repo, "serena", "start-mcp-server",
+             "--context=claude-code", "--project-from-cwd"]
+}
+with open(cfg, "w") as f:
+    json.dump(data, f, indent=2)
+    f.write("\n")
+PYEOF
+      fi
+
+      # Also register tilth if installed
+      if check_command tilth; then
+        python3 - "$COWORK_CFG" <<'PYEOF'
+import json, sys
+cfg = sys.argv[1]
+try:
+    with open(cfg) as f: data = json.load(f)
+except (FileNotFoundError, json.JSONDecodeError):
+    data = {}
+data.setdefault("mcpServers", {})
+data["mcpServers"]["tilth"] = {"command": "tilth", "args": ["mcp"]}
+with open(cfg, "w") as f:
+    json.dump(data, f, indent=2)
+    f.write("\n")
+PYEOF
+        ok "Serena + tilth MCP: Cowork / Claude Desktop ($COWORK_CFG)"
+      else
+        ok "Serena MCP: Cowork / Claude Desktop ($COWORK_CFG)"
+      fi
+    fi
+  fi
+
   # Disable Serena's built-in web dashboard entirely.
   # On macOS, web_dashboard:true spawns a native pywebview app process per host.
   # With Serena registered in multiple hosts (claude-code, opencode, codex),
@@ -596,6 +728,7 @@ verify_stack() {
   if $HAS_OPENCODE; then ok "OpenCode ........ available"; else warn "OpenCode ........ not found"; fi
   if $HAS_COPILOT;  then ok "Copilot CLI ..... available"; else warn "Copilot CLI ..... not found"; fi
   if $HAS_VSCODE;   then ok "VS Code ......... available"; else warn "VS Code ......... not found"; fi
+  if $HAS_COWORK;   then ok "Cowork (Desktop)  available"; else warn "Cowork (Desktop)  not found"; fi
 
   echo ""
   if $all_ok; then
@@ -608,9 +741,10 @@ verify_stack() {
   info "Architecture:"
   cat << 'EOF'
 
-  +-----------------------------------------------------------+
-  |  Claude Code / Codex / OpenCode / Copilot CLI / VS Code   |
-  +-----------------------------------------------------------+
+  +-------------------------------------------------------------------+
+  |  Claude Code / Codex / OpenCode / Copilot CLI / VS Code          |
+  |                     + Cowork (Claude Desktop)                     |
+  +-------------------------------------------------------------------+
            |                |                |
       Code reading     Refactoring     Command output
            |                |                |
@@ -706,6 +840,12 @@ TKDDOC
 
   write_token-diet_md "$HOME/.claude" "$HOME/.claude/CLAUDE.md"
   write_token-diet_md "$HOME/.codex" "$HOME/.codex/AGENTS.md"
+  # Cowork (Claude Desktop) — write token-diet.md to its config dir if detected
+  if $HAS_COWORK; then
+    local cowork_dir
+    cowork_dir="$(dirname "$COWORK_CFG")"
+    write_token-diet_md "$cowork_dir" ""
+  fi
 }
 
 # --- Main ---------------------------------------------------------------------
@@ -721,7 +861,7 @@ Tools:
   Serena   IDE-like symbol navigation via LSP
 
 Hosts (auto-detected):
-  Claude Code, Codex CLI, OpenCode, Copilot CLI, VS Code
+  Claude Code, Codex CLI, OpenCode, Copilot CLI, VS Code, Cowork (Claude Desktop)
 
 Options:
   --all          Install all three tools (default)

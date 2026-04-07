@@ -11,16 +11,18 @@
 #>
 param(
     [string]$Command = 'gain',
-    [switch]$Version
+    [switch]$Version,
+    [Parameter(ValueFromRemainingArguments = $true)]
+    [string[]]$SubArgs
 )
-# Collect all remaining positional args (including dash-prefixed flags like --stats)
-# $args is PowerShell's automatic variable for unbound arguments
-[string[]]$SubArgs = $args
+
+if (-not $SubArgs) { $SubArgs = @() }
+if ($args -and $args.Count -gt 0) { $SubArgs += $args }
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-$script:TD_VERSION = '1.3.5'
+$script:TD_VERSION = '1.3.6'
 if ($Version) { Write-Output "token-diet $script:TD_VERSION"; exit 0 }
 $ScriptDir = $PSScriptRoot
 
@@ -162,8 +164,8 @@ function Invoke-Gain {
         $memDir = Join-Path $env:USERPROFILE '.serena\memories'
         $logDir = Join-Path $env:USERPROFILE '.serena\logs'
         Write-Output "  MCP hosts:    $(Get-HostsRegistered 'serena')"
-        Write-Output "  Memories:     $(if (Test-Path $memDir) { (Get-ChildItem $memDir).Count } else { 0 }) files"
-        Write-Output "  Session logs: $(if (Test-Path $logDir) { (Get-ChildItem $logDir).Count } else { 0 }) days"
+        Write-Output "  Memories:     $(if (Test-Path $memDir) { @(Get-ChildItem $memDir).Count } else { 0 }) files"
+        Write-Output "  Session logs: $(if (Test-Path $logDir) { @(Get-ChildItem $logDir).Count } else { 0 }) days"
         Write-Ok 'Serena — active'
     } else {
         Write-Miss 'Serena not installed  ->  run: Install.ps1 -SerenaOnly'
@@ -230,6 +232,10 @@ function Invoke-Health {
 }
 
 function Invoke-Dashboard([string[]]$Remaining) {
+    if ($Remaining -contains '--help' -or $Remaining -contains '-h' -or $Remaining -contains 'help') {
+        Write-Output 'Usage: token-diet.ps1 dashboard [--port N]'
+        return
+    }
     $dashBin = Join-Path $ScriptDir 'token-diet-dashboard'
     if (-not (Test-Path $dashBin)) { Write-Error 'token-diet-dashboard not found — run: Install.ps1'; exit 1 }
     $py = Find-Python
@@ -290,7 +296,7 @@ function Invoke-Service([string[]]$Remaining) {
             }
         }
         default {
-            Write-Output @'
+            $serviceHelp = @'
 Usage: token-diet.ps1 service <subcommand>
 
   install     Register dashboard as a Task Scheduler job (runs on login, restarts on failure)
@@ -299,6 +305,7 @@ Usage: token-diet.ps1 service <subcommand>
   stop        Stop the running dashboard
   status      Show task and process status
 '@
+            Write-Output $serviceHelp
         }
     }
 }
@@ -314,7 +321,7 @@ function Invoke-Breakdown([string[]]$Remaining) {
     Write-Output "`n=== token-diet breakdown ===`n"
     Write-Output "Top commands by tokens saved  (limit: $limit)"
     $json = $hist | ConvertTo-Json -Depth 10 -Compress
-    Invoke-Python -Code @'
+    $breakdownCode = @'
 import json, sys
 data  = json.loads(sys.argv[1]); limit = int(sys.argv[2])
 cmds  = sorted(data.get("commands",[]), key=lambda c: c.get("total_saved",0), reverse=True)[:limit]
@@ -322,7 +329,8 @@ for i,c in enumerate(cmds,1):
     s=c.get("total_saved",0); pct=c.get("avg_pct",0); n=c.get("count",0); inp=c.get("total_input",0)
     sk=f"{s/1000:.1f}K" if s>=1000 else str(s); ik=f"{inp/1000:.1f}K" if inp>=1000 else str(inp)
     print(f"  {i:>2}. {c['cmd'][:34]:<36} {sk:>7} saved  {pct:>5.1f}%  ({n}x, {ik} in)")
-'@ -PyArgs @($json, "$limit")
+'@
+    Invoke-Python -Code $breakdownCode -PyArgs @($json, "$limit")
     Write-Output ''
 }
 
@@ -333,14 +341,15 @@ function Invoke-Explain([string[]]$Remaining) {
     $hist = Get-RtkHistory
     if (-not $hist -or -not $hist.commands) { Write-Output '  No RTK history yet'; exit 1 }
     $json   = $hist | ConvertTo-Json -Depth 10 -Compress
-    $result = Invoke-Python -Code @'
+    $explainCode = @'
 import json,sys
 data=json.loads(sys.argv[1]); target=sys.argv[2]
 m=next((c for c in data.get("commands",[]) if c["cmd"]==target),None)
 if not m: sys.exit(1)
 s=m.get("total_saved",0); inp=m.get("total_input",0); pct=m.get("avg_pct",0); cnt=m.get("count",0)
 print(f"cmd={m['cmd']}\ncount={cnt}\ninput={inp}\noutput={inp-s}\nsaved={s}\npct={pct}")
-'@ -PyArgs @($json, $target)
+'@
+    $result = Invoke-Python -Code $explainCode -PyArgs @($json, $target)
     if (-not $result) { Write-Output "  No data for '$target' — not found in RTK history"; exit 1 }
     $kv = @{}; $result | ForEach-Object { $p=$_ -split '=',2; if($p.Count-eq 2){$kv[$p[0]]=$p[1]} }
     Write-Output "`n=== token-diet explain ===`n"
@@ -408,8 +417,8 @@ function Invoke-Budget([string[]]$Remaining) {
                 Write-Output "`ntoken-diet budget  [$label]  ($file)`n"
                 Write-Output ('  Used:      {0}' -f (Format-Tokens $used))
                 Write-Output ('  Warn at:   {0}' -f (Format-Tokens $warnT))
-                Write-Output ('  Hard stop: {0}' -f (if ($unlimited) { 'unlimited' } else { Format-Tokens $hardT }))
-                Write-Output ('  Remaining: {0}' -f (if ($unlimited) { 'unlimited' } else { Format-Tokens ($hardT - $used) }))
+                Write-Output ('  Hard stop: {0}' -f $(if ($unlimited) { 'unlimited' } else { Format-Tokens $hardT }))
+                Write-Output ('  Remaining: {0}' -f $(if ($unlimited) { 'unlimited' } else { Format-Tokens ($hardT - $used) }))
                 if (-not $unlimited) { Write-Output ('  Burn-down: {0}%' -f $pct) }
                 Write-Output ''
                 if (-not $unlimited -and $used -ge $hardT) { Write-Output "  HARD STOP ($pct%)"; return 3 }
@@ -417,13 +426,13 @@ function Invoke-Budget([string[]]$Remaining) {
                 else                                       { Write-Output '  Budget OK' }
             }
 
-            Show-BudgetSection $budgetFile (if ($isOverride) { 'project' } else { 'global' }) $rtkSummary
+            Show-BudgetSection $budgetFile $(if ($isOverride) { 'project' } else { 'global' }) $rtkSummary
             if ($isOverride -and (Test-Path $globalBudget)) {
                 $gc = Get-Content $globalBudget -Raw | ConvertFrom-Json
                 $gw = [long]$gc.warn; $gh = [long]$gc.hard
                 Write-Output "  global ($globalBudget)"
                 Write-Output ('    Warn at:   {0}' -f (Format-Tokens $gw))
-                Write-Output ('    Hard stop: {0}' -f (if ($gh -eq 0) { 'unlimited' } else { Format-Tokens $gh }))
+                Write-Output ('    Hard stop: {0}' -f $(if ($gh -eq 0) { 'unlimited' } else { Format-Tokens $gh }))
                 Write-Output ''
             }
         }
@@ -436,12 +445,13 @@ function Invoke-Loops {
     $hist = Get-RtkHistory
     if (-not $hist) { Write-Output '  No RTK history yet'; return }
     $json  = $hist | ConvertTo-Json -Depth 10 -Compress
-    $found = Invoke-Python -Code @'
+    $loopsCode = @'
 import json,sys
 data=json.loads(sys.argv[1]); t=int(sys.argv[2])
 for c in sorted([c for c in data.get("commands",[]) if c.get("count",0)>=t],key=lambda c:c["count"],reverse=True):
     print(f'{c["cmd"]}\t{c["count"]}\t{c.get("total_input",0)-c.get("total_saved",0)}')
-'@ -PyArgs @($json, '3')
+'@
+    $found = Invoke-Python -Code $loopsCode -PyArgs @($json, '3')
     Write-Output "`n=== token-diet loops ===`n"
     if (-not $found) { Write-Output '  [OK] No loops detected — all commands run < 3 times'; Write-Output ''; return }
     Write-Output 'Repeated commands  (>=3 runs — potential agent loops)'
@@ -459,7 +469,7 @@ function Invoke-Leaks {
     $hist = Get-RtkHistory
     if (-not $hist) { Write-Output '  RTK history unavailable'; exit 1 }
     $json  = $hist | ConvertTo-Json -Depth 10 -Compress
-    $leaks = Invoke-Python -Code @'
+    $leaksCode = @'
 import sys,json,re
 data=json.loads(sys.argv[1]); FR=re.compile(r'\b(?:cat|head|tail|tilth\s+read|tilth_read)\s+(\S+\.\w+)')
 found=[]
@@ -468,7 +478,8 @@ for c in data.get("commands",[]):
     if m and c.get("count",0)>=2: found.append((m.group(1),c["count"],c.get("total_input",0)))
 for f,cnt,tok in sorted(found,key=lambda x:x[1],reverse=True):
     print(f"{f}\t{cnt}\t{tok}")
-'@ -PyArgs @($json)
+'@
+    $leaks = Invoke-Python -Code $leaksCode -PyArgs @($json)
     if (-not $leaks) { Write-Output '  [OK] No leaks detected — no files read multiple times'; return }
     Write-Output 'Context leaks — files read multiple times:'
     Write-Output ''
@@ -578,7 +589,7 @@ function Invoke-DiffReads([string[]]$Remaining) {
     if (-not $diff.Trim()) { $diff = @(& git -C $root diff HEAD~1 HEAD -- $rel 2>$null) -join "`n" }
     if (-not $diff.Trim()) { Write-Output "No recent changes detected for: $rel"; Write-Output 'Suggest reading the full file.'; return }
     Write-Output "Changed regions in ${rel}:"; Write-Output ''
-    Invoke-Python -Code @'
+    $diffReadsCode = @'
 import sys,re
 hunks=re.findall(r'@@ [^@]+ \+(\d+)(?:,(\d+))? @@',sys.argv[1])
 if not hunks: print("  (no line range info available)")
@@ -588,7 +599,8 @@ else:
         if count==0: print(f"  (deletion at line {start})")
         elif start==end: print(f"  line {start}")
         else: print(f"  lines {start}-{end}  (Read offset={start-1} limit={count})")
-'@ -PyArgs @($diff)
+'@
+    Invoke-Python -Code $diffReadsCode -PyArgs @($diff)
 }
 
 function Invoke-Uninstall([string[]]$Remaining) {
@@ -597,7 +609,7 @@ function Invoke-Uninstall([string[]]$Remaining) {
 }
 
 function Invoke-Help {
-    Write-Output @"
+    $helpText = @"
 
 token-diet — token optimization stack dashboard
 
@@ -633,6 +645,7 @@ INSTALL
   .\Install.ps1 -DryRun     Preview what would be installed
 
 "@
+    Write-Output $helpText
 }
 
 # --- Dispatch -----------------------------------------------------------------

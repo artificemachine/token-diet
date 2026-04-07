@@ -29,8 +29,7 @@ param(
     [string]$Tool = "All",
     [switch]$SkipDedup,
     [switch]$VerifyOnly,
-    [switch]$DryRun,
-    [switch]$Verbose
+    [switch]$DryRun
 )
 
 $ErrorActionPreference = "Stop"
@@ -55,7 +54,7 @@ $LogFile = Join-Path $env:LOCALAPPDATA "Programs\token-diet\install.log"
 function Show-Output {
     [CmdletBinding()] param([Parameter(ValueFromPipeline)]$InputObject)
     process {
-        if ($Verbose) {
+        if ($VerbosePreference -eq 'Continue') {
             $InputObject
             $InputObject | Out-File -Append -FilePath $LogFile -Encoding utf8 -ErrorAction SilentlyContinue
         } else {
@@ -64,7 +63,7 @@ function Show-Output {
         }
     }
     end {
-        if (-not $Verbose -and $script:_buf) {
+        if ($VerbosePreference -ne 'Continue' -and $script:_buf) {
             $script:_buf | Select-Object -Last 5
             $script:_buf = @()
         }
@@ -175,7 +174,13 @@ function Detect-Hosts {
 function Install-RTK {
     Write-Header "RTK (Rust Token Killer)"
 
-    if ((Test-Cmd "rtk") -and ((rtk gain --help 2>$null); $LASTEXITCODE -eq 0)) {
+    $rtkGainAvailable = $false
+    if (Test-Cmd "rtk") {
+        rtk gain --help 2>$null | Out-Null
+        $rtkGainAvailable = ($LASTEXITCODE -eq 0)
+    }
+
+    if ($rtkGainAvailable) {
         Write-Ok "RTK already installed: $(rtk --version 2>$null)"
         Write-Info "Upgrading..."
     } elseif (Test-Cmd "rtk") {
@@ -359,7 +364,13 @@ function Verify-Stack {
 
     $allOk = $true
 
-    if ((Test-Cmd "rtk") -and ((rtk gain --help 2>$null); $LASTEXITCODE -eq 0)) {
+    $rtkGainAvailable = $false
+    if (Test-Cmd "rtk") {
+        rtk gain --help 2>$null | Out-Null
+        $rtkGainAvailable = ($LASTEXITCODE -eq 0)
+    }
+
+    if ($rtkGainAvailable) {
         Write-Ok "RTK ............. $(rtk --version 2>$null)"
     } else { Write-Warn "RTK ............. not installed or wrong version"; $allOk = $false }
 

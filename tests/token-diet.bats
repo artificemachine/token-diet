@@ -340,10 +340,17 @@ case "$1" in
   --version) echo "rtk 0.34.3-mock"; exit 0 ;;
   gain)
     case "$2" in
-      --help)    echo "Usage: rtk gain [OPTIONS]"; exit 0 ;;
-      --history) echo '{"summary":{},"commands":[{"cmd":"cargo build","count":7,"total_input":70000,"total_saved":56000,"avg_pct":80.0},{"cmd":"git status","count":2,"total_input":1000,"total_saved":800,"avg_pct":80.0}]}'; exit 0 ;;
-      --format)  echo '{"summary":{"total_commands":9,"total_input":71000,"total_saved":56800,"avg_savings_pct":80.0,"total_time_ms":100},"daily":[]}'; exit 0 ;;
-      *)         echo "Usage: rtk gain [OPTIONS]"; exit 0 ;;
+      --help)   echo "Usage: rtk gain [OPTIONS]"; exit 0 ;;
+      --format) echo '{"summary":{"total_commands":9,"total_input":71000,"total_saved":56800,"avg_savings_pct":80.0,"total_time_ms":100},"daily":[]}'; exit 0 ;;
+      *)
+        printf 'RTK Token Savings (Global Scope)\n\nBy Command\n'
+        printf '────────────────────────────────────────────────────────────────────────\n'
+        printf '  #  Command                   Count   Saved    Avg%%%%    Time  Impact    \n'
+        printf '────────────────────────────────────────────────────────────────────────\n'
+        printf ' 1.  cargo build                   7   56.0K   80.0%%%%     0ms  ██████████\n'
+        printf ' 2.  git status                    2    0.8K   80.0%%%%     0ms  ░░░░░░░░░░\n'
+        printf '────────────────────────────────────────────────────────────────────────\n'
+        exit 0 ;;
     esac ;;
   *)  exit 0 ;;
 esac
@@ -527,9 +534,18 @@ case "$1" in
   --version) echo "rtk 0.34.3-mock"; exit 0 ;;
   gain)
     case "$2" in
-      --history) echo '{"summary":{},"commands":[{"cmd":"cat src/auth.rs","count":3,"total_input":9000,"total_saved":7000,"avg_pct":77.0},{"cmd":"cat src/main.rs","count":2,"total_input":6000,"total_saved":4500,"avg_pct":75.0},{"cmd":"git status","count":1,"total_input":500,"total_saved":400,"avg_pct":80.0}]}'; exit 0 ;;
-      --format)  echo '{"summary":{"total_commands":6,"total_input":15500,"total_saved":11900,"avg_savings_pct":76.8,"total_time_ms":100},"daily":[]}'; exit 0 ;;
-      *)         echo "Usage: rtk gain [OPTIONS]"; exit 0 ;;
+      --help)   echo "Usage: rtk gain [OPTIONS]"; exit 0 ;;
+      --format) echo '{"summary":{"total_commands":6,"total_input":15500,"total_saved":11900,"avg_savings_pct":76.8,"total_time_ms":100},"daily":[]}'; exit 0 ;;
+      *)
+        printf 'RTK Token Savings (Global Scope)\n\nBy Command\n'
+        printf '────────────────────────────────────────────────────────────────────────\n'
+        printf '  #  Command                   Count   Saved    Avg%%%%    Time  Impact    \n'
+        printf '────────────────────────────────────────────────────────────────────────\n'
+        printf ' 1.  cat src/auth.rs               3    7.0K   77.0%%%%     0ms  ████░░░░░░\n'
+        printf ' 2.  cat src/main.rs               2    4.5K   75.0%%%%     0ms  ████░░░░░░\n'
+        printf ' 3.  git status                    1    0.4K   80.0%%%%     0ms  ░░░░░░░░░░\n'
+        printf '────────────────────────────────────────────────────────────────────────\n'
+        exit 0 ;;
     esac ;;
   *)  exit 0 ;;
 esac

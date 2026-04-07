@@ -1,13 +1,6 @@
 {
   "servers": {
-    "tilth": {
-      "args": [
-        "--mcp"
-      ],
-      "command": "tilth"
-    },
     "serena": {
-      "command": "uvx",
       "args": [
         "--from",
         "git+https://github.com/celstnblacc/serena",
@@ -16,9 +9,16 @@
         "--context=ide",
         "--project-from-cwd"
       ],
+      "command": "uvx",
       "env": {
         "SERENA_NO_TELEMETRY": "1"
       }
+    },
+    "tilth": {
+      "args": [
+        "--mcp"
+      ],
+      "command": "tilth"
     }
   }
 }

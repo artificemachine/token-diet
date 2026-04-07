@@ -102,6 +102,26 @@ function Show-Output {
 
 function Test-Cmd { param([string]$Name) $null -ne (Get-Command $Name -ErrorAction SilentlyContinue) }
 
+function Repair-SubmoduleWorktree {
+    param([string]$RelativePath)
+
+    $fullPath = Join-Path $script:ProjectRoot $RelativePath
+    if (-not (Test-Path $fullPath)) { return }
+
+    $entries = @(Get-ChildItem -Force -LiteralPath $fullPath -ErrorAction SilentlyContinue)
+    $nonGitEntries = @($entries | Where-Object { $_.Name -ne '.git' })
+    if ($nonGitEntries.Count -gt 0) { return }
+
+    Write-Warn "$RelativePath appears empty; repairing submodule worktree"
+    if ($DryRun) {
+        Write-DryRun "git -C $script:ProjectRoot submodule update --init --force -- $RelativePath"
+        return
+    }
+
+    git -C $script:ProjectRoot submodule update --init --force -- $RelativePath 2>&1 |
+        Where-Object { $_ -match 'Submodule path|checked out|error' }
+}
+
 # Extract the configured command for [mcp_servers.<tool>] from Codex TOML.
 function Get-CodexMcpCommand([string]$Tool) {
     $codexCfg = Join-Path $env:USERPROFILE '.codex\config.toml'
@@ -166,6 +186,9 @@ function Ensure-Git {
     if (Test-Path $gitmodules) {
         Write-Info "Initializing submodules (forks\rtk, forks\tilth, forks\serena)..."
         git -C $script:ProjectRoot submodule update --init --recursive 2>&1 | Where-Object { $_ -match "Cloning|already|error" }
+        Repair-SubmoduleWorktree "forks\rtk"
+        Repair-SubmoduleWorktree "forks\tilth"
+        Repair-SubmoduleWorktree "forks\serena"
         Write-Ok "Submodules ready"
     }
 }
@@ -283,19 +306,19 @@ function Install-RTK {
 
     # Host integration
     if ($script:HasClaude -and $script:HasOpenCode) {
-        if ($DryRun) { Write-DryRun "rtk init -g --opencode" }
-        else { try { rtk init -g --opencode 2>$null; Write-Ok "RTK: Claude Code + Codex + OpenCode" } catch { Write-Warn "RTK init failed" } }
+        if ($DryRun) { Write-DryRun "rtk init -g --opencode --auto-patch" }
+        else { try { rtk init -g --opencode --auto-patch 2>$null; Write-Ok "RTK: Claude Code + Codex + OpenCode" } catch { Write-Warn "RTK init failed" } }
     } elseif ($script:HasClaude) {
-        if ($DryRun) { Write-DryRun "rtk init -g" }
-        else { try { rtk init -g 2>$null; Write-Ok "RTK: Claude Code + Codex" } catch { Write-Warn "RTK init failed" } }
+        if ($DryRun) { Write-DryRun "rtk init -g --auto-patch" }
+        else { try { rtk init -g --auto-patch 2>$null; Write-Ok "RTK: Claude Code + Codex" } catch { Write-Warn "RTK init failed" } }
     }
     if ($script:HasCodex -and -not $script:HasClaude) {
         if ($DryRun) { Write-DryRun "rtk init --codex" }
         else { try { rtk init --codex 2>$null; Write-Ok "RTK: Codex CLI" } catch { Write-Warn "RTK Codex init failed" } }
     }
     if ($script:HasOpenCode -and -not $script:HasClaude) {
-        if ($DryRun) { Write-DryRun "rtk init -g --opencode" }
-        else { try { rtk init -g --opencode 2>$null; Write-Ok "RTK: OpenCode" } catch { Write-Warn "RTK OpenCode init failed" } }
+        if ($DryRun) { Write-DryRun "rtk init -g --opencode --auto-patch" }
+        else { try { rtk init -g --opencode --auto-patch 2>$null; Write-Ok "RTK: OpenCode" } catch { Write-Warn "RTK OpenCode init failed" } }
     }
     if ($script:HasCopilot) {
         Write-Ok "RTK: Copilot CLI (uses same hooks as Claude Code)"
@@ -680,6 +703,7 @@ function Install-TokenDiet {
     if ($DryRun) {
         Write-DryRun "Copy token-diet.ps1 to $binDir\token-diet.ps1"
         if (Test-Path $srcDash) { Write-DryRun "Copy token-diet-dashboard to $binDir\token-diet-dashboard" }
+        Write-DryRun "Copy Uninstall.ps1 to $binDir\Uninstall.ps1"
         Write-DryRun "Write token-diet.md to ~/.claude/ and ~/.codex/"
         Write-DryRun "Add @token-diet.md to CLAUDE.md / AGENTS.md"
         return
@@ -700,6 +724,9 @@ function Install-TokenDiet {
 
     # Copy installer so `token-diet verify` works standalone
     Copy-Item (Join-Path $script:ScriptDir "Install.ps1") (Join-Path $binDir "Install.ps1") -Force
+
+    # Copy uninstaller so `token-diet uninstall` works standalone
+    Copy-Item (Join-Path $script:ScriptDir "Uninstall.ps1") (Join-Path $binDir "Uninstall.ps1") -Force
 
     # Create a .cmd shim so 'token-diet' works from cmd.exe / PATH without typing .ps1
     $shimContent = @"

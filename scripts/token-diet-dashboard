@@ -560,7 +560,7 @@ def main():
             sys.exit(1)
         raise
     url = f"http://127.0.0.1:{PORT}"
-    print(f"  token-diet dashboard \u2192 {url}")
+    print(f"  token-diet dashboard -> {url}")
     print("  Ctrl+C to stop\n")
     threading.Timer(0.4, lambda: webbrowser.open(url)).start()
     try:

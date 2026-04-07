@@ -364,3 +364,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ### Fixed
 * `scripts/token-diet` — `breakdown`, `loops`, `leaks`, `explain`: replaced JSON parsing (which relied on a non-existent `commands` array in `rtk gain --format json`) with regex parsing of the human-readable "By Command" table from `rtk gain`; all four commands now work correctly with the current RTK binary
 * `tests/test_helper.bash` — updated `mock_cmd_with_history` and `mock_cmd_no_loops` to emit text table output for plain `gain` calls; inline mocks in `token-diet.bats` updated to match
+
+## [1.3.6] - 2026-04-07
+
+### Fixed
+* `scripts/Install.ps1` — `rtk init -g` now called with `--auto-patch` to ensure RTK hooks are wired during install without requiring a manual follow-up step
+* `scripts/Install.ps1` — added `Repair-SubmoduleWorktree` to recover empty submodule worktrees after external wipes
+* `scripts/Install.ps1` — copies `Uninstall.ps1` to bin dir (mirrors macOS fix from v1.3.4)
+* `scripts/token-diet.ps1` — parser stability fixes: here-string assignments, `$(...)`/`@(...)` subexpressions, `ValueFromRemainingArguments` for `$SubArgs`
+* `scripts/token-diet.ps1` — `dashboard --help` handler; Serena counter fix for single-item directories
+* `scripts/token-diet-dashboard` — replaced Unicode arrow `→` with ASCII `->` to avoid cp1252 encoding failures on Windows consoles
+* `.vscode/mcp.json` — reverted hardcoded absolute tilth path to plain `tilth`
+
+### Security
+* `forks/tilth` — bump submodule to `v0.5.7-security.1`: path traversal guards (P-1 HIGH) added to all three MCP entry points; pager injection prevention (P-2 MEDIUM) added to `$PAGER` handling
+
+### Tests
+* `tests/test_token_diet_ps1_smoke.py` — new Windows-only pytest smoke suite covering 18 PS1 command dispatch paths

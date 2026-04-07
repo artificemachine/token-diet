@@ -274,14 +274,14 @@ Describe 'token-diet.ps1 — budget' {
         }
     }
 
-    It 'budget status exits 1 with hint when no .token-budget found' {
-        # Use a fresh temp dir guaranteed to have no .token-budget
+    It 'budget status auto-creates global budget and exits 0 when no .token-budget found' {
+        # budget status auto-creates a global .token-budget and exits 0
         $cleanDir = Join-Path $TestDrive 'clean'
         New-Item -ItemType Directory -Path $cleanDir -Force | Out-Null
         Push-Location $cleanDir
         try {
             & pwsh -NoProfile -File $script:PS1 'budget' 'status' 2>&1 | Out-Null
-            $LASTEXITCODE | Should -Be 1
+            $LASTEXITCODE | Should -BeIn @(0, 2)
         } finally {
             Pop-Location
         }

@@ -345,3 +345,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Added
 * `AGENTS.md`, `SOUL.md` — superharness project scaffolding
+
+## [1.3.3] — 2026-04-07
+
+### Added
+* `scripts/token-diet` — `no-rtk` command: temporarily disables the RTK Claude Code hook via a sentinel file (`~/.config/token-diet/rtk-disabled`); patches the hook to respect it (idempotent)
+* `scripts/token-diet` — `use-rtk` command: removes the sentinel file and re-enables RTK filtering
+* `tests/token-diet.bats` — 6 tests covering `no-rtk`/`use-rtk` toggle behaviour

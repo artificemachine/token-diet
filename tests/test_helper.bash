@@ -86,7 +86,8 @@ MOCK
 }
 
 # mock_cmd_with_history
-# Extends mock_cmd_with_gain to handle: gain --history --format json
+# RTK mock with per-command "By Command" text table (cargo test×5, git log×3, npm test×2).
+# --format json returns the summary for budget tests.
 mock_cmd_with_history() {
   cat > "$TMP_BIN/rtk" << 'MOCK'
 #!/usr/bin/env bash
@@ -94,11 +95,19 @@ case "$1" in
   --version) echo "rtk 0.34.3-mock"; exit 0 ;;
   gain)
     case "$2" in
-      --help)    echo "Usage: rtk gain [OPTIONS]"; exit 0 ;;
-      --history) echo '{"summary":{"total_commands":10,"total_input":65000,"total_saved":50000,"avg_savings_pct":76.9,"total_time_ms":300},"commands":[{"cmd":"cargo test","count":5,"total_input":50000,"total_saved":40000,"avg_pct":80.0},{"cmd":"git log","count":3,"total_input":12000,"total_saved":9000,"avg_pct":75.0},{"cmd":"npm test","count":2,"total_input":3000,"total_saved":1000,"avg_pct":33.3}]}'; exit 0 ;;
-      --format)  echo '{"summary":{"total_commands":10,"total_input":65000,"total_saved":50000,"avg_savings_pct":76.9,"total_time_ms":300},"daily":[]}'; exit 0 ;;
-      --daily)   echo '{"summary":{"total_commands":10,"total_input":65000,"total_saved":50000,"avg_savings_pct":76.9,"total_time_ms":300},"daily":[]}'; exit 0 ;;
-      *)         echo "Usage: rtk gain [OPTIONS]"; exit 0 ;;
+      --help)   echo "Usage: rtk gain [OPTIONS]"; exit 0 ;;
+      --format) echo '{"summary":{"total_commands":10,"total_input":65000,"total_saved":50000,"avg_savings_pct":76.9,"total_time_ms":300},"daily":[]}'; exit 0 ;;
+      --daily)  echo '{"summary":{"total_commands":10,"total_input":65000,"total_saved":50000,"avg_savings_pct":76.9,"total_time_ms":300},"daily":[]}'; exit 0 ;;
+      *)
+        printf 'RTK Token Savings (Global Scope)\n\nBy Command\n'
+        printf '────────────────────────────────────────────────────────────────────────\n'
+        printf '  #  Command                   Count   Saved    Avg%%%%    Time  Impact    \n'
+        printf '────────────────────────────────────────────────────────────────────────\n'
+        printf ' 1.  cargo test                    5   40.0K   80.0%%%%     0ms  ██████████\n'
+        printf ' 2.  git log                       3    9.0K   75.0%%%%     0ms  ████░░░░░░\n'
+        printf ' 3.  npm test                      2    1.0K   33.3%%%%     0ms  ███░░░░░░░\n'
+        printf '────────────────────────────────────────────────────────────────────────\n'
+        exit 0 ;;
     esac ;;
   *)  exit 0 ;;
 esac
@@ -107,7 +116,7 @@ MOCK
 }
 
 # mock_cmd_no_loops
-# RTK mock whose history has all command counts below the loop threshold (3)
+# RTK mock whose "By Command" table has all counts below the loop threshold (3).
 mock_cmd_no_loops() {
   cat > "$TMP_BIN/rtk" << 'MOCK'
 #!/usr/bin/env bash
@@ -115,10 +124,17 @@ case "$1" in
   --version) echo "rtk 0.34.3-mock"; exit 0 ;;
   gain)
     case "$2" in
-      --help)    echo "Usage: rtk gain [OPTIONS]"; exit 0 ;;
-      --history) echo '{"summary":{},"commands":[{"cmd":"git status","count":1,"total_input":500,"total_saved":400,"avg_pct":80.0},{"cmd":"ls","count":2,"total_input":200,"total_saved":160,"avg_pct":80.0}]}'; exit 0 ;;
-      --format)  echo '{"summary":{"total_commands":3,"total_input":700,"total_saved":560,"avg_savings_pct":80.0,"total_time_ms":50},"daily":[]}'; exit 0 ;;
-      *)         echo "Usage: rtk gain [OPTIONS]"; exit 0 ;;
+      --help)   echo "Usage: rtk gain [OPTIONS]"; exit 0 ;;
+      --format) echo '{"summary":{"total_commands":3,"total_input":700,"total_saved":560,"avg_savings_pct":80.0,"total_time_ms":50},"daily":[]}'; exit 0 ;;
+      *)
+        printf 'RTK Token Savings (Global Scope)\n\nBy Command\n'
+        printf '────────────────────────────────────────────────────────────────────────\n'
+        printf '  #  Command                   Count   Saved    Avg%%%%    Time  Impact    \n'
+        printf '────────────────────────────────────────────────────────────────────────\n'
+        printf ' 1.  git status                    1    0.4K   80.0%%%%     0ms  ████░░░░░░\n'
+        printf ' 2.  ls                            2    0.2K   80.0%%%%     0ms  ███░░░░░░░\n'
+        printf '────────────────────────────────────────────────────────────────────────\n'
+        exit 0 ;;
     esac ;;
   *)  exit 0 ;;
 esac

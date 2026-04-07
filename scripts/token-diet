@@ -12,7 +12,7 @@
 
 set -euo pipefail
 
-readonly TD_VERSION="1.3.4"
+readonly TD_VERSION="1.3.5"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # --- Colors -------------------------------------------------------------------
@@ -702,23 +702,36 @@ cmd_loops() {
     return 1
   fi
 
-  local json; json=$(rtk gain --history 2>/dev/null) || true
-  if [ -z "$json" ]; then
+  local raw; raw=$(rtk gain 2>/dev/null) || true
+  if [ -z "$raw" ]; then
     echo -e "  ${YELLOW}No RTK history yet${NC}"
     return 0
   fi
 
   local threshold=3
   local loops_found
-  loops_found=$(python3 - "$json" "$threshold" << 'PY'
-import json, sys
-data = json.loads(sys.argv[1])
+  loops_found=$(python3 - "$raw" "$threshold" << 'PY'
+import re, sys
+
+def parse_saved(s):
+    s = s.strip()
+    if s.endswith('K'): return int(float(s[:-1]) * 1000)
+    elif s.endswith('M'): return int(float(s[:-1]) * 1_000_000)
+    elif re.match(r'^\d+$', s): return int(s)
+    return 0
+
+raw = sys.argv[1]
 threshold = int(sys.argv[2])
-loops = [c for c in data.get("commands", []) if c.get("count", 0) >= threshold]
-loops_sorted = sorted(loops, key=lambda c: c["count"], reverse=True)
-for c in loops_sorted:
-    wasted = c.get("total_input", 0) - c.get("total_saved", 0)
-    print(f'{c["cmd"]}\t{c["count"]}\t{wasted}')
+pattern = re.compile(r'^\s*\d+\.\s+(.+?)\s{2,}(\d+)\s+([\d.]+[KM]?)\s+([\d.]+)%', re.MULTILINE)
+for m in pattern.finditer(raw):
+    cmd = m.group(1).rstrip()
+    count = int(m.group(2))
+    if count >= threshold:
+        saved = parse_saved(m.group(3))
+        pct = float(m.group(4))
+        total_input = int(saved / (pct / 100)) if pct > 0 else saved
+        wasted = total_input - saved
+        print(f'{cmd}\t{count}\t{wasted}')
 PY
   ) || true
 
@@ -756,8 +769,8 @@ cmd_breakdown() {
     return 1
   fi
 
-  local json; json=$(rtk gain --history 2>/dev/null) || true
-  if [ -z "$json" ]; then
+  local raw; raw=$(rtk gain 2>/dev/null) || true
+  if [ -z "$raw" ]; then
     echo -e "  ${YELLOW}No RTK history yet — run some commands first${NC}"
     return 0
   fi
@@ -766,20 +779,32 @@ cmd_breakdown() {
   echo -e "${BOLD}Top commands by tokens saved${NC}  ${DIM}(limit: ${limit})${NC}"
   echo -e "${DIM}$(printf '%.0s─' {1..52})${NC}"
 
-  python3 - "$json" "$limit" << 'PY'
-import json, sys
-data = json.loads(sys.argv[1])
+  python3 - "$raw" "$limit" << 'PY'
+import re, sys
+
+def parse_saved(s):
+    s = s.strip()
+    if s.endswith('K'): return int(float(s[:-1]) * 1000)
+    elif s.endswith('M'): return int(float(s[:-1]) * 1_000_000)
+    elif re.match(r'^\d+$', s): return int(s)
+    return 0
+
+raw = sys.argv[1]
 limit = int(sys.argv[2])
-cmds = data.get("commands", [])
-cmds_sorted = sorted(cmds, key=lambda c: c.get("total_saved", 0), reverse=True)[:limit]
-for i, c in enumerate(cmds_sorted, 1):
-    saved = c.get("total_saved", 0)
-    pct   = c.get("avg_pct", 0)
-    count = c.get("count", 0)
-    inp   = c.get("total_input", 0)
-    label = c["cmd"][:34]
+pattern = re.compile(r'^\s*\d+\.\s+(.+?)\s{2,}(\d+)\s+([\d.]+[KM]?)\s+([\d.]+)%', re.MULTILINE)
+rows = []
+for m in pattern.finditer(raw):
+    cmd = m.group(1).rstrip()
+    count = int(m.group(2))
+    saved = parse_saved(m.group(3))
+    pct = float(m.group(4))
+    total_input = int(saved / (pct / 100)) if pct > 0 else saved
+    rows.append((cmd, count, saved, pct, total_input))
+
+for i, (cmd, count, saved, pct, inp) in enumerate(rows[:limit], 1):
     saved_k = f"{saved/1000:.1f}K" if saved >= 1000 else str(saved)
     inp_k   = f"{inp/1000:.1f}K"   if inp   >= 1000 else str(inp)
+    label = cmd[:34]
     print(f"  {i:>2}. {label:<36} {saved_k:>7} saved  {pct:>5.1f}%  ({count}x, {inp_k} in)")
 PY
 
@@ -798,31 +823,43 @@ cmd_explain() {
     return 1
   fi
 
-  local json; json=$(rtk gain --history 2>/dev/null) || true
-  if [ -z "$json" ]; then
+  local raw; raw=$(rtk gain 2>/dev/null) || true
+  if [ -z "$raw" ]; then
     echo -e "  ${YELLOW}No RTK history yet — run some commands first${NC}"
     return 1
   fi
 
   local result
-  result=$(python3 - "$json" "$target" << 'PY'
-import json, sys
-data   = json.loads(sys.argv[1])
+  result=$(python3 - "$raw" "$target" << 'PY'
+import re, sys
+
+def parse_saved(s):
+    s = s.strip()
+    if s.endswith('K'): return int(float(s[:-1]) * 1000)
+    elif s.endswith('M'): return int(float(s[:-1]) * 1_000_000)
+    elif re.match(r'^\d+$', s): return int(s)
+    return 0
+
+raw = sys.argv[1]
 target = sys.argv[2]
-match  = next((c for c in data.get("commands", []) if c["cmd"] == target), None)
-if not match:
-    sys.exit(1)
-saved = match.get("total_saved", 0)
-inp   = match.get("total_input",  0)
-pct   = match.get("avg_pct",      0)
-count = match.get("count",        0)
-out   = inp - saved
-print(f"cmd={match['cmd']}")
-print(f"count={count}")
-print(f"input={inp}")
-print(f"output={out}")
-print(f"saved={saved}")
-print(f"pct={pct}")
+pattern = re.compile(r'^\s*\d+\.\s+(.+?)\s{2,}(\d+)\s+([\d.]+[KM]?)\s+([\d.]+)%', re.MULTILINE)
+for m in pattern.finditer(raw):
+    cmd = m.group(1).rstrip()
+    if cmd != target:
+        continue
+    count = int(m.group(2))
+    saved = parse_saved(m.group(3))
+    pct = float(m.group(4))
+    total_input = int(saved / (pct / 100)) if pct > 0 else saved
+    out = total_input - saved
+    print(f"cmd={cmd}")
+    print(f"count={count}")
+    print(f"input={total_input}")
+    print(f"output={out}")
+    print(f"saved={saved}")
+    print(f"pct={pct}")
+    sys.exit(0)
+sys.exit(1)
 PY
   ) || true
 
@@ -887,19 +924,32 @@ cmd_leaks() {
   fi
 
   local raw
-  raw=$(rtk gain --history 2>/dev/null) || { miss "RTK history unavailable"; exit 1; }
+  raw=$(rtk gain 2>/dev/null) || { miss "RTK history unavailable"; exit 1; }
 
   local leaks
   leaks=$(python3 - "$raw" << 'PY'
-import sys, json, re
-data = json.loads(sys.argv[1])
-cmds = data.get("commands", [])
-FILE_READ = re.compile(r'\b(?:cat|head|tail|tilth\s+read|tilth_read)\s+(\S+\.\w+)')
+import re, sys
+
+def parse_saved(s):
+    s = s.strip()
+    if s.endswith('K'): return int(float(s[:-1]) * 1000)
+    elif s.endswith('M'): return int(float(s[:-1]) * 1_000_000)
+    elif re.match(r'^\d+$', s): return int(s)
+    return 0
+
+raw = sys.argv[1]
+pattern = re.compile(r'^\s*\d+\.\s+(.+?)\s{2,}(\d+)\s+([\d.]+[KM]?)\s+([\d.]+)%', re.MULTILINE)
+FILE_READ = re.compile(r'\b(?:rtk\s+)?(?:cat|head|tail|tilth\s+read|tilth_read)\s+(\S+\.\w+)')
 found = []
-for c in cmds:
-    m = FILE_READ.search(c.get("cmd", ""))
-    if m and c.get("count", 0) >= 2:
-        found.append((m.group(1), c["count"], c.get("total_input", 0)))
+for m in pattern.finditer(raw):
+    cmd = m.group(1).rstrip()
+    count = int(m.group(2))
+    fm = FILE_READ.search(cmd)
+    if fm and count >= 2:
+        saved = parse_saved(m.group(3))
+        pct = float(m.group(4))
+        total_input = int(saved / (pct / 100)) if pct > 0 else saved
+        found.append((fm.group(1), count, total_input))
 found.sort(key=lambda x: x[1], reverse=True)
 for f, cnt, tok in found:
     print(f"{f}\t{cnt}\t{tok}")

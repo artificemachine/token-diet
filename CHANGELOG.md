@@ -337,3 +337,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 * `scripts/Install.ps1` — Serena + tilth MCP entries injected into `claude_desktop_config.json` for Cowork
 * `scripts/Install.ps1` — log rotation (512 KB cap on `install.log`)
 * `scripts/Install.ps1` — interactive wizard gains local-mode prompt
+
+## [1.3.2] — 2026-04-07
+
+### Fixed
+* `.vscode/mcp.json` — replaced hardcoded absolute path `/Users/…/.local/bin/tilth` with plain `tilth` (portable across machines)
+
+### Added
+* `AGENTS.md`, `SOUL.md` — superharness project scaffolding

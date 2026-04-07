@@ -23,13 +23,20 @@
 .PARAMETER SkipTests
     Skip clippy + tests in -Local mode (faster install).
 
+.PARAMETER Hosts
+    Comma-separated list of AI hosts to wire integrations for.
+    Valid values: claude, codex, opencode, copilot, vscode, cowork
+    Default: prompt when multiple hosts are detected; skip prompt when only one is found.
+    Example: -Hosts "claude,vscode"
+
 .EXAMPLE
-    .\Install.ps1                # install all
-    .\Install.ps1 -Tool RTK     # RTK only
-    .\Install.ps1 -VerifyOnly   # check status
-    .\Install.ps1 -DryRun       # simulate install, no changes made
-    .\Install.ps1 -Local         # air-gapped build from forks/
-    .\Install.ps1 -FullOutput    # show all build output + log to file
+    .\Install.ps1                           # install all, prompt for host selection
+    .\Install.ps1 -Tool RTK                 # RTK only
+    .\Install.ps1 -VerifyOnly               # check status
+    .\Install.ps1 -DryRun                   # simulate install, no changes made
+    .\Install.ps1 -Local                    # air-gapped build from forks/
+    .\Install.ps1 -FullOutput               # show all build output + log to file
+    .\Install.ps1 -Hosts "claude,vscode"    # only wire Claude Code and VS Code
 #>
 
 [CmdletBinding()]
@@ -41,7 +48,8 @@ param(
     [switch]$DryRun,
     [switch]$FullOutput,
     [switch]$Local,
-    [switch]$SkipTests
+    [switch]$SkipTests,
+    [string]$Hosts = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -264,6 +272,91 @@ function Detect-Hosts {
     if (-not $script:HasClaude -and -not $script:HasCodex -and -not $script:HasOpenCode `
         -and -not $script:HasCopilot -and -not $script:HasVSCode -and -not $script:HasCowork) {
         Write-Warn "No AI host detected. Tools installed but MCP/hook integration skipped."
+    }
+}
+
+# --- Host selection -----------------------------------------------------------
+# Applies -Hosts filter or prompts when multiple hosts are found.
+# Sets $script:Has* flags to false for any host not selected.
+function Confirm-Hosts {
+    # Map slug -> flag variable name and display label
+    $hostMap = [ordered]@{
+        "claude"   = @{ Var = "HasClaude";   Label = "Claude Code" }
+        "codex"    = @{ Var = "HasCodex";    Label = "Codex CLI" }
+        "opencode" = @{ Var = "HasOpenCode"; Label = "OpenCode" }
+        "copilot"  = @{ Var = "HasCopilot";  Label = "Copilot CLI" }
+        "vscode"   = @{ Var = "HasVSCode";   Label = "VS Code" }
+        "cowork"   = @{ Var = "HasCowork";   Label = "Cowork (Desktop)" }
+    }
+
+    # Build list of currently detected hosts
+    $detected = @()
+    foreach ($slug in $hostMap.Keys) {
+        $varName = $hostMap[$slug].Var
+        if ((Get-Variable -Name $varName -Scope Script -ValueOnly)) {
+            $detected += $slug
+        }
+    }
+
+    if ($detected.Count -le 1) { return }   # nothing to choose from
+
+    # -Hosts flag supplied — apply it without prompting
+    if ($Hosts -ne "") {
+        $selected = $Hosts.ToLower() -split '[,\s]+' | Where-Object { $_ -ne "" }
+        foreach ($slug in $hostMap.Keys) {
+            if ($slug -notin $selected) {
+                Set-Variable -Name $hostMap[$slug].Var -Scope Script -Value $false
+            }
+        }
+        $kept = ($selected | Where-Object { $_ -in $hostMap.Keys }) -join ", "
+        Write-Info "Host integrations limited to: $kept"
+        return
+    }
+
+    # Interactive prompt
+    Write-Host ""
+    Write-Host "  Detected AI hosts:" -ForegroundColor White
+    $i = 1
+    $indexMap = @{}
+    foreach ($slug in $detected) {
+        Write-Host "    [$i] $($hostMap[$slug].Label)" -ForegroundColor Cyan
+        $indexMap[$i] = $slug
+        $i++
+    }
+    Write-Host ""
+    Write-Host "  Install integrations for all detected hosts? [Y/n/list]" -ForegroundColor White
+    Write-Host "    Y = all (default)  |  n = none  |  list = e.g. 1,3 or claude,vscode" -ForegroundColor DarkGray
+    $answer = Read-Host "  > "
+
+    if ($answer -eq "" -or $answer -match '^[Yy]') { return }   # keep all
+
+    $selected = @()
+    if ($answer -match '^[Nn]$') {
+        # deselect all
+    } else {
+        # parse numbers or names
+        $tokens = $answer -split '[,\s]+' | Where-Object { $_ -ne "" }
+        foreach ($token in $tokens) {
+            if ($token -match '^\d+$') {
+                $idx = [int]$token
+                if ($indexMap.ContainsKey($idx)) { $selected += $indexMap[$idx] }
+            } elseif ($token.ToLower() -in $hostMap.Keys) {
+                $selected += $token.ToLower()
+            }
+        }
+    }
+
+    foreach ($slug in $hostMap.Keys) {
+        if ($slug -notin $selected) {
+            Set-Variable -Name $hostMap[$slug].Var -Scope Script -Value $false
+        }
+    }
+
+    if ($selected.Count -eq 0) {
+        Write-Warn "No hosts selected — integrations will be skipped."
+    } else {
+        $kept = ($selected | ForEach-Object { $hostMap[$_].Label }) -join ", "
+        Write-Info "Host integrations limited to: $kept"
     }
 }
 
@@ -970,6 +1063,7 @@ if ($doSerena -and -not $Local) { Ensure-Uv }
 if ($doSerena -and $Local) { Ensure-Docker }
 
 Detect-Hosts
+Confirm-Hosts
 
 if ($doRtk)    { Install-RTK }
 if ($doTilth)  { Install-Tilth }

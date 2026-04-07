@@ -785,8 +785,11 @@ install_token_diet() {
     ok "token-diet-dashboard installed: $bin_dir/token-diet-dashboard"
   fi
 
-  # Copy installer so `token-diet verify` works from ~/.local/bin
+  # Copy installer + uninstaller so `token-diet verify/uninstall` work from ~/.local/bin
   install -m755 "$SCRIPT_DIR/install.sh" "$bin_dir/token-diet-install.sh"
+  if [ -f "$SCRIPT_DIR/uninstall.sh" ]; then
+    install -m755 "$SCRIPT_DIR/uninstall.sh" "$bin_dir/uninstall.sh"
+  fi
 
   # Nudge if ~/.local/bin not in PATH
   if ! echo "$PATH" | grep -q "$HOME/.local/bin"; then

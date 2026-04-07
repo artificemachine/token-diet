@@ -192,6 +192,7 @@ ensure_docker() {
 
 # --- Host detection -----------------------------------------------------------
 HAS_CLAUDE=false; HAS_CODEX=false; HAS_OPENCODE=false; HAS_COPILOT=false; HAS_VSCODE=false; HAS_COWORK=false
+HOSTS_FILTER=""   # set by --hosts flag; empty = prompt when multiple detected
 COWORK_CFG="$HOME/Library/Application Support/Claude/claude_desktop_config.json"
 
 detect_hosts() {
@@ -213,6 +214,111 @@ detect_hosts() {
 
   if ! $HAS_CLAUDE && ! $HAS_CODEX && ! $HAS_OPENCODE && ! $HAS_COPILOT && ! $HAS_VSCODE && ! $HAS_COWORK; then
     warn "No AI host detected. Tools installed but integrations skipped."
+  fi
+}
+
+# --- Host selection -----------------------------------------------------------
+# Returns "true" if the given slug is currently enabled.
+_host_is_set() {
+  case "$1" in
+    claude)   echo "$HAS_CLAUDE" ;;
+    codex)    echo "$HAS_CODEX" ;;
+    opencode) echo "$HAS_OPENCODE" ;;
+    copilot)  echo "$HAS_COPILOT" ;;
+    vscode)   echo "$HAS_VSCODE" ;;
+    cowork)   echo "$HAS_COWORK" ;;
+    *)        echo "false" ;;
+  esac
+}
+
+# Sets the flag for the given slug to false.
+_host_disable() {
+  case "$1" in
+    claude)   HAS_CLAUDE=false ;;
+    codex)    HAS_CODEX=false ;;
+    opencode) HAS_OPENCODE=false ;;
+    copilot)  HAS_COPILOT=false ;;
+    vscode)   HAS_VSCODE=false ;;
+    cowork)   HAS_COWORK=false ;;
+  esac
+}
+
+# Applies --hosts filter or prompts when multiple hosts are found.
+# Zeros out HAS_* flags for any host not selected.
+confirm_hosts() {
+  local slugs=("claude" "codex" "opencode" "copilot" "vscode" "cowork")
+  local labels=("Claude Code" "Codex CLI" "OpenCode" "Copilot CLI" "VS Code" "Cowork (Desktop)")
+  local detected_slugs=()
+  local detected_labels=()
+
+  for i in "${!slugs[@]}"; do
+    if [ "$(_host_is_set "${slugs[$i]}")" = "true" ]; then
+      detected_slugs+=("${slugs[$i]}")
+      detected_labels+=("${labels[$i]}")
+    fi
+  done
+
+  if [ "${#detected_slugs[@]}" -le 1 ]; then return; fi   # nothing to choose from
+
+  # --hosts flag supplied — apply without prompting
+  if [ -n "$HOSTS_FILTER" ]; then
+    for slug in "${slugs[@]}"; do
+      if ! echo ",$HOSTS_FILTER," | grep -qi ",$slug,"; then
+        _host_disable "$slug"
+      fi
+    done
+    info "Host integrations limited to: $HOSTS_FILTER"
+    return
+  fi
+
+  # Interactive prompt (skip in dry-run / non-interactive)
+  if [ "${DRY_RUN:-false}" = "true" ] || [ ! -t 0 ]; then return; fi
+
+  echo ""
+  echo -e "${BOLD}  Detected AI hosts:${NC}"
+  local n=1
+  for label in "${detected_labels[@]}"; do
+    echo -e "    ${BLUE}[$n] $label${NC}"
+    n=$((n+1))
+  done
+  echo ""
+  echo -e "${BOLD}  Install integrations for all detected hosts? [Y/n/list]${NC}"
+  echo    "  Y = all (default)  |  n = none  |  list = e.g. 1,3 or claude,vscode"
+  local answer
+  read -rp "  > " answer
+
+  if [ -z "$answer" ] || echo "$answer" | grep -qi '^y'; then return; fi
+
+  local selected_slugs=()
+  if ! echo "$answer" | grep -qi '^n$'; then
+    IFS=', ' read -ra tokens <<< "$answer"
+    for token in "${tokens[@]}"; do
+      token=$(echo "$token" | tr '[:upper:]' '[:lower:]' | tr -d ' ')
+      # numeric index
+      if [[ "$token" =~ ^[0-9]+$ ]] && [ "$token" -ge 1 ] && [ "$token" -le "${#detected_slugs[@]}" ]; then
+        selected_slugs+=("${detected_slugs[$((token-1))]}")
+      else
+        # slug name — validate it's in detected list
+        for s in "${detected_slugs[@]}"; do
+          if [ "$s" = "$token" ]; then
+            selected_slugs+=("$token")
+          fi
+        done
+      fi
+    done
+  fi
+
+  # Zero out unselected
+  for slug in "${detected_slugs[@]}"; do
+    if ! printf '%s\n' "${selected_slugs[@]}" | grep -qx "$slug"; then
+      _host_disable "$slug"
+    fi
+  done
+
+  if [ "${#selected_slugs[@]}" -eq 0 ]; then
+    warn "No hosts selected — integrations will be skipped."
+  else
+    info "Host integrations limited to: ${selected_slugs[*]}"
   fi
 }
 
@@ -875,6 +981,10 @@ Options:
   --verify       Only verify current installation
   --no-dedup     Skip overlap fix configuration
   --skip-tests   Skip clippy + tests in --local mode (faster install)
+  --hosts LIST   Comma-separated list of AI hosts to wire integrations for.
+                 Valid: claude, codex, opencode, copilot, vscode, cowork
+                 Default: prompt when multiple hosts detected.
+                 Example: --hosts "claude,vscode"
   --dry-run      Simulate install — detect hosts and show what would run, no changes made
   --verbose      Show full build output instead of last 5 lines; log to ~/.local/share/token-diet/install.log
   -h, --help     Show this help
@@ -961,6 +1071,7 @@ main() {
       --skip-tests)   SKIP_TESTS=true ;;
       --dry-run)      DRY_RUN=true; SKIP_TESTS=true ;;
       --verbose)      VERBOSE=true ;;
+      --hosts)        shift; HOSTS_FILTER="$1" ;;
       -h|--help)      usage; exit 0 ;;
       *)              warn "Unknown option: $1"; usage; exit 1 ;;
     esac
@@ -1005,6 +1116,7 @@ main() {
   # Detect AI hosts
   header "AI Host Detection"
   detect_hosts
+  confirm_hosts
 
   # Install tools
   $do_rtk    && install_rtk

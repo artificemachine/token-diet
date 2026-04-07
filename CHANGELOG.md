@@ -352,3 +352,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 * `scripts/token-diet` — `no-rtk` command: temporarily disables the RTK Claude Code hook via a sentinel file (`~/.config/token-diet/rtk-disabled`); patches the hook to respect it (idempotent)
 * `scripts/token-diet` — `use-rtk` command: removes the sentinel file and re-enables RTK filtering
 * `tests/token-diet.bats` — 6 tests covering `no-rtk`/`use-rtk` toggle behaviour
+
+## [1.3.4] - 2026-04-07
+
+### Fixed
+* `scripts/install.sh` — copy `uninstall.sh` to `~/.local/bin/` during installation so `token-diet uninstall` works from the installed binary
+* `scripts/token-diet` — `cmd_uninstall()` now falls back gracefully to sibling `uninstall.sh` rather than hard-failing when the script isn't on PATH; emits a clear reinstall hint on missing file

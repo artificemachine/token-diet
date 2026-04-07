@@ -12,7 +12,7 @@
 
 set -euo pipefail
 
-readonly TD_VERSION="1.3.2"
+readonly TD_VERSION="1.3.3"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # --- Colors -------------------------------------------------------------------
@@ -1180,6 +1180,50 @@ cmd_serena_gc() {
   echo ""
 }
 
+# --- RTK toggle ---------------------------------------------------------------
+RTK_DISABLED_FLAG="$HOME/.config/token-diet/rtk-disabled"
+RTK_HOOK="$HOME/.claude/hooks/rtk-rewrite.sh"
+
+_patch_rtk_hook() {
+  # Inject sentinel-file check into the Claude Code RTK hook (idempotent).
+  # Safe to call multiple times — bails out if already patched.
+  [ -f "$RTK_HOOK" ] || return 0
+  grep -q "rtk-disabled" "$RTK_HOOK" && return 0
+
+  local tmp
+  tmp="$(mktemp)"
+  awk '
+    /^if ! command -v jq/ && !patched {
+      print "# Temporary disable (token-diet no-rtk / token-diet use-rtk)"
+      print "if [ -f \"$HOME/.config/token-diet/rtk-disabled\" ]; then exit 0; fi"
+      print ""
+      patched=1
+    }
+    { print }
+  ' "$RTK_HOOK" > "$tmp" && mv "$tmp" "$RTK_HOOK"
+}
+
+cmd_no_rtk() {
+  mkdir -p "$(dirname "$RTK_DISABLED_FLAG")"
+  touch "$RTK_DISABLED_FLAG"
+  _patch_rtk_hook
+  echo -e "${BOLD}[ok]${NC}  RTK disabled — commands pass through unfiltered"
+  echo      "      Re-enable: token-diet use-rtk"
+  if ! grep -q "rtk-disabled" "$RTK_HOOK" 2>/dev/null; then
+    echo -e "${YELLOW}[warn]${NC} RTK hook not found at $RTK_HOOK"
+    echo      "       Sentinel file created; hook bypass will apply once hook is installed."
+  fi
+}
+
+cmd_use_rtk() {
+  if [ ! -f "$RTK_DISABLED_FLAG" ]; then
+    echo -e "${BOLD}[ok]${NC}  RTK is already enabled"
+    return 0
+  fi
+  rm -f "$RTK_DISABLED_FLAG"
+  echo -e "${BOLD}[ok]${NC}  RTK re-enabled — commands filtered for token savings"
+}
+
 cmd_help() {
   cat << EOF
 
@@ -1205,6 +1249,8 @@ ${BOLD}COMMANDS${NC}
   service <sub>     Manage always-on dashboard daemon  (install|uninstall|start|stop|status)
   version           Show installed versions of all three tools
   verify            Re-run installation verification
+  no-rtk            Temporarily disable RTK hook (commands pass through unfiltered)
+  use-rtk           Re-enable RTK hook
   uninstall         Remove all token-diet components  [--dry-run] [--force]
   --help            Show this help
 
@@ -1239,6 +1285,8 @@ case "${1:-gain}" in
   diff-reads)        shift; cmd_diff_reads "$@" ;;
   serena-gc)         shift; cmd_serena_gc "$@" ;;
   uninstall)         shift; cmd_uninstall "$@" ;;
+  no-rtk)            cmd_no_rtk ;;
+  use-rtk)           cmd_use_rtk ;;
   --help|-h|help)    cmd_help ;;
   --version)         echo "token-diet $TD_VERSION" ;;
   *)  echo "Unknown command: $1"; cmd_help; exit 1 ;;

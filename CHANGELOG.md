@@ -402,3 +402,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ### Tests
 * `tests/token-diet.bats` — 6 new tests (Cycle 16): compat version OK/WARN, doctor compat block, doctor exits 1 on below-min tool
 * `tests/install.bats` — 5 new tests (Cycles 5.1–5.4): opencode/cowork malformed JSON recovery, idempotent re-install, uninstall idempotency
+
+## [1.4.1] - 2026-04-13
+
+### Changed
+* `config/compat.json` — update serena tested version to `0.1.5` (fork version scheme); bump rtk tested to `0.34.4`; lower serena minimum to `0.1.0` (fork epoch)
+* `forks/serena` — bump submodule to v0.1.5: SEC-003 atomic writes, SEC-002 extended metachar guard + `--no-shell` flag, SEC-004 LS pre-flight binary validation, `serena doctor [--json]` CLI subcommand; 36 security tests passing
+* `scripts/token-diet` — version bump 1.4.0 → 1.4.1
+* `scripts/token-diet.ps1` — version bump 1.4.0 → 1.4.1

@@ -419,3 +419,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 * `config/compat.json` — rtk tested→0.34.5, tilth tested→0.6.1
 * `scripts/install.sh` — symlink RTK and tilth from `~/.cargo/bin/` into `~/.local/bin/` instead of copying; macOS security policy (SIGKILL) kills copied Rust binaries in `~/.local/bin` but honours symlinks
 * `scripts/token-diet` + `scripts/token-diet.ps1` — version bump 1.4.1 → 1.4.2
+
+## [1.4.3] - 2026-04-13
+
+### Fixed
+* `docker/Dockerfile.serena` — add `nodejs npm` to builder stage; `python:3.12-slim` has no Node.js, causing `npm install -g typescript-language-server typescript` to silently no-op and `COPY --from=builder /usr/local/bin/tsserver` to fail. Image now builds and runs correctly.

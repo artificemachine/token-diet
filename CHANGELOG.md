@@ -410,3 +410,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 * `forks/serena` — bump submodule to v0.1.5: SEC-003 atomic writes, SEC-002 extended metachar guard + `--no-shell` flag, SEC-004 LS pre-flight binary validation, `serena doctor [--json]` CLI subcommand; 36 security tests passing
 * `scripts/token-diet` — version bump 1.4.0 → 1.4.1
 * `scripts/token-diet.ps1` — version bump 1.4.0 → 1.4.1
+
+## [1.4.2] - 2026-04-13
+
+### Changed
+* `forks/rtk` — bump submodule to v0.34.5: clippy clean on Rust 1.94 (7 lint fixes)
+* `forks/tilth` — bump submodule to v0.6.1: clippy clean on Rust 1.94 (9 lint fixes)
+* `config/compat.json` — rtk tested→0.34.5, tilth tested→0.6.1
+* `scripts/install.sh` — symlink RTK and tilth from `~/.cargo/bin/` into `~/.local/bin/` instead of copying; macOS security policy (SIGKILL) kills copied Rust binaries in `~/.local/bin` but honours symlinks
+* `scripts/token-diet` + `scripts/token-diet.ps1` — version bump 1.4.1 → 1.4.2

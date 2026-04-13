@@ -927,6 +927,8 @@ function Verify-Stack {
             Write-Ok "Serena (via uv) . $(uv --version 2>$null)"
         } else { Write-Warn "Serena (uv) ..... not installed"; $allOk = $false }
     }
+    $serenaIssue = Get-CodexMcpCommandIssue 'serena'
+    if ($serenaIssue) { Write-Warn $serenaIssue; $allOk = $false }
 
     Write-Host ""
     if (Test-Cmd "claude")               { Write-Ok "Claude Code ..... available" } else { Write-Warn "Claude Code ..... not found" }

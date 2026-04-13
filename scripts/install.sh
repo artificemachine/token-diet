@@ -123,11 +123,12 @@ mcp_command_exists() {
   fi
 }
 
-codex_tilth_issue() {
+codex_mcp_issue() {
+  local tool="$1"
   local command_value
-  command_value="$(codex_mcp_command "tilth")" || return 0
+  command_value="$(codex_mcp_command "$tool")" || return 0
   if ! mcp_command_exists "$command_value"; then
-    echo "Codex tilth MCP command missing: ${command_value}"
+    echo "Codex ${tool} MCP command missing: ${command_value}"
   fi
   return 0
 }
@@ -193,7 +194,28 @@ ensure_docker() {
 # --- Host detection -----------------------------------------------------------
 HAS_CLAUDE=false; HAS_CODEX=false; HAS_OPENCODE=false; HAS_COPILOT=false; HAS_VSCODE=false; HAS_COWORK=false
 HOSTS_FILTER=""   # set by --hosts flag; empty = prompt when multiple detected
-COWORK_CFG="$HOME/Library/Application Support/Claude/claude_desktop_config.json"
+
+resolve_cowork_cfg() {
+  local mac_cfg="$HOME/Library/Application Support/Claude/claude_desktop_config.json"
+  local linux_cfg="$HOME/.config/Claude/claude_desktop_config.json"
+
+  if [ -f "$mac_cfg" ]; then
+    echo "$mac_cfg"
+    return
+  fi
+
+  if [ -f "$linux_cfg" ]; then
+    echo "$linux_cfg"
+    return
+  fi
+
+  case "$(uname -s)" in
+    Darwin) echo "$mac_cfg" ;;
+    *)      echo "$linux_cfg" ;;
+  esac
+}
+
+COWORK_CFG="$(resolve_cowork_cfg)"
 
 detect_hosts() {
   check_command claude     && HAS_CLAUDE=true
@@ -202,8 +224,8 @@ detect_hosts() {
   check_command github-copilot-cli && HAS_COPILOT=true
   # VS Code: check if 'code' CLI exists
   check_command code       && HAS_VSCODE=true
-  # Cowork (Claude Desktop): check for config file
-  [ -f "$COWORK_CFG" ] && HAS_COWORK=true
+  # Cowork (Claude Desktop): check for config file or desktop app
+  { [ -f "$COWORK_CFG" ] || check_command claude-desktop; } && HAS_COWORK=true
 
   if $HAS_CLAUDE;   then ok "Claude Code ..... found"; else warn "Claude Code ..... not found"; fi
   if $HAS_CODEX;    then ok "Codex CLI ....... found"; else warn "Codex CLI ....... not found"; fi
@@ -621,11 +643,16 @@ JSON
       dryrun "Write mcpServers.serena entry to $oc_cfg"
     elif $LOCAL_MODE; then
       python3 - "$oc_cfg" <<'PYEOF'
-import json, sys
+import json, sys, shutil
 cfg = sys.argv[1]
 try:
     with open(cfg) as f: data = json.load(f)
 except FileNotFoundError:
+    data = {}
+except (json.JSONDecodeError, ValueError):
+    backup = cfg + ".bak"
+    shutil.copy2(cfg, backup)
+    print(f"[token-diet] WARNING: malformed JSON in {cfg} — backed up to {backup}, starting fresh", file=sys.stderr)
     data = {}
 data.setdefault("mcpServers", {})
 data["mcpServers"]["serena"] = {
@@ -641,11 +668,16 @@ PYEOF
       ok "Serena MCP: OpenCode (Docker, $oc_cfg)"
     else
       python3 - "$oc_cfg" "${SERENA_REPO}" <<'PYEOF'
-import json, sys
+import json, sys, shutil
 cfg, repo = sys.argv[1], sys.argv[2]
 try:
     with open(cfg) as f: data = json.load(f)
 except FileNotFoundError:
+    data = {}
+except (json.JSONDecodeError, ValueError):
+    backup = cfg + ".bak"
+    shutil.copy2(cfg, backup)
+    print(f"[token-diet] WARNING: malformed JSON in {cfg} — backed up to {backup}, starting fresh", file=sys.stderr)
     data = {}
 data.setdefault("mcpServers", {})
 data["mcpServers"]["serena"] = {
@@ -671,11 +703,16 @@ PYEOF
     else
       if $LOCAL_MODE; then
         python3 - "$COWORK_CFG" <<'PYEOF'
-import json, sys
+import json, sys, shutil
 cfg = sys.argv[1]
 try:
     with open(cfg) as f: data = json.load(f)
 except FileNotFoundError:
+    data = {}
+except (json.JSONDecodeError, ValueError):
+    backup = cfg + ".bak"
+    shutil.copy2(cfg, backup)
+    print(f"[token-diet] WARNING: malformed JSON in {cfg} — backed up to {backup}, starting fresh", file=sys.stderr)
     data = {}
 data.setdefault("mcpServers", {})
 data["mcpServers"]["serena"] = {
@@ -690,11 +727,16 @@ with open(cfg, "w") as f:
 PYEOF
       else
         python3 - "$COWORK_CFG" "${SERENA_REPO}" <<'PYEOF'
-import json, sys
+import json, sys, shutil
 cfg, repo = sys.argv[1], sys.argv[2]
 try:
     with open(cfg) as f: data = json.load(f)
 except FileNotFoundError:
+    data = {}
+except (json.JSONDecodeError, ValueError):
+    backup = cfg + ".bak"
+    shutil.copy2(cfg, backup)
+    print(f"[token-diet] WARNING: malformed JSON in {cfg} — backed up to {backup}, starting fresh", file=sys.stderr)
     data = {}
 data.setdefault("mcpServers", {})
 data["mcpServers"]["serena"] = {
@@ -800,7 +842,7 @@ verify_stack() {
   if check_command tilth; then
     ok "tilth ........... $(tilth --version 2>/dev/null || echo 'installed')"
     local tilth_codex_issue
-    tilth_codex_issue="$(codex_tilth_issue)"
+    tilth_codex_issue="$(codex_mcp_issue "tilth")"
     if [ -n "$tilth_codex_issue" ]; then
       warn "$tilth_codex_issue"
       all_ok=false
@@ -824,6 +866,13 @@ verify_stack() {
       warn "Serena (uv) ..... uv not installed"
       all_ok=false
     fi
+  fi
+
+  local serena_codex_issue
+  serena_codex_issue="$(codex_mcp_issue "serena")"
+  if [ -n "$serena_codex_issue" ]; then
+    warn "$serena_codex_issue"
+    all_ok=false
   fi
 
   echo ""

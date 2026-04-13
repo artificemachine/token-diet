@@ -387,3 +387,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ### Added
 * `scripts/install.sh` — `--hosts LIST` flag: comma-separated list of AI hosts to wire integrations for (e.g. `--hosts "claude,vscode"`); prompts interactively when multiple hosts are detected and no flag is given
 * `scripts/Install.ps1` — `-Hosts` parameter: same semantics as `--hosts` on macOS/Linux; interactive numbered prompt when multiple hosts are detected and no flag is given
+
+## [1.4.0] - 2026-04-13
+
+### Added
+* `config/compat.json` — new cross-tool version compatibility manifest: schema-1 with `min`/`tested` versions for RTK, tilth, and Serena
+* `scripts/token-diet` — `cmd_version`: shows per-tool compat status (OK / WARN below minimum) using `_compat_min()` + `_semver_ok()` helpers
+* `scripts/token-diet` — `cmd_doctor [--json]`: compat block added to JSON output with per-tool status; MCP registration section delegates to `tilth doctor --json` (covers all 22 hosts vs 4 previously)
+* `forks/tilth` — bump submodule to v0.6.0: adds `tilth doctor [--json]` subcommand; checks tilth registration across all 22 MCP hosts; reports `healthy`, `registered_hosts`, and per-host `command`/`command_ok` status
+
+### Fixed
+* `scripts/install.sh` — malformed JSON recovery: 4 remaining `json.load` sites now catch `json.JSONDecodeError` and back up the corrupt file before starting fresh, preventing crash under `set -euo pipefail`
+
+### Tests
+* `tests/token-diet.bats` — 6 new tests (Cycle 16): compat version OK/WARN, doctor compat block, doctor exits 1 on below-min tool
+* `tests/install.bats` — 5 new tests (Cycles 5.1–5.4): opencode/cowork malformed JSON recovery, idempotent re-install, uninstall idempotency

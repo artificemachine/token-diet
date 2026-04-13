@@ -22,7 +22,7 @@ if ($args -and $args.Count -gt 0) { $SubArgs += $args }
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-$script:TD_VERSION = '1.3.7'
+$script:TD_VERSION = '1.4.0'
 if ($Version) { Write-Output "token-diet $script:TD_VERSION"; exit 0 }
 $ScriptDir = $PSScriptRoot
 
@@ -204,6 +204,8 @@ function Invoke-Verify {
         $v = if (Test-Tool 'uvx') { & uvx --version 2>$null } else { & uv --version 2>$null }
         Write-Output "  [OK] Serena (uv) ... $v"
     } else { Write-Output '  [!]  Serena ........ not installed'; $allOk = $false }
+    $serenaIssue = Get-CodexMcpCommandIssue 'serena'
+    if ($serenaIssue) { Write-Output "  [!]  $serenaIssue"; $allOk = $false }
     Write-Output ''
     if ($allOk) { Write-Output '  [OK] All tools installed. Token diet active.' }
     else        { Write-Output '  [W]  Some tools or MCP registrations need attention.'; Write-Output ''; exit 1 }
@@ -224,6 +226,8 @@ function Invoke-Health {
     if ((Test-Tool 'uvx') -or (Test-Tool 'uv')) {
         Write-Ok "Serena  (hosts: $(Get-HostsRegistered 'serena'))"
     } else { Write-Miss 'Serena not found  (uvx or uv required)'; $issues++ }
+    $serenaIssue = Get-CodexMcpCommandIssue 'serena'
+    if ($serenaIssue) { Write-Warn $serenaIssue; $issues++ }
     Write-Output ''
     if ($issues -eq 0) { Write-Output '  All tools healthy'; Write-Output ''; return }
     Write-Output "  $issues issue(s) found — reinstall tools or repair MCP registrations"

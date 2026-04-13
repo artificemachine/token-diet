@@ -12,7 +12,7 @@
 
 set -euo pipefail
 
-readonly TD_VERSION="1.3.7"
+readonly TD_VERSION="1.4.0"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # --- Colors -------------------------------------------------------------------
@@ -87,6 +87,42 @@ mcp_command_exists() {
   else
     check_cmd "$command_value"
   fi
+}
+
+# Read minimum required version for a tool from config/compat.json.
+# Outputs "0.0.0" if the file is absent or the tool is not listed.
+_compat_min() {
+  local tool="$1"
+  local compat_file="$SCRIPT_DIR/../config/compat.json"
+  if [ ! -f "$compat_file" ]; then echo "0.0.0"; return; fi
+  python3 -c "
+import json, sys
+try:
+    d = json.load(open('$compat_file'))
+    print(d['tools']['$tool']['min'])
+except Exception:
+    print('0.0.0')
+" 2>/dev/null || echo "0.0.0"
+}
+
+# Return 0 (true) when \$installed >= \$min_required (semver comparison).
+# Pre-release suffixes like -mock, -beta are stripped before comparison.
+_semver_ok() {
+  local installed="$1" min="$2"
+  python3 - "$installed" "$min" << 'PY'
+import sys, re
+def parse(v):
+    v = re.sub(r'[^0-9.].*$', '', v)   # strip -mock, -beta, -rc1, etc.
+    parts = v.split('.')
+    try:
+        return tuple(int(x) for x in (parts + ['0', '0', '0'])[:3])
+    except ValueError:
+        return (0, 0, 0)
+try:
+    sys.exit(0 if parse(sys.argv[1]) >= parse(sys.argv[2]) else 1)
+except Exception:
+    sys.exit(0)   # unparseable → assume OK
+PY
 }
 
 codex_mcp_command_issue() {
@@ -234,8 +270,31 @@ print(d['total_commands'],d['total_input'],d['total_saved'],round(d['avg_savings
 
 cmd_version() {
   echo -e "\n${BOLD}token-diet stack versions${NC}\n"
-  check_cmd rtk    && ok "RTK    $(rtk --version 2>/dev/null)"    || miss "RTK    not installed"
-  check_cmd tilth  && ok "tilth  $(tilth --version 2>/dev/null)"  || miss "tilth  not installed"
+
+  if check_cmd rtk; then
+    local rtk_ver; rtk_ver=$(rtk --version 2>/dev/null | awk '{print $2}')
+    local rtk_min; rtk_min=$(_compat_min "rtk")
+    if _semver_ok "$rtk_ver" "$rtk_min"; then
+      ok "RTK    rtk ${rtk_ver}  (compat: OK)"
+    else
+      warn "RTK    rtk ${rtk_ver}  (compat: WARN — below min ${rtk_min}, upgrade: cargo install rtk)"
+    fi
+  else
+    miss "RTK    not installed"
+  fi
+
+  if check_cmd tilth; then
+    local tilth_ver; tilth_ver=$(tilth --version 2>/dev/null | awk '{print $2}')
+    local tilth_min; tilth_min=$(_compat_min "tilth")
+    if _semver_ok "$tilth_ver" "$tilth_min"; then
+      ok "tilth  tilth ${tilth_ver}  (compat: OK)"
+    else
+      warn "tilth  tilth ${tilth_ver}  (compat: WARN — below min ${tilth_min}, upgrade: cargo install tilth)"
+    fi
+  else
+    miss "tilth  not installed"
+  fi
+
   check_cmd uvx    && ok "Serena (uvx available: $(uvx --version 2>/dev/null || echo 'ok'))" \
                   || { docker image inspect token-diet/serena:latest &>/dev/null 2>&1 \
                        && ok "Serena (Docker image: token-diet/serena:latest)" \
@@ -277,6 +336,11 @@ cmd_verify() {
     printf "  ${GREEN}✓${NC} Serena (uv) ... %s\n" "$(uv --version 2>/dev/null)"
   else
     printf "  ${YELLOW}✗${NC} Serena ........ not installed\n"; all_ok=false
+  fi
+  local serena_codex_issue; serena_codex_issue=$(codex_mcp_command_issue "serena")
+  if [ -n "$serena_codex_issue" ]; then
+    printf "  ${YELLOW}✗${NC} %s\n" "$serena_codex_issue"
+    all_ok=false
   fi
   echo ""
   if $all_ok; then
@@ -337,6 +401,12 @@ cmd_health() {
     ok "Serena  (hosts: ${serena_hosts})"
   else
     miss "Serena not found  (uvx or Docker required)"
+    issues=$(( issues + 1 ))
+  fi
+
+  local serena_codex_issue; serena_codex_issue=$(codex_mcp_command_issue "serena")
+  if [ -n "$serena_codex_issue" ]; then
+    warn "$serena_codex_issue"
     issues=$(( issues + 1 ))
   fi
 
@@ -1284,6 +1354,465 @@ cmd_use_rtk() {
   echo -e "${BOLD}[ok]${NC}  RTK re-enabled — commands filtered for token savings"
 }
 
+cmd_repair() {
+  local dry_run=false json_mode=false
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --dry-run) dry_run=true; shift ;;
+      --json)    json_mode=true; shift ;;
+      *) echo "Unknown option: $1" >&2; exit 1 ;;
+    esac
+  done
+
+  local repairs=0 failures=0
+  local -a repaired=() failed=() skipped=()
+  _repaired() { repaired+=("$1"); repairs=$(( repairs + 1 )); }
+  _failed()   { failed+=("$1");   failures=$(( failures + 1 )); }
+  _skipped()  { skipped+=("$1"); }
+
+  $json_mode || {
+    echo -e "\n${BOLD}token-diet repair${NC}"
+    $dry_run && echo -e "${DIM}  Dry-run mode — no changes will be made${NC}"
+    echo ""
+  }
+
+  # ── 1. RTK hooks ─────────────────────────────────────────────────────────
+  if check_cmd rtk && rtk --version &>/dev/null 2>&1; then
+    local rtk_show; rtk_show=$(rtk init --show 2>/dev/null || echo "")
+    local rtk_has_issues=false
+    local _line
+    while IFS= read -r _line; do
+      case "$_line" in \[warn\]*|\[FAIL\]*) rtk_has_issues=true ;; esac
+    done <<< "$rtk_show"
+
+    if $rtk_has_issues; then
+      if $dry_run; then
+        $json_mode || warn "RTK hooks: would run 'rtk init -g --auto-patch'"
+        _skipped "RTK hooks: dry-run — would run rtk init -g --auto-patch"
+      else
+        if rtk init -g --auto-patch &>/dev/null 2>&1; then
+          $json_mode || ok "RTK hooks repaired"
+          _repaired "RTK hooks: ran rtk init -g --auto-patch"
+        else
+          $json_mode || miss "RTK hooks: repair failed — run 'rtk init -g --auto-patch' manually"
+          _failed "RTK hooks: rtk init -g --auto-patch failed"
+        fi
+      fi
+    fi
+  else
+    _skipped "RTK hooks: rtk not installed"
+  fi
+
+  # ── 2. JSON MCP stale commands ───────────────────────────────────────────
+  _repair_mcp_json() {
+    local tool="$1" host_label="$2" cfg="$3"
+    [ -f "$cfg" ] || return 0
+
+    local registered
+    registered=$(python3 - "$cfg" "$tool" << 'PY'
+import json, sys
+try:
+    d = json.load(open(sys.argv[1]))
+    servers = d.get("mcpServers", {})
+    key = next((k for k in servers if sys.argv[2].lower() in k.lower()), None)
+    if key is None: sys.exit(1)
+    print(servers[key].get("command", ""))
+except Exception:
+    sys.exit(1)
+PY
+    2>/dev/null) || return 0  # not registered — skip silently
+
+    [ -n "$registered" ] || return 0
+    mcp_command_exists "$registered" && return 0  # healthy
+
+    # Stale command — find current path
+    local new_path; new_path=$(command -v "$tool" 2>/dev/null || echo "")
+    if [ -z "$new_path" ]; then
+      $json_mode || miss "  ${host_label}  ${tool}: stale '${registered}' and '${tool}' not in PATH"
+      _failed "${tool} ${host_label}: stale command and '${tool}' not in PATH — cannot repair"
+      return 0
+    fi
+
+    if $dry_run; then
+      $json_mode || warn "  ${host_label}  ${tool}: would update '${registered}' → '${new_path}'"
+      _skipped "${tool} ${host_label}: dry-run — would update command to ${new_path}"
+      return 0
+    fi
+
+    python3 - "$cfg" "$tool" "$new_path" << 'PY'
+import json, sys, os
+cfg_path, tool_name, new_cmd = sys.argv[1], sys.argv[2], sys.argv[3]
+with open(cfg_path) as f:
+    d = json.load(f)
+servers = d.get("mcpServers", {})
+key = next((k for k in servers if tool_name.lower() in k.lower()), None)
+if key:
+    servers[key]["command"] = new_cmd
+tmp = cfg_path + ".tmp"
+with open(tmp, "w") as f:
+    json.dump(d, f, indent=2)
+    f.write("\n")
+os.replace(tmp, cfg_path)
+PY
+    if [ $? -eq 0 ]; then
+      $json_mode || ok "  ${host_label}  ${tool}: updated command → ${new_path}"
+      _repaired "${tool} ${host_label}: updated stale command to ${new_path}"
+    else
+      $json_mode || miss "  ${host_label}  ${tool}: failed to update config"
+      _failed "${tool} ${host_label}: JSON write failed"
+    fi
+  }
+
+  local cc_cfg="$HOME/.claude/settings.json"
+  local cd_mac="$HOME/Library/Application Support/Claude/claude_desktop_config.json"
+  local cd_linux="$HOME/.config/Claude/claude_desktop_config.json"
+  local oc_cfg="$HOME/.opencode.json"
+
+  local _mcp_tool
+  for _mcp_tool in tilth serena; do
+    _repair_mcp_json "$_mcp_tool" "claude-code"    "$cc_cfg"
+    _repair_mcp_json "$_mcp_tool" "claude-desktop" "$cd_mac"
+    _repair_mcp_json "$_mcp_tool" "claude-desktop" "$cd_linux"
+    _repair_mcp_json "$_mcp_tool" "opencode"       "$oc_cfg"
+  done
+
+  # ── 3. Codex TOML — stale commands flagged as manual only ────────────────
+  local codex_cfg="$HOME/.codex/config.toml"
+  if [ -f "$codex_cfg" ]; then
+    for _mcp_tool in tilth serena; do
+      local codex_cmd; codex_cmd=$(codex_mcp_command "$_mcp_tool" 2>/dev/null || echo "")
+      [ -n "$codex_cmd" ] || continue
+      if ! mcp_command_exists "$codex_cmd"; then
+        $json_mode || warn "  codex  ${_mcp_tool}: stale '${codex_cmd}' — edit ~/.codex/config.toml manually"
+        _skipped "${_mcp_tool} codex: stale command '${codex_cmd}' — edit ~/.codex/config.toml manually"
+      fi
+    done
+  fi
+
+  # ── 4. Summary ───────────────────────────────────────────────────────────
+  if $json_mode; then
+    python3 - "$repairs" "$failures" "$dry_run" \
+      "REPAIRED_SEP" "${repaired[@]+"${repaired[@]}"}" \
+      "FAILED_SEP"   "${failed[@]+"${failed[@]}"}" \
+      "SKIPPED_SEP"  "${skipped[@]+"${skipped[@]}"}" << 'PY'
+import json, sys
+repairs  = int(sys.argv[1])
+failures = int(sys.argv[2])
+is_dry   = sys.argv[3] == "true"
+repaired, failed, skipped, current = [], [], [], None
+for a in sys.argv[4:]:
+    if   a == "REPAIRED_SEP": current = repaired
+    elif a == "FAILED_SEP":   current = failed
+    elif a == "SKIPPED_SEP":  current = skipped
+    elif current is not None: current.append(a)
+result = {
+    "repairs": repairs, "failures": failures,
+    "repaired": repaired, "failed": failed, "skipped": skipped,
+    "healthy": failures == 0,
+}
+if is_dry:
+    result["dry_run"] = True
+print(json.dumps(result, indent=2))
+PY
+  else
+    echo ""
+    echo -e "${DIM}$(printf '%.0s─' {1..50})${NC}"
+    if [ "$failures" -eq 0 ] && [ "$repairs" -gt 0 ]; then
+      echo -e "\n  ${GREEN}${BOLD}Repaired ${repairs} issue(s)${NC}\n"
+    elif [ "$failures" -eq 0 ]; then
+      echo -e "\n  ${GREEN}${BOLD}Nothing to repair — stack is healthy${NC}\n"
+    else
+      echo -e "\n  ${RED}${BOLD}${failures} repair(s) failed — manual action required:${NC}"
+      local _f
+      for _f in "${failed[@]}"; do
+        echo -e "  ${RED}→${NC}  ${_f}"
+      done
+      echo ""
+    fi
+  fi
+
+  return "$(( failures > 0 ))"
+}
+
+cmd_doctor() {
+  local json_mode=false
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --json) json_mode=true; shift ;;
+      *) echo "Unknown option: $1" >&2; exit 1 ;;
+    esac
+  done
+
+  local issues=0
+  local -a findings=() compat_results=()
+  _issue() { findings+=("$1"); issues=$(( issues + 1 )); }
+
+  $json_mode || echo -e "\n${BOLD}token-diet doctor${NC}\n"
+
+  # ── 1. Binaries ─────────────────────────────────────────────────────────────
+  $json_mode || { echo -e "${BOLD}Binaries${NC}"; \
+                  echo -e "${DIM}$(printf '%.0s─' {1..50})${NC}"; }
+
+  local rtk_ok=false tilth_ok=false serena_ok=false rtk_ver="" tilth_ver=""
+
+  if check_cmd rtk && rtk --version &>/dev/null 2>&1; then
+    rtk_ok=true
+    rtk_ver=$(rtk --version 2>/dev/null | awk '{print $2}')
+    $json_mode || ok "rtk     ${rtk_ver}   ${DIM}$(command -v rtk)${NC}"
+    local _rtk_min; _rtk_min=$(_compat_min "rtk")
+    if _semver_ok "$rtk_ver" "$_rtk_min"; then
+      compat_results+=("rtk:ok:${rtk_ver}:${_rtk_min}")
+    else
+      $json_mode || warn "rtk ${rtk_ver} is below minimum ${_rtk_min} — upgrade: cargo install rtk"
+      _issue "compat: rtk ${rtk_ver} below minimum ${_rtk_min}"
+      compat_results+=("rtk:warn:${rtk_ver}:${_rtk_min}")
+    fi
+  else
+    $json_mode || miss "rtk     not found  →  run: bash install.sh --rtk-only"
+    _issue "rtk: binary missing"
+  fi
+
+  if check_cmd tilth && tilth --version &>/dev/null 2>&1; then
+    tilth_ok=true
+    tilth_ver=$(tilth --version 2>/dev/null | awk '{print $2}')
+    $json_mode || ok "tilth   ${tilth_ver}   ${DIM}$(command -v tilth)${NC}"
+    local _tilth_min; _tilth_min=$(_compat_min "tilth")
+    if _semver_ok "$tilth_ver" "$_tilth_min"; then
+      compat_results+=("tilth:ok:${tilth_ver}:${_tilth_min}")
+    else
+      $json_mode || warn "tilth ${tilth_ver} is below minimum ${_tilth_min} — upgrade: cargo install tilth"
+      _issue "compat: tilth ${tilth_ver} below minimum ${_tilth_min}"
+      compat_results+=("tilth:warn:${tilth_ver}:${_tilth_min}")
+    fi
+  else
+    $json_mode || miss "tilth   not found  →  run: bash install.sh --tilth-only"
+    _issue "tilth: binary missing"
+  fi
+
+  local uvx_ok=false uv_ok=false
+  { check_cmd uvx && uvx --version &>/dev/null 2>&1; } && uvx_ok=true || true
+  { check_cmd uv  && uv  --version &>/dev/null 2>&1; } && uv_ok=true  || true
+
+  if $uvx_ok || $uv_ok || \
+     docker image inspect token-diet/serena:latest &>/dev/null 2>&1; then
+    serena_ok=true
+    if $uvx_ok; then
+      $json_mode || ok "serena  runtime: uvx   ${DIM}$(command -v uvx)${NC}"
+    elif $uv_ok; then
+      $json_mode || ok "serena  runtime: uv    ${DIM}$(command -v uv)${NC}"
+    else
+      $json_mode || ok "serena  runtime: docker image token-diet/serena:latest"
+    fi
+  else
+    $json_mode || miss "serena  no runtime found  →  install uvx or build docker image"
+    _issue "serena: no runtime (uvx/uv/docker)"
+  fi
+
+  # ── 2. RTK hooks ────────────────────────────────────────────────────────────
+  $json_mode || { echo ""; echo -e "${BOLD}RTK hooks${NC}"; \
+                  echo -e "${DIM}$(printf '%.0s─' {1..50})${NC}"; }
+
+  if $rtk_ok; then
+    local rtk_show; rtk_show=$(rtk init --show 2>/dev/null || echo "")
+    if [ -n "$rtk_show" ]; then
+      local label
+      while IFS= read -r line; do
+        label="${line#*\] }"  # strip leading [STATUS] prefix
+        case "$line" in
+          \[ok\]*)
+            $json_mode || ok "$label" ;;
+          \[warn\]*)
+            $json_mode || warn "$label"
+            _issue "RTK hook warning: $label" ;;
+          \[FAIL\]*)
+            $json_mode || miss "$label"
+            _issue "RTK hook failure: $label" ;;
+          \[--\]*)
+            $json_mode || dim "  (not configured) $label" ;;
+        esac
+      done <<< "$rtk_show"
+    else
+      $json_mode || warn "rtk init --show returned no output"
+      _issue "RTK: could not read hook status"
+    fi
+  else
+    $json_mode || dim "  (skipped — rtk not installed)"
+  fi
+
+  # ── 3. MCP registrations ────────────────────────────────────────────────────
+  $json_mode || { echo ""; echo -e "${BOLD}MCP registrations${NC}"; \
+                  echo -e "${DIM}$(printf '%.0s─' {1..50})${NC}"; }
+
+  # tilth: delegate to `tilth doctor` which covers all 22 hosts
+  local tilth_doctor_json=""
+  if $tilth_ok; then
+    tilth_doctor_json=$(tilth doctor --json 2>/dev/null || echo "")
+    if [ -n "$tilth_doctor_json" ]; then
+      if $json_mode; then
+        : # folded into JSON output below
+      else
+        echo -e "  ${BOLD}tilth${NC}"
+        echo "$tilth_doctor_json" | python3 -c "
+import json, sys
+try:
+    d = json.load(sys.stdin)
+    hosts = d.get('hosts', {})
+    found_any = False
+    for host, info in sorted(hosts.items()):
+        found_any = True
+        if info.get('registered'):
+            cmd = info.get('command', '')
+            ok_flag = info.get('command_ok', True)
+            mark = '\033[32m\u2713\033[0m' if ok_flag else '\033[33m!\033[0m'
+            label = 'registered' if ok_flag else 'registered but command missing:'
+            print(f'    {mark}  {host:<20} {label}   {cmd}')
+        else:
+            print(f'    \033[2m\u2013\033[0m  {host:<20} config exists \u2014 not registered')
+    if not found_any:
+        print('    (no host configs found)')
+except Exception as e:
+    print(f'    (could not parse tilth doctor output: {e})')
+"
+        echo ""
+      fi
+      # Feed issues from tilth doctor into our findings only when explicitly unhealthy
+      local _tilth_healthy; _tilth_healthy=$(echo "$tilth_doctor_json" | python3 -c "import json,sys; d=json.load(sys.stdin); print('true' if d.get('healthy') else 'false')" 2>/dev/null || echo "unknown")
+      if [ "$_tilth_healthy" = "false" ]; then
+        _issue "tilth: not registered in any MCP host (run: tilth install <host>)"
+      fi
+    else
+      # tilth doctor returned nothing (old binary without doctor subcommand) — soft skip
+      $json_mode || dim "  tilth   (doctor subcommand not available — upgrade tilth to v0.6.0+)"
+    fi
+  else
+    $json_mode || dim "  tilth   (skipped — binary not installed)"
+  fi
+
+  # serena: manual check for the four common hosts
+  _doctor_check_mcp_json() {
+    local tool="$1" host_label="$2" cfg="$3"
+    [ -f "$cfg" ] || return 0  # host not installed — skip silently
+
+    local registered
+    registered=$(python3 - "$cfg" "$tool" << 'PY'
+import json, sys
+try:
+    d = json.load(open(sys.argv[1]))
+    servers = d.get("mcpServers", {})
+    key = next((k for k in servers if sys.argv[2].lower() in k.lower()), None)
+    if key is None:
+        sys.exit(1)
+    v = servers[key]
+    cmd = v.get("command", "")
+    args = v.get("args", [])
+    print(cmd + (" " + " ".join(str(a) for a in args) if args else ""))
+except Exception:
+    sys.exit(1)
+PY
+    2>/dev/null)
+
+    if [ -n "$registered" ]; then
+      local first_word; first_word=$(echo "$registered" | awk '{print $1}')
+      if mcp_command_exists "$first_word"; then
+        $json_mode || ok "  ${host_label}   registered   ${DIM}${registered}${NC}"
+      else
+        $json_mode || warn "  ${host_label}   registered but command missing: ${first_word}"
+        _issue "${tool} ${host_label}: registered but '${first_word}' not in PATH"
+      fi
+    else
+      $json_mode || miss "  ${host_label}   not registered  →  run: bash install.sh"
+      _issue "${tool} ${host_label}: not registered"
+    fi
+  }
+
+  _doctor_check_mcp_codex() {
+    local tool="$1"
+    [ -f "$HOME/.codex/config.toml" ] || return 0
+    local codex_cmd; codex_cmd=$(codex_mcp_command "$tool" 2>/dev/null || echo "")
+    if [ -n "$codex_cmd" ]; then
+      if mcp_command_exists "$codex_cmd"; then
+        $json_mode || ok "  codex       registered   ${DIM}${codex_cmd}${NC}"
+      else
+        $json_mode || warn "  codex       registered but command missing: ${codex_cmd}"
+        _issue "${tool} codex: registered but '${codex_cmd}' not in PATH"
+      fi
+    else
+      $json_mode || miss "  codex       not registered  →  run: bash install.sh"
+      _issue "${tool} codex: not registered"
+    fi
+  }
+
+  local cc_cfg="$HOME/.claude/settings.json"
+  local cd_mac="$HOME/Library/Application Support/Claude/claude_desktop_config.json"
+  local cd_linux="$HOME/.config/Claude/claude_desktop_config.json"
+  local oc_cfg="$HOME/.opencode.json"
+
+  $json_mode || echo -e "  ${BOLD}serena${NC}"
+  _doctor_check_mcp_json "serena" "claude-code"    "$cc_cfg"
+  _doctor_check_mcp_json "serena" "claude-desktop" "$cd_mac"
+  _doctor_check_mcp_json "serena" "claude-desktop" "$cd_linux"
+  _doctor_check_mcp_json "serena" "opencode"       "$oc_cfg"
+  _doctor_check_mcp_codex "serena"
+  $json_mode || echo ""
+
+  # ── 4. Summary ──────────────────────────────────────────────────────────────
+  if $json_mode; then
+    python3 - "$issues" "$tilth_doctor_json" \
+      "FINDINGS_SEP" "${findings[@]+"${findings[@]}"}" \
+      "COMPAT_SEP"   "${compat_results[@]+"${compat_results[@]}"}" << 'PY'
+import json, sys
+
+args = sys.argv[1:]
+issues = int(args[0])
+tilth_doctor_raw = args[1]
+findings, compat_raw, current = [], [], None
+for a in args[2:]:
+    if a == "FINDINGS_SEP":  current = findings;   continue
+    if a == "COMPAT_SEP":    current = compat_raw; continue
+    if current is not None:  current.append(a)
+
+compat = {}
+for entry in compat_raw:
+    parts = entry.split(":", 3)
+    if len(parts) == 4:
+        tool, status, ver, min_ver = parts
+        compat[tool] = {"status": status, "version": ver, "min": min_ver}
+
+tilth_mcp = None
+if tilth_doctor_raw:
+    try:
+        tilth_mcp = json.loads(tilth_doctor_raw)
+    except Exception:
+        pass
+
+out = {
+    "issues": issues,
+    "healthy": issues == 0,
+    "findings": findings,
+    "compat": compat,
+}
+if tilth_mcp is not None:
+    out["tilth_mcp"] = tilth_mcp
+
+print(json.dumps(out, indent=2))
+PY
+  else
+    echo -e "${DIM}$(printf '%.0s─' {1..50})${NC}"
+    if [ "$issues" -eq 0 ]; then
+      echo -e "\n  ${GREEN}${BOLD}All checks passed — stack is healthy${NC}\n"
+    else
+      echo -e "\n  ${YELLOW}${BOLD}${issues} issue(s) found:${NC}"
+      local f
+      for f in "${findings[@]}"; do
+        echo -e "  ${RED}→${NC}  ${f}"
+      done
+      echo -e "\n  Run ${BOLD}bash install.sh${NC} to repair most issues.\n"
+    fi
+  fi
+
+  return "$(( issues > 0 ))"
+}
+
 cmd_help() {
   cat << EOF
 
@@ -1295,6 +1824,8 @@ ${BOLD}USAGE${NC}
 ${BOLD}COMMANDS${NC}
   gain              Show token savings dashboard across RTK + tilth + Serena  (default)
   health            Quick health check: tools responding + MCP hosts registered
+  doctor            Structured diagnosis: binaries, RTK hooks, MCP registrations  [--json]
+  repair            Fix what doctor finds: RTK hooks, stale MCP commands  [--dry-run] [--json]
   breakdown         Top commands by tokens saved  [--limit N]
   explain <cmd>     Token cost breakdown for a specific command
   budget <init|status>  Per-project token budget with warn/hard thresholds
@@ -1330,6 +1861,8 @@ EOF
 case "${1:-gain}" in
   gain)              cmd_gain ;;
   health)            cmd_health ;;
+  doctor)            shift; cmd_doctor "$@" ;;
+  repair)            shift; cmd_repair "$@" ;;
   breakdown)         shift; cmd_breakdown "$@" ;;
   explain)           shift; cmd_explain "$@" ;;
   budget)            shift; cmd_budget "$@" ;;

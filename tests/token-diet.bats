@@ -84,6 +84,18 @@ load test_helper
   [[ "$output" == *"/missing/tilth"* ]]
 }
 
+@test "health: exits 1 when Codex serena MCP path is stale" {
+  mock_cmd_with_gain
+  mock_cmd tilth
+  mock_cmd uvx
+  mock_mcp_config codex serena "/missing/serena"
+
+  run "$SCRIPTS_DIR/token-diet" health
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Codex serena MCP command missing"* ]]
+  [[ "$output" == *"/missing/serena"* ]]
+}
+
 # ---------------------------------------------------------------------------
 # Cycle 2.4 — health: listed in --help
 # ---------------------------------------------------------------------------
@@ -635,6 +647,22 @@ MOCK
   [[ "$output" == *"MCP command missing: /missing/tilth"* ]]
 }
 
+@test "verify: stale serena Codex command is flagged in inline fallback" {
+  tmp_bin="$(mktemp -d)"
+  cp "$SCRIPTS_DIR/token-diet" "$tmp_bin/token-diet"
+  chmod +x "$tmp_bin/token-diet"
+  mock_cmd_with_gain
+  mock_cmd tilth
+  mock_cmd uv
+  mkdir -p "$TMP_HOME/.codex"
+  printf '\n[mcp_servers.serena]\ncommand = "/missing/serena"\n' >> "$TMP_HOME/.codex/config.toml"
+  clean_path="${PATH//:$PROJECT_ROOT\/scripts/}"
+
+  run env HOME="$TMP_HOME" PATH="$clean_path" "$tmp_bin/token-diet" verify
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Codex serena MCP command missing: /missing/serena"* ]]
+}
+
 # ---------------------------------------------------------------------------
 # UX fix: verify inline fallback exits 1 when issues found
 # ---------------------------------------------------------------------------
@@ -803,4 +831,599 @@ MOCK
 @test "help text includes no-rtk command" {
   run "$SCRIPTS_DIR/token-diet" --help
   [[ "$output" == *"no-rtk"* ]]
+}
+
+@test "no-rtk: does not modify hook when sentinel already present in hook" {
+  # Simulate a hook that already contains the token-diet sentinel check
+  # (as installed by RTK >= hook-version 4).
+  mkdir -p "$TMP_HOME/.claude/hooks"
+  cat > "$TMP_HOME/.claude/hooks/rtk-rewrite.sh" << 'HOOK'
+#!/usr/bin/env bash
+# rtk-hook-version: 4
+# token-diet integration: honour the no-rtk / use-rtk toggle
+if [ -f "$HOME/.config/token-diet/rtk-disabled" ]; then exit 0; fi
+if ! command -v jq &>/dev/null; then exit 0; fi
+HOOK
+
+  local checksum_before
+  checksum_before=$(shasum -a 256 "$TMP_HOME/.claude/hooks/rtk-rewrite.sh" | awk '{print $1}')
+
+  run env HOME="$TMP_HOME" "$SCRIPTS_DIR/token-diet" no-rtk
+  [ "$status" -eq 0 ]
+
+  local checksum_after
+  checksum_after=$(shasum -a 256 "$TMP_HOME/.claude/hooks/rtk-rewrite.sh" | awk '{print $1}')
+
+  # Hook must not have been modified — sentinel was already present
+  [ "$checksum_before" = "$checksum_after" ]
+}
+
+# ---------------------------------------------------------------------------
+# Cycle 14.1 — doctor: dispatch and help text
+# ---------------------------------------------------------------------------
+
+@test "doctor: help text includes doctor command" {
+  run "$SCRIPTS_DIR/token-diet" --help
+  [[ "$output" == *"doctor"* ]]
+}
+
+@test "doctor: unknown flag exits 1" {
+  run "$SCRIPTS_DIR/token-diet" doctor --bad-flag
+  [ "$status" -eq 1 ]
+}
+
+# ---------------------------------------------------------------------------
+# Cycle 14.2 — doctor: binary checks
+# ---------------------------------------------------------------------------
+
+@test "doctor: exits 1 and reports rtk missing when rtk not in PATH" {
+  # Shadow real rtk with a stub that exits 1 so doctor sees it as missing
+  printf '#!/usr/bin/env bash\nexit 1\n' > "$TMP_BIN/rtk"
+  chmod +x "$TMP_BIN/rtk"
+  mock_cmd tilth
+  mock_cmd uvx
+
+  run "$SCRIPTS_DIR/token-diet" doctor
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"rtk"* ]]
+}
+
+@test "doctor: exits 1 and reports tilth missing when tilth not in PATH" {
+  mock_rtk_with_init_show
+  # Shadow real tilth with a stub that exits 1
+  printf '#!/usr/bin/env bash\nexit 1\n' > "$TMP_BIN/tilth"
+  chmod +x "$TMP_BIN/tilth"
+  mock_cmd uvx
+
+  run "$SCRIPTS_DIR/token-diet" doctor
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"tilth"* ]]
+}
+
+@test "doctor: exits 1 and reports serena missing when no runtime available" {
+  mock_rtk_with_init_show
+  mock_cmd tilth
+  # Shadow uvx and uv with stubs that exit 1; no docker image
+  for cmd in uvx uv docker; do
+    printf '#!/usr/bin/env bash\nexit 1\n' > "$TMP_BIN/$cmd"
+    chmod +x "$TMP_BIN/$cmd"
+  done
+
+  run "$SCRIPTS_DIR/token-diet" doctor
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"serena"* ]]
+}
+
+# ---------------------------------------------------------------------------
+# Cycle 14.3 — doctor: RTK hook checks
+# ---------------------------------------------------------------------------
+
+@test "doctor: exits 1 and reports RTK hook failure" {
+  mock_rtk_with_init_show fail
+  mock_cmd tilth
+  mock_cmd uvx
+  mock_mcp_config claude-code tilth
+  mock_mcp_config claude-code serena
+
+  run "$SCRIPTS_DIR/token-diet" doctor
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"FAIL"* ]] || [[ "$output" == *"Integrity"* ]]
+}
+
+@test "doctor: exits 1 and reports RTK hook warning" {
+  mock_rtk_with_init_show warn
+  mock_cmd tilth
+  mock_cmd uvx
+  mock_mcp_config claude-code tilth
+  mock_mcp_config claude-code serena
+
+  run "$SCRIPTS_DIR/token-diet" doctor
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Hook"* ]] || [[ "$output" == *"warn"* ]] || [[ "$output" == *"NOT executable"* ]]
+}
+
+# ---------------------------------------------------------------------------
+# Cycle 14.4 — doctor: MCP registration checks
+# ---------------------------------------------------------------------------
+
+@test "doctor: exits 1 when tilth not registered in claude-code" {
+  mock_rtk_with_init_show
+  mock_cmd tilth
+  mock_cmd uvx
+  mock_mcp_config claude-code serena
+
+  run "$SCRIPTS_DIR/token-diet" doctor
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"tilth"* ]]
+}
+
+@test "doctor: exits 1 when serena not registered in claude-code" {
+  mock_rtk_with_init_show
+  mock_cmd tilth
+  mock_cmd uvx
+  mock_mcp_config claude-code tilth
+
+  run "$SCRIPTS_DIR/token-diet" doctor
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"serena"* ]]
+}
+
+@test "doctor: exits 1 when MCP command is stale (binary missing)" {
+  mock_rtk_with_init_show
+  mock_cmd tilth
+  mock_cmd uvx
+  mock_mcp_config claude-code tilth "/nonexistent/tilth"
+  mock_mcp_config claude-code serena
+
+  run "$SCRIPTS_DIR/token-diet" doctor
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"/nonexistent/tilth"* ]] || [[ "$output" == *"missing"* ]]
+}
+
+# ---------------------------------------------------------------------------
+# Cycle 14.5 — doctor: healthy full stack
+# ---------------------------------------------------------------------------
+
+@test "doctor: exits 0 and prints 'All checks passed' when full stack healthy" {
+  mock_rtk_with_init_show healthy
+  mock_cmd tilth
+  mock_cmd uvx
+  # Register MCP tools with commands that exist in $TMP_BIN
+  mock_mcp_config claude-code tilth "tilth"
+  mock_mcp_config claude-code serena "uvx"
+
+  run "$SCRIPTS_DIR/token-diet" doctor
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"All checks passed"* ]]
+}
+
+# ---------------------------------------------------------------------------
+# Cycle 14.6 — doctor: --json output
+# ---------------------------------------------------------------------------
+
+@test "doctor --json: outputs valid JSON with healthy=true when full stack ok" {
+  mock_rtk_with_init_show healthy
+  mock_cmd tilth
+  mock_cmd uvx
+  mock_mcp_config claude-code tilth "tilth"
+  mock_mcp_config claude-code serena "uvx"
+
+  run "$SCRIPTS_DIR/token-diet" doctor --json
+  [ "$status" -eq 0 ]
+  python3 -c "import json,sys; d=json.loads(sys.stdin.read()); assert d['healthy'] is True" <<< "$output"
+}
+
+@test "doctor --json: outputs valid JSON with healthy=false and findings when issues" {
+  # Shadow rtk so it's seen as missing
+  printf '#!/usr/bin/env bash\nexit 1\n' > "$TMP_BIN/rtk"
+  chmod +x "$TMP_BIN/rtk"
+  mock_cmd tilth
+  mock_cmd uvx
+
+  run "$SCRIPTS_DIR/token-diet" doctor --json
+  [ "$status" -eq 1 ]
+  python3 -c "
+import json,sys
+d=json.loads(sys.stdin.read())
+assert d['healthy'] is False
+assert d['issues'] > 0
+assert len(d['findings']) > 0
+" <<< "$output"
+}
+
+# ---------------------------------------------------------------------------
+# Cycle 15.1 — repair: dispatch and flag parsing
+# ---------------------------------------------------------------------------
+
+@test "repair: listed in --help" {
+  run "$SCRIPTS_DIR/token-diet" --help
+  [[ "$output" == *"repair"* ]]
+}
+
+@test "repair: unknown flag exits 1" {
+  run "$SCRIPTS_DIR/token-diet" repair --bad-flag
+  [ "$status" -eq 1 ]
+}
+
+@test "repair: --dry-run accepted, exits 0 when nothing to repair" {
+  mock_rtk_with_init_show healthy
+  mock_cmd tilth
+  mock_cmd uvx
+  mock_mcp_config claude-code tilth "tilth"
+  mock_mcp_config claude-code serena "uvx"
+
+  run "$SCRIPTS_DIR/token-diet" repair --dry-run
+  [ "$status" -eq 0 ]
+}
+
+# ---------------------------------------------------------------------------
+# Cycle 15.2 — repair: RTK hook repair
+# ---------------------------------------------------------------------------
+
+@test "repair: repairs RTK hook warning with rtk init -g --auto-patch" {
+  mock_rtk_with_auto_patch success
+  mock_cmd tilth
+  mock_cmd uvx
+  mock_mcp_config claude-code tilth "tilth"
+  mock_mcp_config claude-code serena "uvx"
+
+  run "$SCRIPTS_DIR/token-diet" repair
+  [ "$status" -eq 0 ]
+  [ -f "$TMP_HOME/.rtk-auto-patch-called" ]
+  [[ "$output" == *"RTK"* ]]
+}
+
+@test "repair: reports failure when rtk init -g --auto-patch fails" {
+  mock_rtk_with_auto_patch fail
+  mock_cmd tilth
+  mock_cmd uvx
+  mock_mcp_config claude-code tilth "tilth"
+  mock_mcp_config claude-code serena "uvx"
+
+  run "$SCRIPTS_DIR/token-diet" repair
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"RTK"* ]]
+}
+
+@test "repair: skips RTK repair when rtk not installed" {
+  printf '#!/usr/bin/env bash\nexit 1\n' > "$TMP_BIN/rtk"
+  chmod +x "$TMP_BIN/rtk"
+  mock_cmd tilth
+  mock_cmd uvx
+
+  run "$SCRIPTS_DIR/token-diet" repair
+  [ "$status" -eq 0 ]
+  [ ! -f "$TMP_HOME/.rtk-auto-patch-called" ]
+}
+
+@test "repair: --dry-run shows would-run for RTK warning without invoking rtk init" {
+  mock_rtk_with_auto_patch success
+  mock_cmd tilth
+  mock_cmd uvx
+  mock_mcp_config claude-code tilth "tilth"
+  mock_mcp_config claude-code serena "uvx"
+
+  run "$SCRIPTS_DIR/token-diet" repair --dry-run
+  [ "$status" -eq 0 ]
+  [ ! -f "$TMP_HOME/.rtk-auto-patch-called" ]
+  [[ "$output" == *"rtk init"* ]] || [[ "$output" == *"auto-patch"* ]] || [[ "$output" == *"RTK"* ]]
+}
+
+# ---------------------------------------------------------------------------
+# Cycle 15.3 — repair: stale MCP command repair
+# ---------------------------------------------------------------------------
+
+@test "repair: updates stale tilth command path in claude-code config" {
+  mock_rtk_with_init_show healthy
+  mock_cmd tilth
+  mock_cmd uvx
+  mock_mcp_config claude-code tilth "/nonexistent/tilth"
+  mock_mcp_config claude-code serena "uvx"
+
+  run "$SCRIPTS_DIR/token-diet" repair
+  [ "$status" -eq 0 ]
+
+  # Verify the JSON was updated to the working tilth path
+  local updated_cmd
+  updated_cmd=$(python3 -c "
+import json
+d = json.load(open('$TMP_HOME/.claude/settings.json'))
+servers = d.get('mcpServers', {})
+key = next((k for k in servers if 'tilth' in k.lower()), None)
+print(servers[key]['command'] if key else '')
+")
+  [[ "$updated_cmd" != "/nonexistent/tilth" ]]
+  [[ "$updated_cmd" != "" ]]
+}
+
+@test "repair: fails when stale MCP command and tool not in PATH" {
+  mock_rtk_with_init_show healthy
+  # tilth absent from TMP_BIN; restrict PATH to TMP_BIN + system dirs only,
+  # excluding $HOME/.local/bin where the real tilth lives.
+  mock_cmd uvx
+  mock_mcp_config claude-code tilth "/nonexistent/tilth"
+  mock_mcp_config claude-code serena "uvx"
+
+  run env HOME="$TMP_HOME" PATH="$TMP_BIN:/usr/bin:/bin" "$SCRIPTS_DIR/token-diet" repair
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"tilth"* ]]
+}
+
+@test "repair: skips not-registered entries (installer scope, not repair scope)" {
+  mock_rtk_with_init_show healthy
+  mock_cmd tilth
+  mock_cmd uvx
+  # Only serena registered — tilth not registered at all
+  mock_mcp_config claude-code serena "uvx"
+
+  run "$SCRIPTS_DIR/token-diet" repair
+  [ "$status" -eq 0 ]
+  # Must not attempt to install tilth — it should be skipped silently
+  [[ "$output" != *"install"* ]]
+}
+
+@test "repair: --dry-run shows would-update but does not write JSON" {
+  mock_rtk_with_init_show healthy
+  mock_cmd tilth
+  mock_cmd uvx
+  mock_mcp_config claude-code tilth "/nonexistent/tilth"
+  mock_mcp_config claude-code serena "uvx"
+
+  # Record config before
+  local before
+  before=$(cat "$TMP_HOME/.claude/settings.json")
+
+  run "$SCRIPTS_DIR/token-diet" repair --dry-run
+  [ "$status" -eq 0 ]
+
+  # JSON must be unchanged
+  local after
+  after=$(cat "$TMP_HOME/.claude/settings.json")
+  [ "$before" = "$after" ]
+  [[ "$output" == *"tilth"* ]]
+}
+
+# ---------------------------------------------------------------------------
+# Cycle 15.4 — repair: Codex TOML stale → manual skip
+# ---------------------------------------------------------------------------
+
+@test "repair: flags stale codex TOML command as manual-only and exits 0" {
+  mock_rtk_with_init_show healthy
+  mock_cmd tilth
+  mock_cmd uvx
+  mock_mcp_config codex tilth "/nonexistent/tilth"
+
+  run "$SCRIPTS_DIR/token-diet" repair
+  [ "$status" -eq 0 ]
+  # Must not modify codex config
+  [[ "$(cat "$TMP_HOME/.codex/config.toml")" == *"/nonexistent/tilth"* ]]
+}
+
+# ---------------------------------------------------------------------------
+# Cycle 15.5 — repair: --json output
+# ---------------------------------------------------------------------------
+
+@test "repair --json: healthy=true and repairs=0 when nothing to repair" {
+  mock_rtk_with_init_show healthy
+  mock_cmd tilth
+  mock_cmd uvx
+  mock_mcp_config claude-code tilth "tilth"
+  mock_mcp_config claude-code serena "uvx"
+
+  run "$SCRIPTS_DIR/token-diet" repair --json
+  [ "$status" -eq 0 ]
+  python3 -c "
+import json, sys
+d = json.loads(sys.stdin.read())
+assert d['healthy'] is True
+assert d['repairs'] == 0
+assert 'repaired' in d
+assert 'failed' in d
+assert 'skipped' in d
+" <<< "$output"
+}
+
+@test "repair --json: repaired list non-empty after fixing stale MCP command" {
+  mock_rtk_with_init_show healthy
+  mock_cmd tilth
+  mock_cmd uvx
+  mock_mcp_config claude-code tilth "/nonexistent/tilth"
+  mock_mcp_config claude-code serena "uvx"
+
+  run "$SCRIPTS_DIR/token-diet" repair --json
+  [ "$status" -eq 0 ]
+  python3 -c "
+import json, sys
+d = json.loads(sys.stdin.read())
+assert d['repairs'] >= 1
+assert len(d['repaired']) >= 1
+assert d['healthy'] is True
+" <<< "$output"
+}
+
+@test "repair --json: failed list non-empty when tool not in PATH" {
+  mock_rtk_with_init_show healthy
+  # tilth absent from TMP_BIN; restrict PATH to TMP_BIN + system dirs only
+  mock_cmd uvx
+  mock_mcp_config claude-code tilth "/nonexistent/tilth"
+  mock_mcp_config claude-code serena "uvx"
+
+  run env HOME="$TMP_HOME" PATH="$TMP_BIN:/usr/bin:/bin" "$SCRIPTS_DIR/token-diet" repair --json
+  [ "$status" -eq 1 ]
+  python3 -c "
+import json, sys
+d = json.loads(sys.stdin.read())
+assert d['healthy'] is False
+assert d['failures'] >= 1
+assert len(d['failed']) >= 1
+" <<< "$output"
+}
+
+@test "repair --json --dry-run: dry_run key is true" {
+  mock_rtk_with_auto_patch success
+  mock_cmd tilth
+  mock_cmd uvx
+  mock_mcp_config claude-code tilth "/nonexistent/tilth"
+  mock_mcp_config claude-code serena "uvx"
+
+  run "$SCRIPTS_DIR/token-diet" repair --json --dry-run
+  [ "$status" -eq 0 ]
+  python3 -c "
+import json, sys
+d = json.loads(sys.stdin.read())
+assert d.get('dry_run') is True
+" <<< "$output"
+}
+
+# ---------------------------------------------------------------------------
+# Cycle 15.6 — repair: exit code semantics
+# ---------------------------------------------------------------------------
+
+@test "repair: exits 0 when only skips (no failures, no repairs needed)" {
+  mock_rtk_with_init_show healthy
+  mock_cmd tilth
+  mock_cmd uvx
+  # No MCP configs at all — everything skipped silently
+
+  run "$SCRIPTS_DIR/token-diet" repair
+  [ "$status" -eq 0 ]
+}
+
+# ---------------------------------------------------------------------------
+# Cycle 16.1 — compat: version shows OK when tools meet min version
+# ---------------------------------------------------------------------------
+
+@test "compat: version shows OK for rtk when version meets min" {
+  # mock_cmd_with_gain → rtk 0.34.3-mock; min in compat.json is 0.23.0 → OK
+  mock_cmd_with_gain
+  mock_cmd tilth  # 0.99.0-mock; min is 0.4.0 → OK
+  mock_cmd uvx
+
+  run "$SCRIPTS_DIR/token-diet" version
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"OK"* ]] || [[ "$output" == *"ok"* ]]
+}
+
+# ---------------------------------------------------------------------------
+# Cycle 16.2 — compat: version shows WARN when rtk below min
+# ---------------------------------------------------------------------------
+
+@test "compat: version shows WARN for rtk when version below min" {
+  # rtk 0.10.0 < min 0.23.0 → WARN
+  cat > "$TMP_BIN/rtk" << 'MOCK'
+#!/usr/bin/env bash
+case "$1" in
+  --version) echo "rtk 0.10.0"; exit 0 ;;
+  gain)
+    case "$2" in
+      --help)   echo "Usage: rtk gain [OPTIONS]"; exit 0 ;;
+      --format) echo '{"summary":{"total_commands":0,"total_input":0,"total_saved":0,"avg_savings_pct":0.0,"total_time_ms":0},"daily":[]}'; exit 0 ;;
+    esac ;;
+  *) exit 0 ;;
+esac
+MOCK
+  chmod +x "$TMP_BIN/rtk"
+  mock_cmd tilth
+  mock_cmd uvx
+
+  run "$SCRIPTS_DIR/token-diet" version
+  [[ "$output" == *"WARN"* ]] || [[ "$output" == *"warn"* ]] || \
+  [[ "$output" == *"below"* ]] || [[ "$output" == *"outdated"* ]]
+}
+
+# ---------------------------------------------------------------------------
+# Cycle 16.3 — compat: doctor flags below-min rtk version as issue
+# ---------------------------------------------------------------------------
+
+@test "compat: doctor exits 1 when rtk version below min" {
+  # rtk 0.10.0 < min 0.23.0
+  cat > "$TMP_BIN/rtk" << 'MOCK'
+#!/usr/bin/env bash
+case "$1" in
+  --version) echo "rtk 0.10.0"; exit 0 ;;
+  gain)
+    case "$2" in
+      --help)   echo "Usage: rtk gain [OPTIONS]"; exit 0 ;;
+      --format) echo '{"summary":{"total_commands":0,"total_input":0,"total_saved":0,"avg_savings_pct":0.0,"total_time_ms":0},"daily":[]}'; exit 0 ;;
+    esac ;;
+  init) exit 0 ;;
+  *) exit 0 ;;
+esac
+MOCK
+  chmod +x "$TMP_BIN/rtk"
+  mock_cmd tilth
+  mock_cmd uvx
+  mock_mcp_config claude-code tilth "tilth"
+  mock_mcp_config claude-code serena "uvx"
+
+  run "$SCRIPTS_DIR/token-diet" doctor
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"rtk"* ]]
+  [[ "$output" == *"0.10.0"* ]] || [[ "$output" == *"below"* ]] || \
+  [[ "$output" == *"compat"* ]] || [[ "$output" == *"min"* ]]
+}
+
+# ---------------------------------------------------------------------------
+# Cycle 16.4 — compat: doctor --json includes compat block
+# ---------------------------------------------------------------------------
+
+@test "compat: doctor --json includes compat block with per-tool status" {
+  mock_rtk_with_init_show healthy
+  mock_cmd tilth
+  mock_cmd uvx
+  mock_mcp_config claude-code tilth "tilth"
+  mock_mcp_config claude-code serena "uvx"
+
+  run "$SCRIPTS_DIR/token-diet" doctor --json
+  [ "$status" -eq 0 ]
+  python3 -c "
+import json, sys
+d = json.loads(sys.stdin.read())
+assert 'compat' in d, 'missing compat key: ' + str(list(d.keys()))
+c = d['compat']
+assert 'rtk' in c or 'tilth' in c, 'compat block has no tool entries: ' + str(c)
+" <<< "$output"
+}
+
+# ---------------------------------------------------------------------------
+# Cycle 16.5 — compat: doctor exits 0 when all tools above min version
+# ---------------------------------------------------------------------------
+
+@test "compat: doctor exits 0 when all tools above min version" {
+  # rtk 1.3.6-mock > 0.23.0; tilth 0.99.0-mock > 0.4.0
+  mock_rtk_with_init_show healthy
+  mock_cmd tilth
+  mock_cmd uvx
+  mock_mcp_config claude-code tilth "tilth"
+  mock_mcp_config claude-code serena "uvx"
+
+  run "$SCRIPTS_DIR/token-diet" doctor
+  [ "$status" -eq 0 ]
+}
+
+# ---------------------------------------------------------------------------
+# Cycle 16.6 — compat: doctor flags below-min tilth version as issue
+# ---------------------------------------------------------------------------
+
+@test "compat: doctor exits 1 when tilth version below min" {
+  mock_rtk_with_init_show healthy
+  # tilth 0.2.0 < min 0.4.0
+  cat > "$TMP_BIN/tilth" << 'MOCK'
+#!/usr/bin/env bash
+case "$1" in
+  --version) echo "tilth 0.2.0"; exit 0 ;;
+  --help)    echo "Usage: tilth [OPTIONS]"; exit 0 ;;
+  *) exit 0 ;;
+esac
+MOCK
+  chmod +x "$TMP_BIN/tilth"
+  mock_cmd uvx
+  mock_mcp_config claude-code tilth "tilth"
+  mock_mcp_config claude-code serena "uvx"
+
+  run "$SCRIPTS_DIR/token-diet" doctor
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"tilth"* ]]
+  [[ "$output" == *"0.2.0"* ]] || [[ "$output" == *"below"* ]] || \
+  [[ "$output" == *"compat"* ]] || [[ "$output" == *"min"* ]]
 }

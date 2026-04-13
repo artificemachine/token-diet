@@ -145,6 +145,34 @@ command = "C:\missing\tilth.exe"
         $LASTEXITCODE | Should -Be 1
         $out | Should -Match 'MCP command missing'
     }
+
+    It 'health: exits 1 when Codex serena MCP path is stale' {
+        $fakeHome = Join-Path $TestDrive 'home-serena-stale'
+        New-Item -ItemType Directory -Path (Join-Path $fakeHome '.codex') -Force | Out-Null
+        Set-Content (Join-Path $fakeHome '.codex\config.toml') @"
+[mcp_servers.serena]
+command = "C:\missing\serena.exe"
+"@ -Encoding UTF8
+
+        $out = (& pwsh -NoProfile -Command `
+            "`$env:PATH='$script:MockBin;$env:PATH'; `$env:USERPROFILE='$fakeHome'; `$env:APPDATA='$script:FakeAppData'; & '$($script:PS1)' health" 2>&1) -join ' '
+        $LASTEXITCODE | Should -Be 1
+        $out | Should -Match 'Codex serena MCP command missing'
+    }
+
+    It 'verify: exits 1 when Codex serena MCP path is stale' {
+        $fakeHome = Join-Path $TestDrive 'home-serena-verify-stale'
+        New-Item -ItemType Directory -Path (Join-Path $fakeHome '.codex') -Force | Out-Null
+        Set-Content (Join-Path $fakeHome '.codex\config.toml') @"
+[mcp_servers.serena]
+command = "C:\missing\serena.exe"
+"@ -Encoding UTF8
+
+        $out = (& pwsh -NoProfile -Command `
+            "`$env:PATH='$script:MockBin;$env:PATH'; `$env:USERPROFILE='$fakeHome'; `$env:APPDATA='$script:FakeAppData'; & '$($script:PS1)' verify" 2>&1) -join ' '
+        $LASTEXITCODE | Should -Be 1
+        $out | Should -Match 'Codex serena MCP command missing'
+    }
 }
 
 Describe 'token-diet.ps1 — route' {

@@ -188,3 +188,140 @@ PY
   [ "$status" -eq 0 ]
   [[ "$output" == *"Codex tilth MCP command missing: /missing/tilth"* ]]
 }
+
+@test "install.sh --verify warns when Codex serena MCP path is stale" {
+  mock_cmd_with_gain
+  mock_cmd tilth
+  mock_cmd uv
+  mock_cmd codex
+  mock_mcp_config codex serena "/missing/serena"
+
+  run bash "$SCRIPTS_DIR/install.sh" --verify
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Codex serena MCP command missing: /missing/serena"* ]]
+}
+
+# ---------------------------------------------------------------------------
+# Cycle 5.1 — reinstall idempotency: opencode JSON
+# ---------------------------------------------------------------------------
+
+@test "install: --serena-only --hosts opencode does not duplicate serena entry on second run" {
+  mock_install_prereqs
+  mock_cmd opencode
+  echo '{}' > "$TMP_HOME/.opencode.json"
+
+  bash "$SCRIPTS_DIR/install.sh" --serena-only --hosts opencode
+  bash "$SCRIPTS_DIR/install.sh" --serena-only --hosts opencode
+
+  python3 - "$TMP_HOME/.opencode.json" << 'PY'
+import json, sys
+d = json.load(open(sys.argv[1]))
+servers = d.get("mcpServers", {})
+count = sum(1 for k in servers if "serena" in k.lower())
+assert count == 1, f"Expected 1 serena entry, got {count}: {list(servers.keys())}"
+PY
+}
+
+@test "install: --serena-only preserves unrelated mcpServers entries in opencode config" {
+  mock_install_prereqs
+  mock_cmd opencode
+  python3 -c "
+import json
+with open('$TMP_HOME/.opencode.json', 'w') as f:
+    json.dump({'mcpServers': {'other-tool': {'command': 'other'}}}, f)
+    f.write('\n')
+"
+
+  run bash "$SCRIPTS_DIR/install.sh" --serena-only --hosts opencode
+  [ "$status" -eq 0 ]
+
+  python3 - "$TMP_HOME/.opencode.json" << 'PY'
+import json, sys
+d = json.load(open(sys.argv[1]))
+servers = d.get("mcpServers", {})
+assert "other-tool" in servers, f"Unrelated entry was removed: {list(servers.keys())}"
+assert "serena" in servers, f"Serena entry missing: {list(servers.keys())}"
+PY
+}
+
+# ---------------------------------------------------------------------------
+# Cycle 5.2 — malformed JSON recovery: opencode
+# ---------------------------------------------------------------------------
+
+@test "install: --serena-only recovers from malformed opencode config (backs up + fresh)" {
+  mock_install_prereqs
+  mock_cmd opencode
+  # Malformed JSON — json.load will raise JSONDecodeError without the fix
+  printf '{"broken json\n' > "$TMP_HOME/.opencode.json"
+
+  run bash "$SCRIPTS_DIR/install.sh" --serena-only --hosts opencode
+  [ "$status" -eq 0 ]
+
+  # After recovery, the config must be valid JSON with serena registered
+  python3 - "$TMP_HOME/.opencode.json" << 'PY'
+import json, sys
+d = json.load(open(sys.argv[1]))
+servers = d.get("mcpServers", {})
+assert "serena" in servers, f"serena missing after malformed-JSON recovery: {list(servers.keys())}"
+PY
+}
+
+# ---------------------------------------------------------------------------
+# Cycle 5.3 — malformed JSON recovery: cowork (Claude Desktop)
+# ---------------------------------------------------------------------------
+
+@test "install: --serena-only recovers from malformed cowork config (backs up + fresh)" {
+  mock_install_prereqs
+  mock_cmd opencode  # also detect opencode so --hosts cowork filter has >1 choice to filter
+
+  # Create malformed cowork config so HAS_COWORK=true and the json.load site is hit
+  local cowork_dir
+  if [ "$(uname -s)" = "Darwin" ]; then
+    cowork_dir="$TMP_HOME/Library/Application Support/Claude"
+  else
+    cowork_dir="$TMP_HOME/.config/Claude"
+  fi
+  mkdir -p "$cowork_dir"
+  printf '{"broken json\n' > "$cowork_dir/claude_desktop_config.json"
+
+  run bash "$SCRIPTS_DIR/install.sh" --serena-only --hosts cowork
+  [ "$status" -eq 0 ]
+
+  python3 - "$cowork_dir/claude_desktop_config.json" << 'PY'
+import json, sys
+d = json.load(open(sys.argv[1]))
+servers = d.get("mcpServers", {})
+assert "serena" in servers, f"serena missing after malformed-JSON recovery: {list(servers.keys())}"
+PY
+}
+
+# ---------------------------------------------------------------------------
+# Cycle 5.4 — uninstall idempotency
+# ---------------------------------------------------------------------------
+
+@test "uninstall: --force is idempotent (second run on clean system exits 0)" {
+  run bash "$SCRIPTS_DIR/uninstall.sh" --force
+  [ "$status" -eq 0 ]
+
+  run bash "$SCRIPTS_DIR/uninstall.sh" --force
+  [ "$status" -eq 0 ]
+}
+
+@test "install.sh writes Serena to Linux Claude Desktop config when that config exists" {
+  mock_install_prereqs
+  mkdir -p "$TMP_HOME/.config/Claude"
+  printf '{}\n' > "$TMP_HOME/.config/Claude/claude_desktop_config.json"
+
+  run bash "$SCRIPTS_DIR/install.sh" --serena-only --hosts cowork
+  [ "$status" -eq 0 ]
+
+  python3 - "$TMP_HOME/.config/Claude/claude_desktop_config.json" << 'PY'
+import json, sys
+with open(sys.argv[1]) as f:
+    data = json.load(f)
+servers = data.get("mcpServers", {})
+assert "serena" in servers, "serena not written to Linux Claude Desktop config"
+assert servers["serena"]["command"] == "uvx", servers["serena"]
+assert "--project-from-cwd" in servers["serena"]["args"], servers["serena"]["args"]
+PY
+}

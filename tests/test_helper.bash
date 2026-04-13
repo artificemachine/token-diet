@@ -204,6 +204,86 @@ PY
   fi
 }
 
+# mock_rtk_with_init_show [healthy|warn|fail]
+# Creates an rtk mock that handles gain AND init --show.
+# Pass "healthy" (default) for all-[ok] output, "warn" for one [warn], "fail" for one [FAIL].
+mock_rtk_with_init_show() {
+  local mode="${1:-healthy}"
+  local show_output
+  case "$mode" in
+    warn)
+      show_output='[warn] Hook: /mock/.claude/hooks/rtk-rewrite.sh (NOT executable - run: chmod +x)
+[ok] settings.json: RTK hook configured'
+      ;;
+    fail)
+      show_output='[FAIL] Integrity: hook modified outside rtk init (run: rtk verify)
+[ok] settings.json: RTK hook configured'
+      ;;
+    *)  # healthy
+      show_output='[ok] Hook: /mock/.claude/hooks/rtk-rewrite.sh
+[ok] settings.json: RTK hook configured
+[ok] Codex RTK.md: /mock/.codex/RTK.md'
+      ;;
+  esac
+
+  cat > "$TMP_BIN/rtk" << MOCK
+#!/usr/bin/env bash
+case "\$1" in
+  --version) echo "rtk 1.3.6-mock"; exit 0 ;;
+  gain)
+    case "\$2" in
+      --help)   echo "Usage: rtk gain [OPTIONS]"; exit 0 ;;
+      --format) echo '{"summary":{"total_commands":10,"total_input":5000,"total_saved":3500,"avg_savings_pct":70.0,"total_time_ms":250},"daily":[]}'; exit 0 ;;
+      *)        echo "Usage: rtk gain [OPTIONS]"; exit 0 ;;
+    esac ;;
+  init)
+    if [ "\$2" = "--show" ]; then
+      printf '%s\n' "$show_output"
+      exit 0
+    fi
+    exit 0 ;;
+  *) exit 0 ;;
+esac
+MOCK
+  chmod +x "$TMP_BIN/rtk"
+}
+
+# mock_rtk_with_auto_patch [success|fail]
+# Handles: --version, gain --format, init --show (warn output), init -g --auto-patch.
+# success (default) → auto-patch exits 0; fail → exits 1.
+# Writes $TMP_HOME/.rtk-auto-patch-called on each auto-patch invocation.
+mock_rtk_with_auto_patch() {
+  local mode="${1:-success}"
+  local patch_exit=0
+  [ "$mode" = "fail" ] && patch_exit=1
+
+  cat > "$TMP_BIN/rtk" << MOCK
+#!/usr/bin/env bash
+case "\$1" in
+  --version) echo "rtk 1.3.6-mock"; exit 0 ;;
+  gain)
+    case "\$2" in
+      --help)   echo "Usage: rtk gain [OPTIONS]"; exit 0 ;;
+      --format) echo '{"summary":{"total_commands":10,"total_input":5000,"total_saved":3500,"avg_savings_pct":70.0,"total_time_ms":250},"daily":[]}'; exit 0 ;;
+      *)        echo "Usage: rtk gain [OPTIONS]"; exit 0 ;;
+    esac ;;
+  init)
+    if [ "\$2" = "--show" ]; then
+      printf '[warn] Hook: /mock/.claude/hooks/rtk-rewrite.sh (NOT executable - run: chmod +x)\n'
+      printf '[ok] settings.json: RTK hook configured\n'
+      exit 0
+    fi
+    if [ "\$2" = "-g" ] && [ "\$3" = "--auto-patch" ]; then
+      touch "$TMP_HOME/.rtk-auto-patch-called"
+      exit $patch_exit
+    fi
+    exit 0 ;;
+  *) exit 0 ;;
+esac
+MOCK
+  chmod +x "$TMP_BIN/rtk"
+}
+
 # mock_install_prereqs
 # Creates mock binaries for all install.sh prerequisites
 mock_install_prereqs() {

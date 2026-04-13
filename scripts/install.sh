@@ -373,6 +373,17 @@ install_rtk() {
     fi
   fi
 
+  # Symlink cargo binary into ~/.local/bin so it takes effect on PATH without
+  # restarting the shell. macOS security policy kills copied Rust binaries in
+  # ~/.local/bin (SIGKILL) but honours symlinks into ~/.cargo/bin.
+  local cargo_rtk="$HOME/.cargo/bin/rtk"
+  local local_rtk="$HOME/.local/bin/rtk"
+  if [ -f "$cargo_rtk" ] && [ "${DRY_RUN:-false}" != "true" ]; then
+    mkdir -p "$HOME/.local/bin"
+    ln -sf "$cargo_rtk" "$local_rtk"
+    ok "RTK symlinked: $local_rtk → $cargo_rtk"
+  fi
+
   # Verify
   if ! rtk gain --help &>/dev/null; then
     warn "RTK verification failed"
@@ -496,6 +507,15 @@ install_tilth() {
       cargo install --git "$TILTH_REPO" --force 2>&1 | show_output
       ok "tilth installed: $(tilth --version 2>/dev/null)"
     fi
+  fi
+
+  # Symlink cargo binary into ~/.local/bin — same reason as RTK above.
+  local cargo_tilth="$HOME/.cargo/bin/tilth"
+  local local_tilth="$HOME/.local/bin/tilth"
+  if [ -f "$cargo_tilth" ] && [ "${DRY_RUN:-false}" != "true" ]; then
+    mkdir -p "$HOME/.local/bin"
+    ln -sf "$cargo_tilth" "$local_tilth"
+    ok "tilth symlinked: $local_tilth → $cargo_tilth"
   fi
 
   # Host integration — tilth install <host>

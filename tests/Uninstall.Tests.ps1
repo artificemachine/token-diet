@@ -20,6 +20,8 @@ BeforeAll {
     # Mimic Windows env vars pointing at temp dirs
     $env:USERPROFILE  = $TmpRoot
     $env:APPDATA      = Join-Path $TmpRoot "AppData\Roaming"
+    # Redirect cargo home so 'cargo uninstall' never touches the host cargo registry
+    $env:CARGO_HOME   = Join-Path $TmpRoot ".cargo"
     $env:LOCALAPPDATA = Join-Path $TmpRoot "AppData\Local"
 
     foreach ($dir in @(

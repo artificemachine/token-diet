@@ -47,6 +47,8 @@ COPY --from=builder /opt/serena-venv /opt/serena-venv
 COPY --from=builder /usr/local/lib/node_modules /usr/local/lib/node_modules
 COPY --from=builder /usr/local/bin/tsserver /usr/local/bin/tsserver
 
+LABEL org.opencontainers.image.version="0.1.5"
+
 ENV PATH="/opt/serena-venv/bin:$PATH"
 ENV SERENA_NO_TELEMETRY=1
 

@@ -33,7 +33,9 @@ def rtk_stats(data=None):
         data = _get_rtk_daily()
     if not data:
         return None
-    return {"summary": data["summary"], "daily": data.get("daily", [])[-14:]}
+    ver_raw = run(["rtk", "--version"])
+    version = ver_raw.split()[-1] if ver_raw else None
+    return {"version": version, "summary": data["summary"], "daily": data.get("daily", [])[-14:]}
 
 def tilth_stats():
     ver = run(["tilth", "--version"])
@@ -53,7 +55,15 @@ def serena_stats():
     log_days  = len(list(log_dir.iterdir())) if log_dir.exists() else 0
     hosts     = _registered_hosts("serena")
     mode      = "docker" if has_docker else "uvx"
-    return {"mode": mode, "hosts": hosts, "memories": memories, "log_days": log_days}
+    version   = None
+    if has_docker:
+        label = run(["docker", "inspect", "token-diet/serena:latest",
+                     "--format", "{{index .Config.Labels \"org.opencontainers.image.version\"}}"])
+        version = label.strip() if label and label.strip() else None
+    elif has_uvx:
+        ver_raw = run(["uvx", "serena", "--version"])
+        version = ver_raw.split()[-1] if ver_raw else None
+    return {"mode": mode, "version": version, "hosts": hosts, "memories": memories, "log_days": log_days}
 
 def _registered_hosts(tool):
     found = []
@@ -419,7 +429,9 @@ function render(d){
   cards+='<div class=card><h2 data-tip="Wraps every CLI command and filters/truncates its output before it reaches the LLM. Saves 60\u201390% of tokens on git, test runners, build tools, and any verbose command output.">RTK \u2014 output compression</h2>';
   if(r){
     const sm=r.summary;
-    cards+=`<div class=tool>${badge(true)} RTK</div>`;
+    const rVer=r.version?` ${r.version}`:'';
+    cards+=`<div class=tool>${badge(true)} RTK${rVer}</div>`;
+    if(r.version) cards+=`<div class=stat><span class=sl>Version</span><span class=sv>${r.version}</span></div>`;
     cards+=`<div class=stat><span class=sl>Tokens in</span><span class=sv>${fmt(sm.total_input)}</span></div>`;
     cards+=`<div class=stat><span class=sl>Tokens saved</span><span class=sv>${fmt(sm.total_saved)}</span></div>`;
     cards+=`<div class=stat><span class=sl>Avg efficiency</span><span class=sv>${sm.avg_savings_pct.toFixed(1)}%</span></div>`;
@@ -452,8 +464,10 @@ function render(d){
   // Serena card
   cards+='<div class=card><h2 data-tip="LSP = Language Server Protocol. A language server understands your codebase deeply: go-to-definition, find-references, call graphs, cross-file symbols. Serena exposes this to the LLM so it navigates by meaning instead of reading whole files \u2014 fewer turns, smaller prompts.">Serena \u2014 LSP navigation</h2>';
   if(s){
-    cards+=`<div class=tool>${badge(true)} Serena (${s.mode})</div>`;
+    const sVer=s.version?` ${s.version}`:'';
+    cards+=`<div class=tool>${badge(true)} Serena${sVer} (${s.mode})</div>`;
     cards+=`<div class=stat><span class=sl>Mode</span><span class=sv>${s.mode}</span></div>`;
+    if(s.version) cards+=`<div class=stat><span class=sl>Version</span><span class=sv>${s.version}</span></div>`;
     cards+=`<div class=stat><span class=sl>Memories</span><span class=sv>${s.memories} files</span></div>`;
     cards+=`<div class=stat><span class=sl>Session logs</span><span class=sv>${s.log_days} days</span></div>`;
     cards+=`<div class=stat><span class=sl>Savings type</span><span class=sv>structural (fewer turns)</span></div>`;

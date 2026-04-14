@@ -237,8 +237,9 @@ def test_token_diet_version_returns_version_string(dashboard_mod):
 
 
 def test_token_diet_version_returns_none_when_not_installed(dashboard_mod):
-    """token_diet_version() returns None when token-diet is not on PATH."""
-    with patch.object(dashboard_mod, "run", return_value=None):
+    """token_diet_version() returns None when token-diet is not on PATH and no sibling script found."""
+    with patch.object(dashboard_mod, "run", return_value=None), \
+         patch("pathlib.Path.exists", return_value=False):
         result = dashboard_mod.token_diet_version()
     assert result is None
 

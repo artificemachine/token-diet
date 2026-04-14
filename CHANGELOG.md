@@ -430,3 +430,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ### Added
 * `scripts/token-diet-dashboard` — RTK and Serena cards now show their installed version numbers alongside the active/badge label (RTK via `rtk --version`; Serena docker via `org.opencontainers.image.version` label; Serena uvx via `uvx serena --version`).
 * `docker/Dockerfile.serena` — add `LABEL org.opencontainers.image.version="0.1.5"` to runtime stage so `docker inspect` reports the bundled version. Rebuild the image to pick this up.
+
+## [1.4.5] - 2026-04-14
+
+### Fixed
+* `scripts/token-diet-dashboard` — use `docker image inspect` (consistent with existing `has_docker` check) instead of bare `docker inspect` for reading the version label.
+* `scripts/token-diet-dashboard` — `token_diet_version()` fallback for Windows: if `token-diet` subprocess fails, parse `TD_VERSION` from the sibling bash or PS1 script file (first 50 lines).

@@ -57,7 +57,7 @@ def serena_stats():
     mode      = "docker" if has_docker else "uvx"
     version   = None
     if has_docker:
-        label = run(["docker", "inspect", "token-diet/serena:latest",
+        label = run(["docker", "image", "inspect", "token-diet/serena:latest",
                      "--format", "{{index .Config.Labels \"org.opencontainers.image.version\"}}"])
         version = label.strip() if label and label.strip() else None
     elif has_uvx:
@@ -280,11 +280,30 @@ def missing_hosts_stats():
     }
 
 def token_diet_version():
-    """Self-version of the token-diet CLI."""
+    """Self-version of the token-diet CLI.
+
+    First tries subprocess (works on Linux/macOS where 'token-diet' is on
+    PATH).  Falls back to parsing TD_VERSION from the sibling bash script
+    (handles Windows where the .cmd shim isn't visible to Python subprocess
+    without shell=True).
+    """
     raw = run(["token-diet", "--version"])
-    if not raw:
-        return None
-    return raw.split()[-1]
+    if raw:
+        return raw.split()[-1]
+    # Fallback: read version from sibling script file
+    import re
+    for name in ("token-diet", "token-diet.ps1"):
+        p = pathlib.Path(__file__).resolve().parent / name
+        if not p.exists():
+            continue
+        try:
+            for line in p.read_text(encoding="utf-8").splitlines()[:50]:
+                m = re.search(r'''(?:readonly\s+)?TD_VERSION\s*=\s*['"]([^'"]+)['"]''', line)
+                if m:
+                    return m.group(1)
+        except Exception:
+            continue
+    return None
 
 def collect():
     daily_data  = _get_rtk_daily()

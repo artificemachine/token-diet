@@ -448,3 +448,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 * `token-diet update` — re-runs the installer to update RTK + tilth + Serena. Locates `install.sh` via `$TD_INSTALLER`, the script's own dir (repo checkout or installed `token-diet-install.sh`), or as a last resort clones `celstnblacc/token-diet` (depth 1) to a tempdir and runs it from there. All extra args are passed through to the installer (`--local`, `--verbose`, etc.).
 * `token-diet reinstall` — runs `uninstall --force` then `update`. Useful when the install is broken or out of sync.
 * PowerShell parity: `token-diet update` and `token-diet reinstall` mirror the same resolution order using `Install.ps1` / `token-diet-install.ps1`.
+
+## [1.5.1] - 2026-04-19
+
+### Added
+* `LICENSE` — MIT, matching the upstream forks (`celstnblacc/rtk`, `tilth`, `serena`). The installer pulls the repo via `git clone`, so the repo needed an explicit license for users building from source.
+
+### Changed
+* `.gitignore` — ignore local scan/coverage artifacts (`.coverage`, `shipguard.txt`) that were showing up as untracked after test and ShipGuard runs.

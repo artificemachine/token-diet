@@ -18,3 +18,5 @@ __pycache__/
 
 .token-budget
 nul
+.coverage
+shipguard.txt

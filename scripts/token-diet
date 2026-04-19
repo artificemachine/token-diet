@@ -12,7 +12,7 @@
 
 set -euo pipefail
 
-readonly TD_VERSION="1.4.6"
+readonly TD_VERSION="1.5.0"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # --- Colors -------------------------------------------------------------------
@@ -434,6 +434,63 @@ cmd_uninstall() {
     exit 1
   fi
   bash "$uninstall_sh" "$@"
+}
+
+# --- Update / Reinstall ------------------------------------------------------
+# Resolve the install script. Order:
+#   1. $TD_INSTALLER override
+#   2. $SCRIPT_DIR/install.sh         (running from a repo checkout)
+#   3. $SCRIPT_DIR/token-diet-install.sh (installed copy next to this binary)
+#   4. Clone celstnblacc/token-diet to a tempdir and use scripts/install.sh
+# Echoes the path. Clone-tempdir paths are auto-cleaned by the trap registered
+# inside cmd_update.
+_resolve_installer() {
+  local target="${1:-$HOME/.token-diet-clone}"  # unused; kept for trap symmetry
+  if [ -n "${TD_INSTALLER:-}" ] && [ -f "$TD_INSTALLER" ]; then
+    echo "$TD_INSTALLER"; return 0
+  fi
+  if [ -f "$SCRIPT_DIR/install.sh" ]; then
+    echo "$SCRIPT_DIR/install.sh"; return 0
+  fi
+  if [ -f "$SCRIPT_DIR/token-diet-install.sh" ]; then
+    echo "$SCRIPT_DIR/token-diet-install.sh"; return 0
+  fi
+  return 1
+}
+
+cmd_update() {
+  local installer
+  if installer="$(_resolve_installer)"; then
+    echo "[token-diet update] using local installer: $installer"
+    exec bash "$installer" "$@"
+  fi
+
+  command -v git >/dev/null 2>&1 || {
+    echo "Error: git not found. Install git, or set TD_INSTALLER=/path/to/install.sh" >&2
+    exit 1
+  }
+
+  local tmpdir
+  tmpdir="$(mktemp -d -t token-diet-update.XXXXXX)"
+  trap 'rm -rf "$tmpdir"' EXIT
+  local repo="https://github.com/celstnblacc/token-diet"
+  echo "[token-diet update] no local checkout found; cloning $repo (depth 1)..."
+  if ! git clone --depth 1 "$repo" "$tmpdir/repo" >/dev/null 2>&1; then
+    echo "Error: failed to clone $repo" >&2
+    exit 1
+  fi
+
+  # Show the commit we are about to run, so the user sees what they trust.
+  ( cd "$tmpdir/repo" && git --no-pager log -1 --pretty='[token-diet update] running commit %h %s (%ci)' )
+
+  bash "$tmpdir/repo/scripts/install.sh" "$@"
+}
+
+cmd_reinstall() {
+  echo "[token-diet reinstall] removing current install..."
+  cmd_uninstall --force || true
+  echo "[token-diet reinstall] re-running installer..."
+  cmd_update "$@"
 }
 
 # --- Service (always-on dashboard daemon) -------------------------------------
@@ -1842,6 +1899,8 @@ ${BOLD}COMMANDS${NC}
   verify            Re-run installation verification
   no-rtk            Temporarily disable RTK hook (commands pass through unfiltered)
   use-rtk           Re-enable RTK hook
+  update            Re-run the installer to update RTK + tilth + Serena  [installer flags]
+  reinstall         Uninstall everything, then run a fresh install  [installer flags]
   uninstall         Remove all token-diet components  [--dry-run] [--force]
   --help            Show this help
 
@@ -1877,6 +1936,8 @@ case "${1:-gain}" in
   strip)             shift; cmd_strip "$@" ;;
   diff-reads)        shift; cmd_diff_reads "$@" ;;
   serena-gc)         shift; cmd_serena_gc "$@" ;;
+  update)            shift; cmd_update "$@" ;;
+  reinstall)         shift; cmd_reinstall "$@" ;;
   uninstall)         shift; cmd_uninstall "$@" ;;
   no-rtk)            cmd_no_rtk ;;
   use-rtk)           cmd_use_rtk ;;

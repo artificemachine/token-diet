@@ -22,7 +22,7 @@ if ($args -and $args.Count -gt 0) { $SubArgs += $args }
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-$script:TD_VERSION = '1.4.6'
+$script:TD_VERSION = '1.5.0'
 if ($Version) { Write-Output "token-diet $script:TD_VERSION"; exit 0 }
 $ScriptDir = $PSScriptRoot
 
@@ -612,6 +612,55 @@ function Invoke-Uninstall([string[]]$Remaining) {
     if (Test-Path $ps1) { & $ps1 @Remaining } else { Write-Error "Uninstall.ps1 not found"; exit 1 }
 }
 
+function Resolve-Installer {
+    if ($env:TD_INSTALLER -and (Test-Path $env:TD_INSTALLER)) { return $env:TD_INSTALLER }
+    $candidates = @(
+        (Join-Path $ScriptDir 'Install.ps1'),
+        (Join-Path $ScriptDir 'token-diet-install.ps1')
+    )
+    foreach ($c in $candidates) { if (Test-Path $c) { return $c } }
+    return $null
+}
+
+function Invoke-Update([string[]]$Remaining) {
+    $installer = Resolve-Installer
+    if ($installer) {
+        Write-Output "[token-diet update] using local installer: $installer"
+        & $installer @Remaining
+        return
+    }
+
+    if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
+        Write-Error "git not found. Install git, or set `$env:TD_INSTALLER to an Install.ps1 path."
+        exit 1
+    }
+
+    $tmp = Join-Path ([System.IO.Path]::GetTempPath()) ("token-diet-update-" + [System.Guid]::NewGuid().ToString('N').Substring(0,8))
+    New-Item -ItemType Directory -Path $tmp -Force | Out-Null
+    try {
+        $repo = 'https://github.com/celstnblacc/token-diet'
+        Write-Output "[token-diet update] no local installer found; cloning $repo (depth 1)..."
+        & git clone --depth 1 $repo (Join-Path $tmp 'repo') 2>$null
+        if ($LASTEXITCODE -ne 0) { Write-Error "failed to clone $repo"; exit 1 }
+        Push-Location (Join-Path $tmp 'repo')
+        try {
+            & git --no-pager log -1 --pretty='[token-diet update] running commit %h %s (%ci)'
+            $ps1 = Join-Path (Get-Location) 'scripts\Install.ps1'
+            if (-not (Test-Path $ps1)) { Write-Error "Install.ps1 not found in clone"; exit 1 }
+            & $ps1 @Remaining
+        } finally { Pop-Location }
+    } finally {
+        Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue
+    }
+}
+
+function Invoke-Reinstall([string[]]$Remaining) {
+    Write-Output "[token-diet reinstall] removing current install..."
+    try { Invoke-Uninstall @('-Force') } catch { }
+    Write-Output "[token-diet reinstall] re-running installer..."
+    Invoke-Update $Remaining
+}
+
 function Invoke-Help {
     $helpText = @"
 
@@ -636,6 +685,8 @@ COMMANDS
   service <sub>           Always-on dashboard daemon  (install|uninstall|start|stop|status)
   version                 Show installed versions of all three tools
   verify                  Re-run installation verification
+  update                  Re-run the installer to update RTK + tilth + Serena  [installer flags]
+  reinstall               Uninstall everything, then run a fresh install  [installer flags]
   uninstall               Remove all token-diet components  [-DryRun] [-Force]
   --help                  Show this help
 
@@ -669,6 +720,8 @@ switch ($Command) {
     'test-first'                        { Invoke-TestFirst  $SubArgs }
     'strip'                             { Invoke-Strip      $SubArgs }
     'diff-reads'                        { Invoke-DiffReads  $SubArgs }
+    'update'                            { Invoke-Update     $SubArgs }
+    'reinstall'                         { Invoke-Reinstall  $SubArgs }
     'uninstall'                         { Invoke-Uninstall  $SubArgs }
     { $_ -in '--help','-h','help' }     { Invoke-Help }
     default {

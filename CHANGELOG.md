@@ -441,3 +441,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 * `tests/Uninstall.Tests.ps1` — set `$env:CARGO_HOME` to the test temp dir in `BeforeAll` so that `cargo uninstall rtk/tilth` never touches the host cargo registry. Previously, Pester `-Force` tests called the real `cargo uninstall` against the actual cargo registry, wiping the installed RTK and tilth binaries after each test run.
+
+## [1.5.0] - 2026-04-19
+
+### Added
+* `token-diet update` — re-runs the installer to update RTK + tilth + Serena. Locates `install.sh` via `$TD_INSTALLER`, the script's own dir (repo checkout or installed `token-diet-install.sh`), or as a last resort clones `celstnblacc/token-diet` (depth 1) to a tempdir and runs it from there. All extra args are passed through to the installer (`--local`, `--verbose`, etc.).
+* `token-diet reinstall` — runs `uninstall --force` then `update`. Useful when the install is broken or out of sync.
+* PowerShell parity: `token-diet update` and `token-diet reinstall` mirror the same resolution order using `Install.ps1` / `token-diet-install.ps1`.

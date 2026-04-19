@@ -110,6 +110,54 @@ load test_helper
 # Cycle 3.7 — uninstall dispatch
 # ---------------------------------------------------------------------------
 
+@test "help text includes update and reinstall commands" {
+  run "$SCRIPTS_DIR/token-diet" --help
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"update"* ]]
+  [[ "$output" == *"reinstall"* ]]
+}
+
+@test "update: runs TD_INSTALLER and passes flags through" {
+  local fake="$TMP_HOME/fake-install.sh"
+  cat > "$fake" << 'INSTALLER'
+#!/usr/bin/env bash
+echo "FAKE_INSTALLER args=$*"
+exit 0
+INSTALLER
+  chmod +x "$fake"
+
+  TD_INSTALLER="$fake" run "$SCRIPTS_DIR/token-diet" update --local --verbose
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"FAKE_INSTALLER args=--local --verbose"* ]]
+  [[ "$output" == *"using local installer"* ]]
+}
+
+@test "update: forwards installer non-zero exit code" {
+  local fake="$TMP_HOME/fail-install.sh"
+  printf '#!/usr/bin/env bash\nexit 7\n' > "$fake"
+  chmod +x "$fake"
+
+  TD_INSTALLER="$fake" run "$SCRIPTS_DIR/token-diet" update
+  [ "$status" -eq 7 ]
+}
+
+@test "reinstall: runs uninstall then update with TD_INSTALLER" {
+  # Plant a file uninstall.sh would remove
+  echo "#!/bin/bash" > "$TMP_HOME/.local/bin/token-diet-dashboard"
+  chmod +x "$TMP_HOME/.local/bin/token-diet-dashboard"
+
+  local fake="$TMP_HOME/fake-install.sh"
+  printf '#!/usr/bin/env bash\necho FAKE_INSTALLER_RAN\nexit 0\n' > "$fake"
+  chmod +x "$fake"
+
+  TD_INSTALLER="$fake" run "$SCRIPTS_DIR/token-diet" reinstall --local
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"removing current install"* ]]
+  [[ "$output" == *"re-running installer"* ]]
+  [[ "$output" == *"FAKE_INSTALLER_RAN"* ]]
+  [ ! -f "$TMP_HOME/.local/bin/token-diet-dashboard" ]
+}
+
 @test "uninstall subcommand dispatches to uninstall.sh" {
   # Plant a file to prove uninstall ran
   mkdir -p "$TMP_HOME/.local/bin"

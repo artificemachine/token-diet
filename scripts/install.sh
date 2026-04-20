@@ -133,6 +133,56 @@ codex_mcp_issue() {
   return 0
 }
 
+# Inject token-diet usage rules into OpenCode mode.build.prompt + mode.plan.prompt.
+# Idempotent — wraps the block in <!-- token-diet:begin --> / <!-- token-diet:end -->
+# markers so repeat runs replace (never duplicate) the block and preserve user text.
+inject_opencode_rules() {
+  local oc_prompt_cfg="$HOME/.config/opencode/opencode.json"
+  local rules_file
+  rules_file="$(dirname "$0")/lib/opencode-rules.md"
+  [ -f "$rules_file" ] || { warn "OpenCode rules template missing: $rules_file"; return 0; }
+
+  if [ "${DRY_RUN:-false}" = "true" ]; then
+    dryrun "Inject token-diet rules into mode.build.prompt + mode.plan.prompt at $oc_prompt_cfg"
+    return 0
+  fi
+
+  mkdir -p "$(dirname "$oc_prompt_cfg")"
+  [ -f "$oc_prompt_cfg" ] || echo '{}' > "$oc_prompt_cfg"
+
+  python3 - "$oc_prompt_cfg" "$rules_file" <<'PYEOF'
+import json, re, shutil, sys
+cfg_path, rules_path = sys.argv[1], sys.argv[2]
+BEGIN = "<!-- token-diet:begin -->"
+END   = "<!-- token-diet:end -->"
+with open(rules_path) as f: rules_body = f.read().strip()
+block = f"{BEGIN}\n{rules_body}\n{END}"
+
+try:
+    with open(cfg_path) as f: data = json.load(f)
+except (FileNotFoundError, json.JSONDecodeError, ValueError):
+    if sys.argv[1] and __import__('os').path.exists(cfg_path):
+        shutil.copy2(cfg_path, cfg_path + ".bak")
+    data = {}
+
+data.setdefault("mode", {})
+pattern = re.compile(re.escape(BEGIN) + r".*?" + re.escape(END), re.DOTALL)
+for mode_name in ("build", "plan"):
+    data["mode"].setdefault(mode_name, {})
+    existing = data["mode"][mode_name].get("prompt", "") or ""
+    if BEGIN in existing:
+        new = pattern.sub(block, existing, count=1)
+    else:
+        new = (existing + ("\n\n" if existing else "") + block).lstrip("\n")
+    data["mode"][mode_name]["prompt"] = new
+
+with open(cfg_path, "w") as f:
+    json.dump(data, f, indent=2)
+    f.write("\n")
+PYEOF
+  ok "OpenCode prompt rules injected: $oc_prompt_cfg"
+}
+
 ensure_git() {
   check_command git || fail "git is required. Install it first."
   ok "git found: $(git --version)"
@@ -711,6 +761,7 @@ with open(cfg, "w") as f:
 PYEOF
       ok "Serena MCP: OpenCode ($oc_cfg)"
     fi
+    inject_opencode_rules
   fi
   if $HAS_COPILOT; then
     ok "Serena: Copilot CLI uses VS Code MCP config (shared)"
@@ -1018,6 +1069,7 @@ TKDDOC
 
   write_token-diet_md "$HOME/.claude" "$HOME/.claude/CLAUDE.md"
   write_token-diet_md "$HOME/.codex" "$HOME/.codex/AGENTS.md"
+
   # Cowork (Claude Desktop) — write token-diet.md to its config dir if detected
   if $HAS_COWORK; then
     local cowork_dir

@@ -307,6 +307,98 @@ PY
   [ "$status" -eq 0 ]
 }
 
+# ---------------------------------------------------------------------------
+# Cycle 6.1 — OpenCode prompt rule injection (v1.6.0)
+# ---------------------------------------------------------------------------
+
+@test "install.sh injects token-diet rules into opencode mode.build.prompt and mode.plan.prompt" {
+  mock_install_prereqs
+  mock_cmd opencode
+  mkdir -p "$TMP_HOME/.config/opencode"
+  echo '{}' > "$TMP_HOME/.config/opencode/opencode.json"
+
+  run bash "$SCRIPTS_DIR/install.sh" --serena-only --hosts opencode
+  [ "$status" -eq 0 ]
+
+  python3 - "$TMP_HOME/.config/opencode/opencode.json" << 'PY'
+import json, sys
+d = json.load(open(sys.argv[1]))
+for m in ("build", "plan"):
+    p = d.get("mode", {}).get(m, {}).get("prompt", "")
+    assert "token-diet:begin" in p, f"mode.{m}.prompt missing begin marker"
+    assert "token-diet:end"   in p, f"mode.{m}.prompt missing end marker"
+    assert "tilth_search"     in p, f"mode.{m}.prompt missing tilth rules"
+PY
+}
+
+@test "install.sh opencode rule injection is idempotent (no duplication on second run)" {
+  mock_install_prereqs
+  mock_cmd opencode
+  mkdir -p "$TMP_HOME/.config/opencode"
+  echo '{}' > "$TMP_HOME/.config/opencode/opencode.json"
+
+  bash "$SCRIPTS_DIR/install.sh" --serena-only --hosts opencode
+  bash "$SCRIPTS_DIR/install.sh" --serena-only --hosts opencode
+
+  python3 - "$TMP_HOME/.config/opencode/opencode.json" << 'PY'
+import json, sys
+d = json.load(open(sys.argv[1]))
+for m in ("build", "plan"):
+    p = d.get("mode", {}).get(m, {}).get("prompt", "")
+    assert p.count("token-diet:begin") == 1, f"mode.{m}.prompt has duplicated begin markers"
+    assert p.count("token-diet:end")   == 1, f"mode.{m}.prompt has duplicated end markers"
+PY
+}
+
+@test "install.sh opencode rule injection preserves user's existing prompt text" {
+  mock_install_prereqs
+  mock_cmd opencode
+  mkdir -p "$TMP_HOME/.config/opencode"
+  python3 -c "
+import json
+with open('$TMP_HOME/.config/opencode/opencode.json', 'w') as f:
+    json.dump({'mode': {'build': {'prompt': 'USER ORIGINAL BUILD PROMPT'}, 'plan': {'prompt': 'USER ORIGINAL PLAN PROMPT'}}}, f)
+    f.write('\n')
+"
+
+  run bash "$SCRIPTS_DIR/install.sh" --serena-only --hosts opencode
+  [ "$status" -eq 0 ]
+
+  python3 - "$TMP_HOME/.config/opencode/opencode.json" << 'PY'
+import json, sys
+d = json.load(open(sys.argv[1]))
+assert "USER ORIGINAL BUILD PROMPT" in d["mode"]["build"]["prompt"]
+assert "USER ORIGINAL PLAN PROMPT"  in d["mode"]["plan"]["prompt"]
+PY
+}
+
+@test "uninstall.sh strips token-diet block from opencode prompts but preserves user text" {
+  mock_cmd opencode
+  mkdir -p "$TMP_HOME/.config/opencode"
+  python3 -c "
+import json
+prompt = 'USER TEXT\n<!-- token-diet:begin -->\nrules here\n<!-- token-diet:end -->\nTRAILING USER TEXT'
+with open('$TMP_HOME/.config/opencode/opencode.json', 'w') as f:
+    json.dump({'mode': {'build': {'prompt': prompt}, 'plan': {'prompt': prompt}}}, f)
+    f.write('\n')
+"
+
+  run bash "$SCRIPTS_DIR/uninstall.sh" --force
+  [ "$status" -eq 0 ]
+
+  python3 - "$TMP_HOME/.config/opencode/opencode.json" << 'PY'
+import json, sys
+d = json.load(open(sys.argv[1]))
+for m in ("build", "plan"):
+    p = d["mode"][m]["prompt"]
+    assert "token-diet:begin" not in p, f"mode.{m} still has markers"
+    assert "USER TEXT" in p, f"mode.{m} user text lost"
+    assert "TRAILING USER TEXT" in p, f"mode.{m} trailing user text lost"
+PY
+}
+
+# ---------------------------------------------------------------------------
+
 @test "install.sh writes Serena to Linux Claude Desktop config when that config exists" {
   mock_install_prereqs
   mkdir -p "$TMP_HOME/.config/Claude"

@@ -1167,7 +1167,10 @@ run_wizard() {
 
   local confirm
   read -rp "  Proceed? [Y/n] " confirm
-  [[ "$confirm" =~ ^[Nn] ]] && echo "Aborted." && exit 0
+  if [[ "$confirm" =~ ^[Nn] ]]; then
+    echo "Aborted."
+    exit 0
+  fi
 }
 
 # --- Main ---------------------------------------------------------------------
@@ -1179,15 +1182,20 @@ main() {
   DRY_RUN=false
   VERBOSE=false
 
+  # has_args tracks *intent* flags (--all, --rtk-only, --tilth-only, --serena-only,
+  # --verify). Modifier-only flags (--skip-tests, --local, --verbose, --hosts, etc.)
+  # leave has_args=false so the wizard still runs and picks install targets.
+  # Regression fix (issue #38): previously has_args was set for any flag, so a bare
+  # `install.sh --skip-tests` skipped the wizard AND left do_* false, leading to
+  # a silent no-op that only updated the token-diet CLI binary.
   while [ $# -gt 0 ]; do
-    has_args=true
     case "$1" in
-      --all)          do_rtk=true; do_tilth=true; do_serena=true ;;
+      --all)          has_args=true; do_rtk=true; do_tilth=true; do_serena=true ;;
+      --rtk-only)     has_args=true; do_rtk=true ;;
+      --tilth-only)   has_args=true; do_tilth=true ;;
+      --serena-only)  has_args=true; do_serena=true ;;
+      --verify)       has_args=true; verify_only=true ;;
       --local)        LOCAL_MODE=true ;;
-      --rtk-only)     do_rtk=true ;;
-      --tilth-only)   do_tilth=true ;;
-      --serena-only)  do_serena=true ;;
-      --verify)       verify_only=true ;;
       --no-dedup)     do_dedup=false ;;
       --skip-tests)   SKIP_TESTS=true ;;
       --dry-run)      DRY_RUN=true; SKIP_TESTS=true ;;
@@ -1217,8 +1225,19 @@ main() {
     exit 0
   fi
 
-  # Interactive mode when no args given
-  if ! $has_args; then
+  # Interactive mode when no args given at all.
+  # If only modifier flags were given (e.g. --skip-tests, --verbose, --dry-run,
+  # --local, --hosts), default to installing all three tools — the user clearly
+  # wants the install to run, they just tweaked *how*. Without this default,
+  # modifier-only invocations silently no-op (issue #38).
+  local any_arg=false
+  if $has_args; then
+    any_arg=true
+  elif $LOCAL_MODE || $SKIP_TESTS || $DRY_RUN || $VERBOSE || [ -n "${HOSTS_FILTER:-}" ] || ! $do_dedup; then
+    any_arg=true
+    do_rtk=true; do_tilth=true; do_serena=true
+  fi
+  if ! $any_arg; then
     run_wizard
     do_rtk=$WIZ_RTK; do_tilth=$WIZ_TILTH; do_serena=$WIZ_SERENA
     do_dedup=$WIZ_DEDUP; LOCAL_MODE=$WIZ_LOCAL; SKIP_TESTS=$WIZ_SKIP_TESTS

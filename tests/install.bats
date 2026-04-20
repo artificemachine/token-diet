@@ -308,6 +308,32 @@ PY
 }
 
 # ---------------------------------------------------------------------------
+# Cycle 6.2 — modifier-only flags must not suppress install (v1.6.1, issue #38)
+# ---------------------------------------------------------------------------
+
+@test "install.sh --skip-tests (modifier-only) still triggers Serena MCP + opencode rules" {
+  mock_install_prereqs
+  mock_cmd opencode
+  mkdir -p "$TMP_HOME/.config/opencode"
+  echo '{}' > "$TMP_HOME/.config/opencode/opencode.json"
+
+  # Wizard answers: install-all=y, dedup=y, local-mode=n (use uvx path — no Docker).
+  # Pre-fix: --skip-tests set has_args=true, wizard was skipped, do_serena stayed
+  # false, injection never ran. Post-fix: has_args stays false for modifier-only
+  # flags, wizard runs, install proceeds normally.
+  # Wizard prompts: install-all, dedup, local-mode, proceed.
+  run bash -c "printf 'y\ny\nn\ny\n' | bash '$SCRIPTS_DIR/install.sh' --skip-tests --hosts opencode"
+  [ "$status" -eq 0 ]
+
+  python3 - "$TMP_HOME/.config/opencode/opencode.json" << 'PY'
+import json, sys
+d = json.load(open(sys.argv[1]))
+p = d.get("mode", {}).get("build", {}).get("prompt", "")
+assert "token-diet:begin" in p, "OpenCode rules not injected — modifier-only flag bypassed install"
+PY
+}
+
+# ---------------------------------------------------------------------------
 # Cycle 6.1 — OpenCode prompt rule injection (v1.6.0)
 # ---------------------------------------------------------------------------
 

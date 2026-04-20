@@ -463,3 +463,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 * OpenCode prompt rule injection — `install.sh` now writes the token-diet + RTK + tilth + Serena usage rules into `~/.config/opencode/opencode.json` under `mode.build.prompt` and `mode.plan.prompt`, wrapped in `<!-- token-diet:begin -->` / `<!-- token-diet:end -->` markers. Previously binaries and MCP servers installed fine for OpenCode, but the usage rules never reached the model because OpenCode does not read `@file.md` include syntax or `~/.claude/CLAUDE.md`. Rules live at `scripts/lib/opencode-rules.md` and are re-usable for any other non-Claude prompt-string host.
 * `uninstall.sh` strips the token-diet block from OpenCode prompts, preserving user-authored text outside the markers.
 * 4 bats tests covering injection, idempotency, user-text preservation, and clean removal.
+
+## [1.6.1] - 2026-04-20
+
+### Fixed
+
+* `install.sh` modifier-only invocations (e.g. `--skip-tests`, `--verbose`, `--dry-run`, `--local`, `--hosts X`) used to set `has_args=true` and then silently no-op because no `do_*` intent was configured. Result: the `token-diet` CLI binary got updated but RTK/tilth/Serena installation and Serena MCP registration (including v1.6.0's OpenCode prompt injection) never ran. Intent flags (`--all`, `--rtk-only`, `--tilth-only`, `--serena-only`, `--verify`) are now the only flags that gate the wizard; modifier-only invocations default to install-all. Closes #38.
+* `install.sh` wizard's final `Proceed? [Y/n]` prompt used `[[ … ]] && echo && exit 0`, which under `set -e` caused the whole function to return non-zero when the user answered "y", aborting main(). Rewritten as a proper `if … then … fi` block. Latent since the wizard path was never test-covered before v1.6.1 (all existing tests passed explicit `--serena-only`/`--all` and skipped the wizard).
+
+### Added
+
+* New bats test: `install.sh --skip-tests (modifier-only) still triggers Serena MCP + opencode rules`. Proves the fix by driving the wizard with canned stdin (`install-all=y, dedup=y, local=n, proceed=y`) and asserting the token-diet begin marker lands in `opencode.json`. Total 138 bats tests, 0 failures.

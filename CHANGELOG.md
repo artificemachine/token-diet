@@ -456,3 +456,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Changed
 * `.gitignore` — ignore local scan/coverage artifacts (`.coverage`, `shipguard.txt`) that were showing up as untracked after test and ShipGuard runs.
+
+## [1.6.0] - 2026-04-20
+
+### Added
+* OpenCode prompt rule injection — `install.sh` now writes the token-diet + RTK + tilth + Serena usage rules into `~/.config/opencode/opencode.json` under `mode.build.prompt` and `mode.plan.prompt`, wrapped in `<!-- token-diet:begin -->` / `<!-- token-diet:end -->` markers. Previously binaries and MCP servers installed fine for OpenCode, but the usage rules never reached the model because OpenCode does not read `@file.md` include syntax or `~/.claude/CLAUDE.md`. Rules live at `scripts/lib/opencode-rules.md` and are re-usable for any other non-Claude prompt-string host.
+* `uninstall.sh` strips the token-diet block from OpenCode prompts, preserving user-authored text outside the markers.
+* 4 bats tests covering injection, idempotency, user-text preservation, and clean removal.

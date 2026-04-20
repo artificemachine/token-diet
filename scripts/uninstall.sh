@@ -83,6 +83,39 @@ PY
   ok "Removed mcpServers.$key from $cfg"
 }
 
+# strip_opencode_rules <cfg_path>
+# Removes the token-diet begin/end block from mode.build.prompt and mode.plan.prompt.
+strip_opencode_rules() {
+  local cfg="$1"
+  [ -f "$cfg" ] || { miss "$cfg (mode.*.prompt token-diet block)"; return 0; }
+  if $DRY_RUN; then
+    dry "strip token-diet block from mode.build.prompt + mode.plan.prompt in $cfg"
+    return 0
+  fi
+  python3 - "$cfg" <<'PY'
+import json, re, sys
+cfg_path = sys.argv[1]
+BEGIN = "<!-- token-diet:begin -->"
+END   = "<!-- token-diet:end -->"
+pattern = re.compile(r"\n*" + re.escape(BEGIN) + r".*?" + re.escape(END) + r"\n*", re.DOTALL)
+try:
+    with open(cfg_path) as f: data = json.load(f)
+except (json.JSONDecodeError, ValueError):
+    sys.exit(0)
+changed = False
+for mode_name in ("build", "plan"):
+    prompt = data.get("mode", {}).get(mode_name, {}).get("prompt", "")
+    if BEGIN in prompt:
+        data["mode"][mode_name]["prompt"] = pattern.sub("\n", prompt).strip("\n")
+        changed = True
+if changed:
+    with open(cfg_path, "w") as f:
+        json.dump(data, f, indent=2)
+        f.write("\n")
+PY
+  ok "Stripped token-diet prompt block from $cfg"
+}
+
 # remove_line_from_file <file> <pattern>
 # Removes lines matching pattern from a file.
 remove_line_from_file() {
@@ -157,6 +190,7 @@ main() {
   echo -e "${BOLD}MCP registrations — OpenCode${NC}"
   remove_json_key "$HOME/.opencode.json" "tilth"
   remove_json_key "$HOME/.opencode.json" "serena"
+  strip_opencode_rules "$HOME/.config/opencode/opencode.json"
 
   echo ""
   echo -e "${BOLD}MCP registrations — VS Code${NC}"

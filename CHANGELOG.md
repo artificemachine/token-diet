@@ -25,6 +25,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - `token-diet update`: Added `--fresh` flag for clean reinstalls (deprecates `reinstall`).
 - `token-diet verify`: Now an alias for `doctor`, providing deep diagnostics.
 - AI Instructions: Refined `token-diet.md` with explicit tool selection and self-monitoring guidelines for agents.
+- Windows: Fixed duplicate dispatch block in `token-diet.ps1` that broke Pester tests.
+
 
 ## [1.2.15] — 2026-04-06
 

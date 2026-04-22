@@ -459,10 +459,26 @@ _resolve_installer() {
 }
 
 cmd_update() {
+  local fresh=false
+  local args=()
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --fresh) fresh=true ;;
+      *) args+=("$1") ;;
+    esac
+    shift
+  done
+
+  if $fresh; then
+    echo "[token-diet update] --fresh requested; removing current install..."
+    cmd_uninstall --force || true
+    echo "[token-diet update] re-running installer..."
+  fi
+
   local installer
   if installer="$(_resolve_installer)"; then
     echo "[token-diet update] using local installer: $installer"
-    exec bash "$installer" "$@"
+    exec bash "$installer" "${args[@]}"
   fi
 
   command -v git >/dev/null 2>&1 || {
@@ -483,15 +499,51 @@ cmd_update() {
   # Show the commit we are about to run, so the user sees what they trust.
   ( cd "$tmpdir/repo" && git --no-pager log -1 --pretty='[token-diet update] running commit %h %s (%ci)' )
 
-  bash "$tmpdir/repo/scripts/install.sh" "$@"
+  bash "$tmpdir/repo/scripts/install.sh" "${args[@]}"
 }
 
 cmd_reinstall() {
-  echo "[token-diet reinstall] removing current install..."
-  cmd_uninstall --force || true
-  echo "[token-diet reinstall] re-running installer..."
-  cmd_update "$@"
+  echo "Warning: 'reinstall' is deprecated. Use 'token-diet update --fresh' instead."
+  cmd_update --fresh "$@"
 }
+
+cmd_mcp() {
+  local sub="${1:-help}"
+  case "$sub" in
+    install|register)
+      shift
+      cmd_update --tilth-only --serena-only "$@"
+      ;;
+    list|status)
+      cmd_doctor --json | python3 -c 'import json, sys; d=json.load(sys.stdin); print("\nRegistered MCP Hosts:"); 
+for h in d.get("tilth_mcp", {}).get("registered_hosts", []): print(f"  ✓ {h}")'
+      ;;
+    *)
+      echo "Usage: token-diet mcp [install|list]"
+      echo ""
+      echo "  install   Register token-diet MCP servers (tilth/Serena) in detected AI hosts"
+      echo "  list      Show hosts where token-diet MCP is currently registered"
+      exit 1
+      ;;
+  esac
+}
+
+cmd_hook() {
+  local state="${1:-}"
+  case "$state" in
+    on|enable)  cmd_use_rtk ;;
+    off|disable) cmd_no_rtk ;;
+    *)
+      if [ -f "$HOME/.token-diet-no-rtk" ]; then
+        echo "RTK hook is currently: ${RED}DISABLED${NC}"
+      else
+        echo "RTK hook is currently: ${GREEN}ENABLED${NC}"
+      fi
+      echo "Usage: token-diet hook [on|off]"
+      ;;
+  esac
+}
+
 
 # --- Service (always-on dashboard daemon) -------------------------------------
 cmd_service() {
@@ -1880,9 +1932,11 @@ ${BOLD}USAGE${NC}
 
 ${BOLD}COMMANDS${NC}
   gain              Show token savings dashboard across RTK + tilth + Serena  (default)
-  health            Quick health check: tools responding + MCP hosts registered
-  doctor            Structured diagnosis: binaries, RTK hooks, MCP registrations  [--json]
+  health            Quick health check: tools responding + MCP host registrations
+  doctor            Deep configuration and hook diagnosis  [--json]
   repair            Fix what doctor finds: RTK hooks, stale MCP commands  [--dry-run] [--json]
+  mcp               Manage MCP server registrations  [install|list]
+  hook              Toggle RTK hook  [on|off]
   breakdown         Top commands by tokens saved  [--limit N]
   explain <cmd>     Token cost breakdown for a specific command
   budget <init|status>  Per-project token budget with warn/hard thresholds
@@ -1896,11 +1950,7 @@ ${BOLD}COMMANDS${NC}
   dashboard         Open live browser dashboard  [--port N]
   service <sub>     Manage always-on dashboard daemon  (install|uninstall|start|stop|status)
   version           Show installed versions of all three tools
-  verify            Re-run installation verification
-  no-rtk            Temporarily disable RTK hook (commands pass through unfiltered)
-  use-rtk           Re-enable RTK hook
-  update            Re-run the installer to update RTK + tilth + Serena  [installer flags]
-  reinstall         Uninstall everything, then run a fresh install  [installer flags]
+  update            Update tools  [--fresh] [installer flags]
   uninstall         Remove all token-diet components  [--dry-run] [--force]
   --help            Show this help
 
@@ -1920,8 +1970,10 @@ EOF
 case "${1:-gain}" in
   gain)              cmd_gain ;;
   health)            cmd_health ;;
-  doctor)            shift; cmd_doctor "$@" ;;
+  doctor|verify)     shift; cmd_doctor "$@" ;;
   repair)            shift; cmd_repair "$@" ;;
+  mcp)               shift; cmd_mcp "$@" ;;
+  hook)              shift; cmd_hook "$@" ;;
   breakdown)         shift; cmd_breakdown "$@" ;;
   explain)           shift; cmd_explain "$@" ;;
   budget)            shift; cmd_budget "$@" ;;
@@ -1929,7 +1981,6 @@ case "${1:-gain}" in
   dashboard)         shift; cmd_dashboard "$@" ;;
   service)           shift; cmd_service "$@" ;;
   version|versions)  cmd_version ;;
-  verify)            cmd_verify ;;
   route)             shift; cmd_route "$@" ;;
   leaks)             cmd_leaks ;;
   test-first)        shift; cmd_test_first "$@" ;;
@@ -1937,10 +1988,10 @@ case "${1:-gain}" in
   diff-reads)        shift; cmd_diff_reads "$@" ;;
   serena-gc)         shift; cmd_serena_gc "$@" ;;
   update)            shift; cmd_update "$@" ;;
-  reinstall)         shift; cmd_reinstall "$@" ;;
+  reinstall)         echo "Warning: 'reinstall' is deprecated. Use 'token-diet update --fresh' instead."; shift; cmd_update --fresh "$@" ;;
   uninstall)         shift; cmd_uninstall "$@" ;;
-  no-rtk)            cmd_no_rtk ;;
-  use-rtk)           cmd_use_rtk ;;
+  no-rtk)            echo "Warning: 'no-rtk' is deprecated. Use 'token-diet hook off' instead."; cmd_no_rtk ;;
+  use-rtk)           echo "Warning: 'use-rtk' is deprecated. Use 'token-diet hook on' instead."; cmd_use_rtk ;;
   --help|-h|help)    cmd_help ;;
   --version)         echo "token-diet $TD_VERSION" ;;
   *)  echo "Unknown command: $1"; cmd_help; exit 1 ;;

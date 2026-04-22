@@ -787,6 +787,7 @@ function Install-TokenDiet {
     $binDir = Join-Path $env:LOCALAPPDATA "Programs\token-diet"
     $srcPs1 = Join-Path $script:ScriptDir "token-diet.ps1"
     $srcDash = Join-Path $script:ScriptDir "token-diet-dashboard"
+    $srcMcp = Join-Path $script:ScriptDir "token-diet-mcp"
 
     if (-not (Test-Path $srcPs1)) {
         Write-Warn "scripts\token-diet.ps1 not found — skipping CLI install"
@@ -796,9 +797,11 @@ function Install-TokenDiet {
     if ($DryRun) {
         Write-DryRun "Copy token-diet.ps1 to $binDir\token-diet.ps1"
         if (Test-Path $srcDash) { Write-DryRun "Copy token-diet-dashboard to $binDir\token-diet-dashboard" }
+        if (Test-Path $srcMcp) { Write-DryRun "Copy token-diet-mcp to $binDir\token-diet-mcp" }
         Write-DryRun "Copy Uninstall.ps1 to $binDir\Uninstall.ps1"
         Write-DryRun "Write token-diet.md to ~/.claude/ and ~/.codex/"
         Write-DryRun "Add @token-diet.md to CLAUDE.md / AGENTS.md"
+        Write-DryRun "Register token-diet MCP server"
         return
     }
 
@@ -813,6 +816,49 @@ function Install-TokenDiet {
     if (Test-Path $srcDash) {
         Copy-Item $srcDash (Join-Path $binDir "token-diet-dashboard") -Force
         Write-Ok "token-diet-dashboard installed: $binDir\token-diet-dashboard"
+    }
+
+    # Copy MCP
+    if (Test-Path $srcMcp) {
+        Copy-Item $srcMcp (Join-Path $binDir "token-diet-mcp") -Force
+        Write-Ok "token-diet-mcp installed: $binDir\token-diet-mcp"
+
+        # Register MCP server in codex
+        $codexConfig = Join-Path $env:USERPROFILE ".codex\config.toml"
+        if (Test-Path $codexConfig) {
+            $content = Get-Content -Path $codexConfig -Raw
+            if ($content -notmatch '\[mcp_servers\.token-diet\]') {
+                Add-Content -Path $codexConfig -Value "`n[mcp_servers.token-diet]`ncommand = ""python""`nargs = [""$binDir\token-diet-mcp""]`n"
+            }
+        }
+
+        # Register MCP server in JSON configs
+        $configs = @(
+            (Join-Path $env:USERPROFILE ".claude\settings.json"),
+            (Join-Path $env:USERPROFILE ".opencode.json"),
+            (Join-Path $env:APPDATA "Claude\claude_desktop_config.json")
+        )
+        if ($global:CoworkCfg) { $configs += $global:CoworkCfg }
+
+        foreach ($cfg in $configs) {
+            if (Test-Path $cfg) {
+                try {
+                    $json = Get-Content $cfg -Raw | ConvertFrom-Json
+                    if (-not $json.PSObject.Properties.Match('mcpServers')) {
+                        $json | Add-Member -MemberType NoteProperty -Name 'mcpServers' -Value @{}
+                    }
+                    $serverObj = @{ "command" = "python"; "args" = @("$binDir\token-diet-mcp") }
+                    if ($json.mcpServers.PSObject.Properties.Match('token-diet')) {
+                        $json.mcpServers.'token-diet' = $serverObj
+                    } else {
+                        $json.mcpServers | Add-Member -MemberType NoteProperty -Name 'token-diet' -Value $serverObj
+                    }
+                    $json | ConvertTo-Json -Depth 10 | Set-Content $cfg -Encoding UTF8
+                } catch {
+                    Write-Warn "Failed to register token-diet MCP in $cfg"
+                }
+            }
+        }
     }
 
     # Copy installer so `token-diet verify` works standalone
@@ -841,26 +887,29 @@ if errorlevel 9009 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0tok
 
     # Write token-diet.md into AI host config dirs and hook @token-diet.md
     $tkdDoc = @"
-# TKD — token-diet unified CLI
+# Token Diet — AI Context Optimization
 
-``token-diet`` (``token-diet.ps1``) is the top-level command for the token-diet stack (RTK + tilth + Serena).
+``token-diet`` is a unified optimization layer for AI agents. It orchestrates RTK, tilth, and Serena to maximize context efficiency.
 
-## Commands
+## Core Commands
 
-``````powershell
-token-diet gain       # Combined savings dashboard: RTK + tilth + Serena
-token-diet version    # Installed versions of all three tools
-token-diet verify     # Re-run installation verification
-token-diet dashboard  # Open live browser dashboard
-``````
+- ``token-diet gain``: Current token savings and efficiency stats.
+- ``token-diet mcp list``: Check which hosts are currently optimized.
+- ``token-diet hook off``: Disable RTK (raw output) for troubleshooting.
+- ``token-diet hook on``: Re-enable RTK optimization.
+- ``token-diet budget status``: Check project-specific token consumption.
+- ``token-diet route <task>``: Ask ``token-diet`` which tool is best for your current task.
+- ``token-diet doctor``: Run diagnostics if tools are unresponsive.
 
-## Rules
+## Agent Guidelines
 
-- **``token-diet`` is a real script.** Never assume it is a typo for ``rtk``.
-- Run ``Get-Command token-diet`` if unsure whether it is installed.
-- ``token-diet gain`` shows RTK tracked savings + tilth/Serena structural savings.
-  RTK savings are exact (output compression). tilth + Serena savings are
-  structural (smaller prompts, fewer turns) and shown as estimates.
+1. **Self-Monitor**: Regularly run ``token-diet budget status`` to stay within thresholds.
+2. **Tool Selection**:
+   - Use **tilth** for code reading and symbol search.
+   - Use **Serena** for complex refactoring and diagnostics.
+   - Use **RTK** for running commands and builds.
+3. **Be Precise**: Use ``tilth_read`` with line ranges (found via ``token-diet diff-reads``) to minimize context waste.
+4. **Optimization**: If you detect you are looping or wasting tokens, run ``token-diet loops`` or ``token-diet leaks`` to self-audit.
 "@
 
     $hostDirs = @(

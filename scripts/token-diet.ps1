@@ -838,6 +838,65 @@ switch ($Command) {
     'verify'                            { Invoke-Doctor     $SubArgs }
     'repair'                            { Invoke-Repair     $SubArgs }
     'mcp'                               { Invoke-Mcp        $SubArgs }
+    'upstream'                          { Invoke-Upstream   $SubArgs }
+    'hook'                              { Invoke-Hook       $SubArgs }
+    'breakdown'                         { Invoke-Breakdown  $SubArgs }
+    'explain'                           { Invoke-Explain    $SubArgs }
+    'budget'                            { Invoke-Budget     $SubArgs }
+    'loops'                             { Invoke-Loops }
+    'dashboard'                         { Invoke-Dashboard  $SubArgs }
+    'service'                           { Invoke-Service    $SubArgs }
+    { $_ -in 'version','versions' }     { Invoke-Version }
+    'route'                             { Invoke-Route      $SubArgs }
+    'leaks'                             { Invoke-Leaks }
+    'test-first'                        { Invoke-TestFirst  $SubArgs }
+    'strip'                             { Invoke-Strip      $SubArgs }
+    'diff-reads'                        { Invoke-DiffReads  $SubArgs }
+    'update'                            { Invoke-Update     $SubArgs }
+    'reinstall'                         { Invoke-Reinstall  $SubArgs }
+    'uninstall'                         { Invoke-Uninstall  $SubArgs }
+    'no-rtk'                            { Write-Warning "'no-rtk' is deprecated. Use 'token-diet hook off' instead."; Invoke-NoRtk }
+    'use-rtk'                           { Write-Warning "'use-rtk' is deprecated. Use 'token-diet hook on' instead."; Invoke-UseRtk }
+    { $_ -in '--help','-h','help' }     { Invoke-Help }
+    default {
+        Write-Output "Unknown command: $Command"
+        Invoke-Help
+        exit 1
+    }
+}
+      exit 1
+    }
+}
+] <file>  Strip comments from source file to reduce tokens
+  diff-reads <file>       Suggest line ranges to read based on recent git diff
+  dashboard               Open live browser dashboard  [--port N]
+  service <sub>           Always-on dashboard daemon  (install|uninstall|start|stop|status)
+  version                 Show installed versions of all three tools
+  update                  Update tools  [-Fresh] [installer flags]
+  uninstall               Remove all token-diet components  [-DryRun] [-Force]
+  --help                  Show this help
+
+TOOLS
+  RTK    Command output compression       60-90% savings (tracked)
+  tilth  AST-aware code reading           38-44% savings (structural)
+  Serena LSP symbol navigation            fewer prompt turns (structural)
+
+INSTALL
+  .\Install.ps1             Install all tools
+  .\Install.ps1 -DryRun     Preview what would be installed
+
+"@
+    Write-Output $helpText
+}
+
+# --- Dispatch -----------------------------------------------------------------
+switch ($Command) {
+    'gain'                              { Invoke-Gain }
+    'health'                            { Invoke-Health }
+    'doctor'                            { Invoke-Doctor     $SubArgs }
+    'verify'                            { Invoke-Doctor     $SubArgs }
+    'repair'                            { Invoke-Repair     $SubArgs }
+    'mcp'                               { Invoke-Mcp        $SubArgs }
     'hook'                              { Invoke-Hook       $SubArgs }
     'breakdown'                         { Invoke-Breakdown  $SubArgs }
     'explain'                           { Invoke-Explain    $SubArgs }

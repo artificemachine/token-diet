@@ -13,6 +13,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Auto-registration of `token-diet` MCP server in `install.sh` and `Install.ps1` across all supported AI hosts.
 - Analysis and TDD documentation for the MCP conversion in `docs/`.
 - `token-diet mcp` command: New dedicated command for managing server registrations.
+- `token-diet upstream` command: New command to manage and verify original repository updates for audited forks.
 - `token-diet hook` command: Unified toggle for RTK optimization (replacing `no-rtk`/`use-rtk`).
 - `docs/enterprise.md`: New guide for air-gapped and enterprise deployments.
 

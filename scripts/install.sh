@@ -622,7 +622,6 @@ install_serena() {
         warn "Serena fetch via uvx failed. May work on first real invocation."
       fi
     fi
-    local serena_cmd="uvx --from git+${SERENA_REPO} serena start-mcp-server --project-from-cwd"
   fi
 
   # Claude Code MCP
@@ -988,6 +987,7 @@ install_token_diet() {
   local bin_dir="$HOME/.local/bin"
   local src_bin="$SCRIPT_DIR/token-diet"
   local src_dash="$SCRIPT_DIR/token-diet-dashboard"
+  local src_mcp="$SCRIPT_DIR/token-diet-mcp"
 
   if [ ! -f "$src_bin" ]; then
     warn "scripts/token-diet not found — skipping token-diet install"
@@ -997,8 +997,10 @@ install_token_diet() {
   if [ "${DRY_RUN:-false}" = "true" ]; then
     dryrun "install -m755 $src_bin $bin_dir/token-diet"
     [ -f "$src_dash" ] && dryrun "install -m755 $src_dash $bin_dir/token-diet-dashboard"
+    [ -f "$src_mcp" ] && dryrun "install -m755 $src_mcp $bin_dir/token-diet-mcp"
     dryrun "write ~/.claude/token-diet.md + add @token-diet.md to ~/.claude/CLAUDE.md"
     dryrun "write ~/.codex/token-diet.md + add @token-diet.md to ~/.codex/AGENTS.md"
+    dryrun "register token-diet MCP server"
     return 0
   fi
 
@@ -1009,6 +1011,38 @@ install_token_diet() {
   if [ -f "$src_dash" ]; then
     install -m755 "$src_dash" "$bin_dir/token-diet-dashboard"
     ok "token-diet-dashboard installed: $bin_dir/token-diet-dashboard"
+  fi
+
+  if [ -f "$src_mcp" ]; then
+    install -m755 "$src_mcp" "$bin_dir/token-diet-mcp"
+    ok "token-diet-mcp installed: $bin_dir/token-diet-mcp"
+    
+    # Register MCP server
+    if command -v codex &>/dev/null; then
+      python3 - "$HOME/.codex/config.toml" << 'PYEOF'
+import pathlib, sys, re
+cfg = pathlib.Path(sys.argv[1])
+if cfg.exists():
+    text = cfg.read_text()
+    if '[mcp_servers.token-diet]' not in text:
+        cfg.write_text(text + '\n[mcp_servers.token-diet]\ncommand = "token-diet-mcp"\n')
+PYEOF
+    fi
+
+    for cfg in "$HOME/.claude/settings.json" "$HOME/Library/Application Support/Claude/claude_desktop_config.json" "$HOME/.config/Claude/claude_desktop_config.json" "$HOME/.opencode.json" "$COWORK_CFG"; do
+      if [ -f "$cfg" ]; then
+        python3 - "$cfg" << 'PYEOF'
+import json, sys
+cfg = sys.argv[1]
+try:
+    with open(cfg) as f: data = json.load(f)
+    data.setdefault("mcpServers", {})
+    data["mcpServers"]["token-diet"] = {"command": "token-diet-mcp", "args": []}
+    with open(cfg, "w") as f: json.dump(data, f, indent=2)
+except Exception: pass
+PYEOF
+      fi
+    done
   fi
 
   # Copy installer + uninstaller so `token-diet verify/uninstall` work from ~/.local/bin
@@ -1032,27 +1066,31 @@ install_token_diet() {
 
     local tkd_doc_file="$config_dir/token-diet.md"
     cat > "$tkd_doc_file" << 'TKDDOC'
-# TKD — token-diet unified CLI
+# Token Diet — AI Context Optimization
 
-`token-diet` (`~/.local/bin/token-diet`) is the top-level command for the token-diet stack (RTK + tilth + Serena).
+`token-diet` is a unified optimization layer for AI agents. It orchestrates RTK, tilth, and Serena to maximize context efficiency.
 
-## Commands
+## Core Commands
 
-```bash
-token-diet gain       # Combined savings dashboard: RTK + tilth + Serena
-token-diet version    # Installed versions of all three tools
-token-diet verify     # Re-run installation verification
-token-diet dashboard  # Open live browser dashboard
-```
+- `token-diet gain`: Current token savings and efficiency stats.
+- `token-diet mcp list`: Check which hosts are currently optimized.
+- `token-diet hook off`: Disable RTK (raw output) for troubleshooting.
+- `token-diet hook on`: Re-enable RTK optimization.
+- `token-diet budget status`: Check project-specific token consumption.
+- `token-diet route <task>`: Ask `token-diet` which tool is best for your current task.
+- `token-diet doctor`: Run diagnostics if tools are unresponsive.
 
-## Rules
+## Agent Guidelines
 
-- **`token-diet` is a real binary.** Never assume it is a typo for `rtk`.
-- Run `which token-diet` if unsure whether it is installed.
-- `token-diet gain` shows RTK tracked savings + tilth/Serena structural savings.
-  RTK savings are exact (output compression). tilth + Serena savings are
-  structural (smaller prompts, fewer turns) and shown as estimates.
+1. **Self-Monitor**: Regularly run `token-diet budget status` to stay within thresholds.
+2. **Tool Selection**:
+   - Use **tilth** for code reading and symbol search.
+   - Use **Serena** for complex refactoring and diagnostics.
+   - Use **RTK** for running commands and builds.
+3. **Be Precise**: Use `tilth_read` with line ranges (found via `token-diet diff-reads`) to minimize context waste.
+4. **Optimization**: If you detect you are looping or wasting tokens, run `token-diet loops` or `token-diet leaks` to self-audit.
 TKDDOC
+
     ok "token-diet.md written: $tkd_doc_file"
 
     # Add @token-diet.md reference to instruction file if not already present

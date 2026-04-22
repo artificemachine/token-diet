@@ -170,20 +170,28 @@ hosts_registered() {
 
 # --- Commands -----------------------------------------------------------------
 cmd_gain() {
-  echo -e "\n${BOLD}=== token-diet gain ===${NC}\n"
+  local tools_active=0
+  local rtk_ok=false tilth_ok=false serena_ok=false
+
+  echo -e "\n${BOLD}token-diet${NC} ${DIM}— combined savings dashboard${NC}\n"
 
   # --- RTK -------------------------------------------------------------------
-  echo -e "${BOLD}RTK${NC} ${DIM}— command output compression${NC}"
+  echo -e "${BOLD}RTK${NC} ${DIM}— command output compression (tracked)${NC}"
   echo -e "${DIM}$(printf '%.0s─' {1..50})${NC}"
 
-  if check_cmd rtk && rtk gain --help &>/dev/null 2>&1; then
+  if check_cmd rtk; then
+    rtk_ok=true
+    tools_active=$((tools_active + 1))
     local json
     json=$(rtk gain --format json 2>/dev/null)
     local cmds saved input pct ms
     read -r cmds input saved pct ms <<< "$(echo "$json" | python3 -c "
 import sys,json
-d=json.load(sys.stdin)['summary']
-print(d['total_commands'],d['total_input'],d['total_saved'],round(d['avg_savings_pct'],1),d['total_time_ms'])")"
+try:
+    d=json.load(sys.stdin)['summary']
+    print(d['total_commands'],d['total_input'],d['total_saved'],round(d['avg_savings_pct'],1),d['total_time_ms'])
+except Exception:
+    print('0 0 0 0.0 0')")"
 
     printf "  %-22s %s\n"  "Commands filtered:"  "$cmds"
     printf "  %-22s %s\n"  "Tokens in:"          "$(human_tokens "$input")"
@@ -204,6 +212,8 @@ print(d['total_commands'],d['total_input'],d['total_saved'],round(d['avg_savings
   echo -e "  ${DIM}Note: tilth reduces prompt size — not tracked per-command${NC}"
 
   if check_cmd tilth; then
+    tilth_ok=true
+    tools_active=$((tools_active + 1))
     local tv; tv=$(tilth --version 2>/dev/null | awk '{print $2}')
     local th; th=$(hosts_registered "tilth")
     printf "  %-22s %s\n" "Version:"   "$tv"
@@ -227,31 +237,25 @@ print(d['total_commands'],d['total_input'],d['total_saved'],round(d['avg_savings
   fi
 
   if $serena_ok; then
+    serena_ok=true
+    tools_active=$((tools_active + 1))
     local sh; sh=$(hosts_registered "serena")
     local mem_count=0 log_days=0
     [ -d "$HOME/.serena/memories" ] && mem_count=$(ls "$HOME/.serena/memories/" 2>/dev/null | wc -l | tr -d ' ')
-    [ -d "$HOME/.serena/logs"     ] && log_days=$(ls "$HOME/.serena/logs/"     2>/dev/null | wc -l | tr -d ' ')
-    printf "  %-22s %s\n" "MCP hosts:"    "$sh"
-    printf "  %-22s %s\n" "Memories:"     "$mem_count files"
-    printf "  %-22s %s\n" "Session logs:" "$log_days days"
+    
+    printf "  %-22s %s\n" "Runtime:"   "uvx (managed)"
+    printf "  %-22s %s\n" "MCP hosts:" "$sh"
+    printf "  %-22s %s\n" "Memories:"  "$mem_count"
     ok "Serena — active"
   else
     miss "Serena not installed  →  run: bash install.sh --serena-only"
   fi
 
-  echo ""
-
-  # --- Stack summary ---------------------------------------------------------
   echo -e "${DIM}$(printf '%.0s─' {1..50})${NC}"
-  local tools_active=0
-  check_cmd rtk      && rtk gain --help &>/dev/null 2>&1 && (( tools_active++ )) || true
-  check_cmd tilth    && (( tools_active++ )) || true
-  $serena_ok         && (( tools_active++ )) || true
-
-  printf "  %-22s %d/3\n" "Tools active:" "$tools_active"
-
-  if check_cmd rtk && rtk gain --help &>/dev/null 2>&1; then
-    printf "  %-22s %s  (%s%%)\n" "RTK tokens saved:" \
+  if $rtk_ok; then
+    local saved; saved=$(rtk gain --format json 2>/dev/null | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['summary']['total_saved'] if 'summary' in d else 0)" 2>/dev/null || echo "0")
+    local pct; pct=$(rtk gain --format json 2>/dev/null | python3 -c "import sys,json; d=json.load(sys.stdin); print(round(d['summary']['avg_savings_pct'],1) if 'summary' in d else 0.0)" 2>/dev/null || echo "0.0")
+    printf "  Combined savings (tracked): %s (%s%%)\n" \
       "$(human_tokens "$saved")" "$pct"
     echo -e "\n  ${DIM}tilth + Serena savings are structural (smaller prompts, fewer turns)${NC}"
     echo -e "  ${DIM}and not individually tracked — but typically add 30-50% reduction${NC}"
@@ -295,13 +299,15 @@ cmd_version() {
     miss "tilth  not installed"
   fi
 
-  check_cmd uvx    && ok "Serena (uvx available: $(uvx --version 2>/dev/null || echo 'ok'))" \
-                  || { docker image inspect token-diet/serena:latest &>/dev/null 2>&1 \
-                       && ok "Serena (Docker image: token-diet/serena:latest)" \
-                       || miss "Serena not installed"; }
+  if check_cmd uvx; then
+    ok "Serena runtime: uvx (managed)"
+  elif check_cmd uv; then
+    ok "Serena runtime: uv"
+  else
+    miss "Serena runtime not found"
+  fi
   echo ""
 }
-
 cmd_verify() {
   # Prefer install.sh next to this script (source tree or ~/.local/bin copy)
   local install_sh
@@ -459,10 +465,26 @@ _resolve_installer() {
 }
 
 cmd_update() {
+  local fresh=false
+  local args=()
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --fresh) fresh=true ;;
+      *) args+=("$1") ;;
+    esac
+    shift
+  done
+
+  if $fresh; then
+    echo "[token-diet update] --fresh requested; removing current install..."
+    cmd_uninstall --force || true
+    echo "[token-diet update] re-running installer..."
+  fi
+
   local installer
   if installer="$(_resolve_installer)"; then
     echo "[token-diet update] using local installer: $installer"
-    exec bash "$installer" "$@"
+    exec bash "$installer" "${args[@]}"
   fi
 
   command -v git >/dev/null 2>&1 || {
@@ -483,17 +505,142 @@ cmd_update() {
   # Show the commit we are about to run, so the user sees what they trust.
   ( cd "$tmpdir/repo" && git --no-pager log -1 --pretty='[token-diet update] running commit %h %s (%ci)' )
 
-  bash "$tmpdir/repo/scripts/install.sh" "$@"
+  bash "$tmpdir/repo/scripts/install.sh" "${args[@]}"
 }
 
 cmd_reinstall() {
-  echo "[token-diet reinstall] removing current install..."
-  cmd_uninstall --force || true
-  echo "[token-diet reinstall] re-running installer..."
-  cmd_update "$@"
+  echo "Warning: 'reinstall' is deprecated. Use 'token-diet update --fresh' instead."
+  cmd_update --fresh "$@"
+}
+cmd_mcp() {
+  local sub="${1:-help}"
+  case "$sub" in
+    install|register)
+      shift
+      cmd_update --tilth-only --serena-only "$@"
+      ;;
+    list|status)
+      cmd_doctor --json | python3 -c 'import json, sys; d=json.load(sys.stdin); print("\nRegistered MCP Hosts:"); 
+for h in d.get("tilth_mcp", {}).get("registered_hosts", []): print(f"  ✓ {h}")'
+      ;;
+    *)
+      echo "Usage: token-diet mcp [install|list]"
+      echo ""
+      echo "  install   Register token-diet MCP servers (tilth/Serena) in detected AI hosts"
+      echo "  list      Show hosts where token-diet MCP is currently registered"
+      exit 1
+      ;;
+  esac
 }
 
+cmd_hook() {
+  local state="${1:-}"
+  case "$state" in
+    on|enable)  cmd_use_rtk ;;
+    off|disable) cmd_no_rtk ;;
+    *)
+      if [ -f "$HOME/.token-diet-no-rtk" ]; then
+        echo "RTK hook is currently: ${RED}DISABLED${NC}"
+      else
+        echo "RTK hook is currently: ${GREEN}ENABLED${NC}"
+      fi
+      echo "Usage: token-diet hook [on|off]"
+      ;;
+  esac
+}
+
+
 # --- Service (always-on dashboard daemon) -------------------------------------
+cmd_mcp() {
+  local sub="${1:-help}"
+  case "$sub" in
+    install|register)
+      shift
+      cmd_update --tilth-only --serena-only "$@"
+      ;;
+    list|status)
+      cmd_doctor --json | python3 -c 'import json, sys; d=json.load(sys.stdin); print("\nRegistered MCP Hosts:"); 
+for h in d.get("tilth_mcp", {}).get("registered_hosts", []): print(f"  ✓ {h}")'
+      ;;
+    *)
+      echo "Usage: token-diet mcp [install|list]"
+      echo ""
+      echo "  install   Register token-diet MCP servers (tilth/Serena) in detected AI hosts"
+      echo "  list      Show hosts where token-diet MCP is currently registered"
+      exit 1
+      ;;
+  esac
+}
+
+cmd_hook() {
+  local state="${1:-}"
+  case "$state" in
+    on|enable)  cmd_use_rtk ;;
+    off|disable) cmd_no_rtk ;;
+    *)
+      if [ -f "$HOME/.token-diet-no-rtk" ]; then
+        echo "RTK hook is currently: DISABLED"
+      else
+        echo "RTK hook is currently: ENABLED"
+      fi
+      echo "Usage: token-diet hook [on|off]"
+      ;;
+  esac
+}
+
+cmd_upstream() {
+  local sub="${1:-help}"
+  local tool="${2:-}"
+  local rtk_url="https://github.com/rtk-ai/rtk.git"
+  local tilth_url="https://github.com/jahala/tilth.git"
+  local serena_url="https://github.com/oraios/serena.git"
+
+  case "$sub" in
+    setup)
+      echo "Configuring upstream remotes in forks/..."
+      (cd "$SCRIPT_DIR/../forks/rtk" && git remote add upstream "$rtk_url" 2>/dev/null || git remote set-url upstream "$rtk_url" && echo "  ✓ rtk")
+      (cd "$SCRIPT_DIR/../forks/tilth" && git remote add upstream "$tilth_url" 2>/dev/null || git remote set-url upstream "$tilth_url" && echo "  ✓ tilth")
+      (cd "$SCRIPT_DIR/../forks/serena" && git remote add upstream "$serena_url" 2>/dev/null || git remote set-url upstream "$serena_url" && echo "  ✓ serena")
+      echo "Setup complete."
+      ;;
+    check)
+      echo -e "Checking for new commits from original authors..."
+      git submodule foreach -q '
+        name=$(basename $displaypath)
+        git fetch upstream main --quiet 2>/dev/null || git fetch upstream master --quiet 2>/dev/null
+        new=$(git log --oneline HEAD..upstream/main 2>/dev/null || git log --oneline HEAD..upstream/master 2>/dev/null)
+        if [ -n "$new" ]; then
+          echo -e "\n[!] $name has new updates upstream:"
+          echo "$new" | sed "s/^/  /"
+        else
+          echo -e "  ✓ $name is up to date."
+        fi
+      '
+      echo -e "\nMaintenance Advice:"
+      echo "1. Run '\''token-diet upstream diff <tool>'\'' to audit changes."
+      echo "2. If safe, '\''cd forks/<tool> && git merge upstream/main'\''."
+      echo "3. RE-VERIFY SECURITY PATCHES after any merge!"
+      ;;
+    diff)
+      if [ -z "$tool" ]; then
+        echo "Error: specify tool (rtk|tilth|serena)"
+        exit 1
+      fi
+      local dir="$SCRIPT_DIR/../forks/$tool"
+      if [ ! -d "$dir" ]; then echo "Error: tool dir not found: $dir"; exit 1; fi
+      echo "Showing diff: fork vs original author ($tool)"
+      (cd "$dir" && git fetch upstream main --quiet 2>/dev/null || git fetch upstream master --quiet 2>/dev/null)
+      (cd "$dir" && git diff HEAD..upstream/main 2>/dev/null || cd "$dir" && git diff HEAD..upstream/master)
+      ;;
+    *)
+      echo "Usage: token-diet upstream [setup|check|diff]"
+      echo ""
+      echo "  setup      Configure '\''upstream'\'' remotes for all forks"
+      echo "  check      Search for new commits in original repositories"
+      echo "  diff <t>   Audit code differences for a specific tool"
+      ;;
+  esac
+}
 cmd_service() {
   local sub="${1:-help}"
   local log_dir="$HOME/.local/share/token-diet"
@@ -1871,18 +2018,21 @@ PY
 }
 
 cmd_help() {
-  cat << EOF
+  cat << helpEOF
 
-${BOLD}token-diet${NC} — token optimization stack dashboard
+token-diet — token optimization stack dashboard
 
-${BOLD}USAGE${NC}
+USAGE
   token-diet [command]
 
-${BOLD}COMMANDS${NC}
+COMMANDS
   gain              Show token savings dashboard across RTK + tilth + Serena  (default)
-  health            Quick health check: tools responding + MCP hosts registered
-  doctor            Structured diagnosis: binaries, RTK hooks, MCP registrations  [--json]
+  health            Quick health check: tools responding + MCP host registrations
+  doctor            Deep configuration and hook diagnosis  [--json]
   repair            Fix what doctor finds: RTK hooks, stale MCP commands  [--dry-run] [--json]
+  mcp               Manage MCP server registrations  [install|list]
+  upstream          Manage and verify original repository updates  [setup|check|diff]
+  hook              Toggle RTK hook  [on|off]
   breakdown         Top commands by tokens saved  [--limit N]
   explain <cmd>     Token cost breakdown for a specific command
   budget <init|status>  Per-project token budget with warn/hard thresholds
@@ -1896,32 +2046,31 @@ ${BOLD}COMMANDS${NC}
   dashboard         Open live browser dashboard  [--port N]
   service <sub>     Manage always-on dashboard daemon  (install|uninstall|start|stop|status)
   version           Show installed versions of all three tools
-  verify            Re-run installation verification
-  no-rtk            Temporarily disable RTK hook (commands pass through unfiltered)
-  use-rtk           Re-enable RTK hook
-  update            Re-run the installer to update RTK + tilth + Serena  [installer flags]
-  reinstall         Uninstall everything, then run a fresh install  [installer flags]
+  update            Update tools  [--fresh] [installer flags]
   uninstall         Remove all token-diet components  [--dry-run] [--force]
   --help            Show this help
 
-${BOLD}TOOLS${NC}
+TOOLS
   RTK    Command output compression       60-90% savings (tracked)
   tilth  AST-aware code reading           38-44% savings (structural)
   Serena LSP symbol navigation            fewer prompt turns (structural)
 
-${BOLD}INSTALL${NC}
+INSTALL
   bash install.sh             Install all tools
   bash install.sh --dry-run   Preview what would be installed
 
-EOF
+helpEOF
 }
 
 # --- Dispatch -----------------------------------------------------------------
 case "${1:-gain}" in
   gain)              cmd_gain ;;
   health)            cmd_health ;;
-  doctor)            shift; cmd_doctor "$@" ;;
+  doctor|verify)     shift; cmd_doctor "$@" ;;
   repair)            shift; cmd_repair "$@" ;;
+  mcp)               shift; cmd_mcp "$@" ;;
+  upstream)          shift; cmd_upstream "$@" ;;
+  hook)              shift; cmd_hook "$@" ;;
   breakdown)         shift; cmd_breakdown "$@" ;;
   explain)           shift; cmd_explain "$@" ;;
   budget)            shift; cmd_budget "$@" ;;
@@ -1929,7 +2078,6 @@ case "${1:-gain}" in
   dashboard)         shift; cmd_dashboard "$@" ;;
   service)           shift; cmd_service "$@" ;;
   version|versions)  cmd_version ;;
-  verify)            cmd_verify ;;
   route)             shift; cmd_route "$@" ;;
   leaks)             cmd_leaks ;;
   test-first)        shift; cmd_test_first "$@" ;;
@@ -1937,10 +2085,10 @@ case "${1:-gain}" in
   diff-reads)        shift; cmd_diff_reads "$@" ;;
   serena-gc)         shift; cmd_serena_gc "$@" ;;
   update)            shift; cmd_update "$@" ;;
-  reinstall)         shift; cmd_reinstall "$@" ;;
+  reinstall)         echo "Warning: 'reinstall' is deprecated. Use 'token-diet update --fresh' instead."; shift; cmd_update --fresh "$@" ;;
   uninstall)         shift; cmd_uninstall "$@" ;;
-  no-rtk)            cmd_no_rtk ;;
-  use-rtk)           cmd_use_rtk ;;
+  no-rtk)            echo "Warning: 'no-rtk' is deprecated. Use 'token-diet hook off' instead."; cmd_no_rtk ;;
+  use-rtk)           echo "Warning: 'use-rtk' is deprecated. Use 'token-diet hook on' instead."; cmd_use_rtk ;;
   --help|-h|help)    cmd_help ;;
   --version)         echo "token-diet $TD_VERSION" ;;
   *)  echo "Unknown command: $1"; cmd_help; exit 1 ;;

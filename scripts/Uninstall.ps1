@@ -135,6 +135,7 @@ if (-not $Force -and -not $DryRun) {
 Write-Header "Binaries"
 Remove-TokenDietFile (Join-Path $BinDir "token-diet.exe")
 Remove-TokenDietFile (Join-Path $BinDir "token-diet-dashboard")
+Remove-TokenDietFile (Join-Path $BinDir "token-diet-mcp")
 
 # Rust binaries
 Write-Header "Rust binaries (cargo uninstall)"

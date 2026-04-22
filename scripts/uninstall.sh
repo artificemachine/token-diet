@@ -156,6 +156,7 @@ main() {
   echo -e "${BOLD}Binaries${NC}"
   remove_file "$HOME/.local/bin/token-diet"
   remove_file "$HOME/.local/bin/token-diet-dashboard"
+  remove_file "$HOME/.local/bin/token-diet-mcp"
 
   echo ""
   echo -e "${BOLD}Rust binaries (cargo uninstall)${NC}"

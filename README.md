@@ -91,10 +91,17 @@ token-diet test-first <file> # suggest test file counterpart before reading impl
 token-diet dashboard        # live browser dashboard at http://127.0.0.1:7384
 token-diet dashboard --port 8080
 token-diet version          # show installed versions of RTK, tilth, Serena
-token-diet --version        # show token-diet self version (e.g. 1.2.12)
+token-diet --version        # show token-diet self version (e.g. 1.7.0)
 token-diet verify           # re-run installation verification
 token-diet uninstall        # remove all token-diet components
 token-diet uninstall --dry-run   # preview what would be removed
+
+## MCP Server
+
+`token-diet` is also an MCP (Model Context Protocol) server. Agents can call `token_diet_health`, `token_diet_savings`, `token_diet_budget`, `token_diet_loops`, and `token_diet_route` to self-monitor and optimize their token consumption.
+
+The installer automatically registers the MCP server for supported AI hosts.
+
 ```
 
 On Windows, use the PowerShell equivalent (`scripts/token-diet.ps1`), which supports all the same commands:

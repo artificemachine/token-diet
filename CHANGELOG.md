@@ -4,6 +4,20 @@ All notable changes to token-diet will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [1.7.0] — 2026-04-22
+
+### Added
+- `scripts/token-diet-mcp`: Zero-dependency Python MCP server providing agent-accessible observability.
+- MCP Tools: `token_diet_health`, `token_diet_savings`, `token_diet_budget`, `token_diet_loops`, and `token_diet_route`.
+- `tests/test_token_diet_mcp.py`: Automated test suite for MCP server handshake and tool calls.
+- Auto-registration of `token-diet` MCP server in `install.sh` and `Install.ps1` across all supported AI hosts.
+- Analysis and TDD documentation for the MCP conversion in `docs/`.
+
+### Changed
+- `scripts/install.sh` & `scripts/Install.ps1`: Now installs `token-diet-mcp` and configures MCP host registrations.
+- `scripts/uninstall.sh` & `scripts/Uninstall.ps1`: Now removes `token-diet-mcp` binary.
+- `tests/install.bats`: Updated to verify lifecycle management of the new MCP binary.
+
 ## [1.2.15] — 2026-04-06
 
 ### Added

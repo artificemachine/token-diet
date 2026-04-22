@@ -787,6 +787,7 @@ function Install-TokenDiet {
     $binDir = Join-Path $env:LOCALAPPDATA "Programs\token-diet"
     $srcPs1 = Join-Path $script:ScriptDir "token-diet.ps1"
     $srcDash = Join-Path $script:ScriptDir "token-diet-dashboard"
+    $srcMcp = Join-Path $script:ScriptDir "token-diet-mcp"
 
     if (-not (Test-Path $srcPs1)) {
         Write-Warn "scripts\token-diet.ps1 not found — skipping CLI install"
@@ -796,9 +797,11 @@ function Install-TokenDiet {
     if ($DryRun) {
         Write-DryRun "Copy token-diet.ps1 to $binDir\token-diet.ps1"
         if (Test-Path $srcDash) { Write-DryRun "Copy token-diet-dashboard to $binDir\token-diet-dashboard" }
+        if (Test-Path $srcMcp) { Write-DryRun "Copy token-diet-mcp to $binDir\token-diet-mcp" }
         Write-DryRun "Copy Uninstall.ps1 to $binDir\Uninstall.ps1"
         Write-DryRun "Write token-diet.md to ~/.claude/ and ~/.codex/"
         Write-DryRun "Add @token-diet.md to CLAUDE.md / AGENTS.md"
+        Write-DryRun "Register token-diet MCP server"
         return
     }
 
@@ -813,6 +816,49 @@ function Install-TokenDiet {
     if (Test-Path $srcDash) {
         Copy-Item $srcDash (Join-Path $binDir "token-diet-dashboard") -Force
         Write-Ok "token-diet-dashboard installed: $binDir\token-diet-dashboard"
+    }
+
+    # Copy MCP
+    if (Test-Path $srcMcp) {
+        Copy-Item $srcMcp (Join-Path $binDir "token-diet-mcp") -Force
+        Write-Ok "token-diet-mcp installed: $binDir\token-diet-mcp"
+
+        # Register MCP server in codex
+        $codexConfig = Join-Path $env:USERPROFILE ".codex\config.toml"
+        if (Test-Path $codexConfig) {
+            $content = Get-Content -Path $codexConfig -Raw
+            if ($content -notmatch '\[mcp_servers\.token-diet\]') {
+                Add-Content -Path $codexConfig -Value "`n[mcp_servers.token-diet]`ncommand = ""python""`nargs = [""$binDir\token-diet-mcp""]`n"
+            }
+        }
+
+        # Register MCP server in JSON configs
+        $configs = @(
+            (Join-Path $env:USERPROFILE ".claude\settings.json"),
+            (Join-Path $env:USERPROFILE ".opencode.json"),
+            (Join-Path $env:APPDATA "Claude\claude_desktop_config.json")
+        )
+        if ($global:CoworkCfg) { $configs += $global:CoworkCfg }
+
+        foreach ($cfg in $configs) {
+            if (Test-Path $cfg) {
+                try {
+                    $json = Get-Content $cfg -Raw | ConvertFrom-Json
+                    if (-not $json.PSObject.Properties.Match('mcpServers')) {
+                        $json | Add-Member -MemberType NoteProperty -Name 'mcpServers' -Value @{}
+                    }
+                    $serverObj = @{ "command" = "python"; "args" = @("$binDir\token-diet-mcp") }
+                    if ($json.mcpServers.PSObject.Properties.Match('token-diet')) {
+                        $json.mcpServers.'token-diet' = $serverObj
+                    } else {
+                        $json.mcpServers | Add-Member -MemberType NoteProperty -Name 'token-diet' -Value $serverObj
+                    }
+                    $json | ConvertTo-Json -Depth 10 | Set-Content $cfg -Encoding UTF8
+                } catch {
+                    Write-Warn "Failed to register token-diet MCP in $cfg"
+                }
+            }
+        }
     }
 
     # Copy installer so `token-diet verify` works standalone

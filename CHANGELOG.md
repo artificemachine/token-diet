@@ -12,11 +12,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - `tests/test_token_diet_mcp.py`: Automated test suite for MCP server handshake and tool calls.
 - Auto-registration of `token-diet` MCP server in `install.sh` and `Install.ps1` across all supported AI hosts.
 - Analysis and TDD documentation for the MCP conversion in `docs/`.
+- `token-diet mcp` command: New dedicated command for managing server registrations.
+- `token-diet hook` command: Unified toggle for RTK optimization (replacing `no-rtk`/`use-rtk`).
+- `docs/enterprise.md`: New guide for air-gapped and enterprise deployments.
 
 ### Changed
+- `README.md`: Major rewrite for clarity; explains the stack in under 60 seconds.
 - `scripts/install.sh` & `scripts/Install.ps1`: Now installs `token-diet-mcp` and configures MCP host registrations.
 - `scripts/uninstall.sh` & `scripts/Uninstall.ps1`: Now removes `token-diet-mcp` binary.
 - `tests/install.bats`: Updated to verify lifecycle management of the new MCP binary.
+- `token-diet update`: Added `--fresh` flag for clean reinstalls (deprecates `reinstall`).
+- `token-diet verify`: Now an alias for `doctor`, providing deep diagnostics.
+- AI Instructions: Refined `token-diet.md` with explicit tool selection and self-monitoring guidelines for agents.
 
 ## [1.2.15] — 2026-04-06
 

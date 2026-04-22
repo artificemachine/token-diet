@@ -1066,27 +1066,31 @@ PYEOF
 
     local tkd_doc_file="$config_dir/token-diet.md"
     cat > "$tkd_doc_file" << 'TKDDOC'
-# TKD — token-diet unified CLI
+# Token Diet — AI Context Optimization
 
-`token-diet` (`~/.local/bin/token-diet`) is the top-level command for the token-diet stack (RTK + tilth + Serena).
+`token-diet` is a unified optimization layer for AI agents. It orchestrates RTK, tilth, and Serena to maximize context efficiency.
 
-## Commands
+## Core Commands
 
-```bash
-token-diet gain       # Combined savings dashboard: RTK + tilth + Serena
-token-diet version    # Installed versions of all three tools
-token-diet verify     # Re-run installation verification
-token-diet dashboard  # Open live browser dashboard
-```
+- `token-diet gain`: Current token savings and efficiency stats.
+- `token-diet mcp list`: Check which hosts are currently optimized.
+- `token-diet hook off`: Disable RTK (raw output) for troubleshooting.
+- `token-diet hook on`: Re-enable RTK optimization.
+- `token-diet budget status`: Check project-specific token consumption.
+- `token-diet route <task>`: Ask `token-diet` which tool is best for your current task.
+- `token-diet doctor`: Run diagnostics if tools are unresponsive.
 
-## Rules
+## Agent Guidelines
 
-- **`token-diet` is a real binary.** Never assume it is a typo for `rtk`.
-- Run `which token-diet` if unsure whether it is installed.
-- `token-diet gain` shows RTK tracked savings + tilth/Serena structural savings.
-  RTK savings are exact (output compression). tilth + Serena savings are
-  structural (smaller prompts, fewer turns) and shown as estimates.
+1. **Self-Monitor**: Regularly run `token-diet budget status` to stay within thresholds.
+2. **Tool Selection**:
+   - Use **tilth** for code reading and symbol search.
+   - Use **Serena** for complex refactoring and diagnostics.
+   - Use **RTK** for running commands and builds.
+3. **Be Precise**: Use `tilth_read` with line ranges (found via `token-diet diff-reads`) to minimize context waste.
+4. **Optimization**: If you detect you are looping or wasting tokens, run `token-diet loops` or `token-diet leaks` to self-audit.
 TKDDOC
+
     ok "token-diet.md written: $tkd_doc_file"
 
     # Add @token-diet.md reference to instruction file if not already present

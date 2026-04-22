@@ -110,11 +110,13 @@ load test_helper
 # Cycle 3.7 — uninstall dispatch
 # ---------------------------------------------------------------------------
 
-@test "help text includes update and reinstall commands" {
+@test "help text includes update and hook commands" {
   run "$SCRIPTS_DIR/token-diet" --help
   [ "$status" -eq 0 ]
   [[ "$output" == *"update"* ]]
-  [[ "$output" == *"reinstall"* ]]
+  [[ "$output" == *"hook"* ]]
+  [[ "$output" == *"mcp"* ]]
+
 }
 
 @test "update: runs TD_INSTALLER and passes flags through" {
@@ -141,7 +143,7 @@ INSTALLER
   [ "$status" -eq 7 ]
 }
 
-@test "reinstall: runs uninstall then update with TD_INSTALLER" {
+@test "hook: runs uninstall then update with TD_INSTALLER" {
   # Plant a file uninstall.sh would remove
   echo "#!/bin/bash" > "$TMP_HOME/.local/bin/token-diet-dashboard"
   chmod +x "$TMP_HOME/.local/bin/token-diet-dashboard"
@@ -150,7 +152,7 @@ INSTALLER
   printf '#!/usr/bin/env bash\necho FAKE_INSTALLER_RAN\nexit 0\n' > "$fake"
   chmod +x "$fake"
 
-  TD_INSTALLER="$fake" run "$SCRIPTS_DIR/token-diet" reinstall --local
+  TD_INSTALLER="$fake" run "$SCRIPTS_DIR/token-diet" update --fresh --local
   [ "$status" -eq 0 ]
   [[ "$output" == *"removing current install"* ]]
   [[ "$output" == *"re-running installer"* ]]
@@ -708,7 +710,7 @@ MOCK
 
   run env HOME="$TMP_HOME" PATH="$clean_path" "$tmp_bin/token-diet" verify
   [ "$status" -eq 1 ]
-  [[ "$output" == *"Codex serena MCP command missing: /missing/serena"* ]]
+  [[ "$output" == *"serena codex: registered but '/missing/serena' not in PATH"* ]]
 }
 
 # ---------------------------------------------------------------------------
@@ -876,9 +878,11 @@ MOCK
   [ ! -f "$TMP_HOME/.config/token-diet/rtk-disabled" ]
 }
 
-@test "help text includes no-rtk command" {
+@test "help text includes hook command" {
   run "$SCRIPTS_DIR/token-diet" --help
-  [[ "$output" == *"no-rtk"* ]]
+  [[ "$output" == *"hook"* ]]
+  [[ "$output" == *"mcp"* ]]
+
 }
 
 @test "no-rtk: does not modify hook when sentinel already present in hook" {

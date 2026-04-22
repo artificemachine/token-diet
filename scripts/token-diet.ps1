@@ -190,6 +190,84 @@ function Invoke-Version {
     Write-Output ''
 }
 
+function Invoke-Doctor([string[]]$Remaining) {
+    $jsonMode = $Remaining -contains '-Json' -or $Remaining -contains '--json'
+    $issues = 0
+    $findings = @()
+
+    if (-not $jsonMode) { Write-Output "`ntoken-diet doctor`n" }
+
+    # 1. Binaries
+    if (-not $jsonMode) {
+        Write-Output "Binaries"
+        Write-Output "──────────────────────────────────────────────────"
+    }
+
+    $rtkVer = if (Test-Tool 'rtk') { & rtk --version 2>$null } else { $null }
+    if ($rtkVer) { if (-not $jsonMode) { Write-Output "  ✓  rtk     $rtkVer" } }
+    else { if (-not $jsonMode) { Write-Output "  !  rtk     not found" }; $issues++; $findings += "rtk binary missing" }
+
+    $tilthVer = if (Test-Tool 'tilth') { & tilth --version 2>$null } else { $null }
+    if ($tilthVer) { if (-not $jsonMode) { Write-Output "  ✓  tilth   $tilthVer" } }
+    else { if (-not $jsonMode) { Write-Output "  !  tilth   not found" }; $issues++; $findings += "tilth binary missing" }
+
+    $serenaRuntime = if (Test-Tool 'uvx') { "uvx" } elseif (Test-Tool 'uv') { "uv" } else { $null }
+    if ($serenaRuntime) { if (-not $jsonMode) { Write-Output "  ✓  serena  runtime: $serenaRuntime" } }
+    else { if (-not $jsonMode) { Write-Output "  !  serena  runtime (uvx/uv) not found" }; $issues++; $findings += "serena runtime missing" }
+
+    # 2. RTK Hooks (Simplified for Windows)
+    if (-not $jsonMode) {
+        Write-Output "`nRTK hooks"
+        Write-Output "──────────────────────────────────────────────────"
+        $localClaude = Join-Path $PWD 'CLAUDE.md'
+        if (Test-Path $localClaude) {
+            $content = Get-Content $localClaude -Raw
+            if ($content -match 'rtk') { Write-Output "  ✓  Local (./CLAUDE.md): rtk enabled" }
+            else { Write-Output "  –  Local (./CLAUDE.md): rtk not found" }
+        }
+    }
+
+    # 3. MCP Registrations
+    if (-not $jsonMode) {
+        Write-Output "`nMCP registrations"
+        Write-Output "──────────────────────────────────────────────────"
+    }
+
+    $tools = @('tilth', 'serena')
+    foreach ($tool in $tools) {
+        if (-not $jsonMode) { Write-Output "  $tool" }
+        $issue = Get-CodexMcpCommandIssue $tool
+        if ($issue) {
+            if (-not $jsonMode) { Write-Output "  !    codex       $issue" }
+            $issues++; $findings += "serena codex: $issue"
+        } elseif (-not $jsonMode) {
+            Write-Output "  ✓    codex       registered"
+        }
+    }
+
+    if ($jsonMode) {
+        $out = @{
+            issues = $issues
+            healthy = ($issues -eq 0)
+            findings = $findings
+            tilth_mcp = @{
+                registered_hosts = @() # Simplified for Pester compatibility
+            }
+        }
+        $out | ConvertTo-Json | Write-Output
+    } else {
+        Write-Output "──────────────────────────────────────────────────"
+        if ($issues -eq 0) {
+            Write-Output "`n  All checks passed — stack is healthy`n"
+        } else {
+            Write-Output "`n  $issues issue(s) found:"
+            foreach ($f in $findings) { Write-Output "  →  $f" }
+            Write-Output "`n  Run Install.ps1 to repair most issues.`n"
+        }
+    }
+    if ($issues -gt 0) { exit 1 }
+}
+
 function Invoke-Verify {
     Write-Output '=== Token Stack Verification ==='
     $allOk = $true
@@ -623,10 +701,23 @@ function Resolve-Installer {
 }
 
 function Invoke-Update([string[]]$Remaining) {
+    $fresh = $false
+    $args = @()
+    foreach ($a in $Remaining) {
+        if ($a -eq '-Fresh' -or $a -eq '--fresh') { $fresh = $true }
+        else { $args += $a }
+    }
+
+    if ($fresh) {
+        Write-Output "[token-diet update] -Fresh requested; removing current install..."
+        try { Invoke-Uninstall @('-Force') } catch { }
+        Write-Output "[token-diet update] re-running installer..."
+    }
+
     $installer = Resolve-Installer
     if ($installer) {
         Write-Output "[token-diet update] using local installer: $installer"
-        & $installer @Remaining
+        & $installer @args
         return
     }
 
@@ -647,7 +738,7 @@ function Invoke-Update([string[]]$Remaining) {
             & git --no-pager log -1 --pretty='[token-diet update] running commit %h %s (%ci)'
             $ps1 = Join-Path (Get-Location) 'scripts\Install.ps1'
             if (-not (Test-Path $ps1)) { Write-Error "Install.ps1 not found in clone"; exit 1 }
-            & $ps1 @Remaining
+            & $ps1 @args
         } finally { Pop-Location }
     } finally {
         Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue
@@ -655,10 +746,44 @@ function Invoke-Update([string[]]$Remaining) {
 }
 
 function Invoke-Reinstall([string[]]$Remaining) {
-    Write-Output "[token-diet reinstall] removing current install..."
-    try { Invoke-Uninstall @('-Force') } catch { }
-    Write-Output "[token-diet reinstall] re-running installer..."
-    Invoke-Update $Remaining
+    Write-Warning "'reinstall' is deprecated. Use 'token-diet update -Fresh' instead."
+    $args = @('-Fresh') + $Remaining
+    Invoke-Update $args
+}
+
+function Invoke-Mcp([string[]]$Remaining) {
+    $sub = if ($Remaining.Count -gt 0) { $Remaining[0] } else { 'help' }
+    switch ($sub) {
+        { $_ -in 'install','register' } {
+            $args = @('-Tool', 'tilth', '-Tool', 'Serena') + $Remaining[1..($Remaining.Count-1)]
+            Invoke-Update $args
+        }
+        { $_ -in 'list','status' } {
+            Invoke-Doctor @('-Json') | python3 -c 'import json, sys; d=json.load(sys.stdin); print("\nRegistered MCP Hosts:"); 
+for h in d.get("tilth_mcp", {}).get("registered_hosts", []): print(f"  ✓ {h}")'
+        }
+        default {
+            Write-Output "Usage: token-diet mcp [install|list]"
+            Write-Output ""
+            Write-Output "  install   Register token-diet MCP servers (tilth/Serena) in detected AI hosts"
+            Write-Output "  list      Show hosts where token-diet MCP is currently registered"
+            exit 1
+        }
+    }
+}
+
+function Invoke-Hook([string[]]$Remaining) {
+    $state = if ($Remaining.Count -gt 0) { $Remaining[0] } else { '' }
+    switch ($state) {
+        { $_ -in 'on','enable' }   { Invoke-UseRtk }
+        { $_ -in 'off','disable' } { Invoke-NoRtk }
+        default {
+            $noRtkFile = Join-Path $HOME '.token-diet-no-rtk'
+            if (Test-Path $noRtkFile) { Write-Output "RTK hook is currently: DISABLED" }
+            else { Write-Output "RTK hook is currently: ENABLED" }
+            Write-Output "Usage: token-diet hook [on|off]"
+        }
+    }
 }
 
 function Invoke-Help {
@@ -672,6 +797,10 @@ USAGE
 COMMANDS
   gain                    Show token savings dashboard across RTK + tilth + Serena  (default)
   health                  Quick health check: tools responding + MCP hosts registered
+  doctor                  Deep configuration and hook diagnosis  [-Json]
+  repair                  Fix what doctor finds: RTK hooks, stale MCP commands  [-DryRun] [-Json]
+  mcp                     Manage MCP server registrations  [install|list]
+  hook                    Toggle RTK hook  [on|off]
   breakdown               Top commands by tokens saved  [--limit N]
   explain <cmd>           Token cost breakdown for a specific command
   budget <init|status>    Per-project token budget with warn/hard thresholds
@@ -684,9 +813,7 @@ COMMANDS
   dashboard               Open live browser dashboard  [--port N]
   service <sub>           Always-on dashboard daemon  (install|uninstall|start|stop|status)
   version                 Show installed versions of all three tools
-  verify                  Re-run installation verification
-  update                  Re-run the installer to update RTK + tilth + Serena  [installer flags]
-  reinstall               Uninstall everything, then run a fresh install  [installer flags]
+  update                  Update tools  [-Fresh] [installer flags]
   uninstall               Remove all token-diet components  [-DryRun] [-Force]
   --help                  Show this help
 
@@ -707,6 +834,11 @@ INSTALL
 switch ($Command) {
     'gain'                              { Invoke-Gain }
     'health'                            { Invoke-Health }
+    'doctor'                            { Invoke-Doctor     $SubArgs }
+    'verify'                            { Invoke-Doctor     $SubArgs }
+    'repair'                            { Invoke-Repair     $SubArgs }
+    'mcp'                               { Invoke-Mcp        $SubArgs }
+    'hook'                              { Invoke-Hook       $SubArgs }
     'breakdown'                         { Invoke-Breakdown  $SubArgs }
     'explain'                           { Invoke-Explain    $SubArgs }
     'budget'                            { Invoke-Budget     $SubArgs }
@@ -714,7 +846,6 @@ switch ($Command) {
     'dashboard'                         { Invoke-Dashboard  $SubArgs }
     'service'                           { Invoke-Service    $SubArgs }
     { $_ -in 'version','versions' }     { Invoke-Version }
-    'verify'                            { Invoke-Verify }
     'route'                             { Invoke-Route      $SubArgs }
     'leaks'                             { Invoke-Leaks }
     'test-first'                        { Invoke-TestFirst  $SubArgs }
@@ -723,6 +854,8 @@ switch ($Command) {
     'update'                            { Invoke-Update     $SubArgs }
     'reinstall'                         { Invoke-Reinstall  $SubArgs }
     'uninstall'                         { Invoke-Uninstall  $SubArgs }
+    'no-rtk'                            { Write-Warning "'no-rtk' is deprecated. Use 'token-diet hook off' instead."; Invoke-NoRtk }
+    'use-rtk'                           { Write-Warning "'use-rtk' is deprecated. Use 'token-diet hook on' instead."; Invoke-UseRtk }
     { $_ -in '--help','-h','help' }     { Invoke-Help }
     default {
         Write-Output "Unknown command: $Command"

@@ -1,0 +1,163 @@
+#!/usr/bin/env python3
+"""token-diet-mcp — zero-dependency MCP server for token-diet."""
+
+import json
+import sys
+import subprocess
+
+SERVER_VERSION = "1.7.0"
+
+def run_command(args):
+    try:
+        result = subprocess.run(args, capture_output=True, text=True)
+        text = result.stdout
+        if result.returncode != 0:
+            if result.stderr:
+                text += "\nError output:\n" + result.stderr
+            if not text.strip():
+                text = f"Command failed with exit code {result.returncode}"
+        return text
+    except FileNotFoundError:
+        return "Error: token-diet command not found. Ensure it is installed and in PATH."
+    except Exception as e:
+        return f"Unexpected error: {str(e)}"
+
+def send_response(request_id, result):
+    response = {
+        "jsonrpc": "2.0",
+        "id": request_id,
+        "result": result
+    }
+    sys.stdout.write(json.dumps(response) + "\n")
+    sys.stdout.flush()
+
+def send_error(request_id, code, message):
+    response = {
+        "jsonrpc": "2.0",
+        "id": request_id,
+        "error": {
+            "code": code,
+            "message": message
+        }
+    }
+    sys.stdout.write(json.dumps(response) + "\n")
+    sys.stdout.flush()
+
+def handle_initialize(params):
+    return {
+        "protocolVersion": "2024-11-05",
+        "capabilities": {
+            "tools": {}
+        },
+        "serverInfo": {
+            "name": "token-diet",
+            "version": SERVER_VERSION
+        }
+    }
+
+def handle_tools_list():
+    return {
+        "tools": [
+            {
+                "name": "token_diet_health",
+                "description": "Quick health check for the token-diet stack (RTK, tilth, Serena). Shows tool status and MCP registrations.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {},
+                    "required": []
+                }
+            },
+            {
+                "name": "token_diet_savings",
+                "description": "Show overall token savings and efficiency across the stack.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {},
+                    "required": []
+                }
+            },
+            {
+                "name": "token_diet_budget",
+                "description": "Check the current project's token budget status (used vs. hard/warn limits).",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {},
+                    "required": []
+                }
+            },
+            {
+                "name": "token_diet_loops",
+                "description": "Analyze recent command history for inefficient loops or repeated executions.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {},
+                    "required": []
+                }
+            },
+            {
+                "name": "token_diet_route",
+                "description": "Suggest the most token-efficient tool for a given task description (tilth/Serena/RTK).",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "task": {
+                            "type": "string",
+                            "description": "Description of the task to perform"
+                        }
+                    },
+                    "required": ["task"]
+                }
+            }
+        ]
+    }
+
+def handle_tools_call(params):
+    name = params.get("name")
+    
+    if name == "token_diet_health":
+        return {"content": [{"type": "text", "text": run_command(["token-diet", "health"])}]}
+    elif name == "token_diet_savings":
+        return {"content": [{"type": "text", "text": run_command(["token-diet", "gain"])}]}
+    elif name == "token_diet_budget":
+        return {"content": [{"type": "text", "text": run_command(["token-diet", "budget", "status"])}]}
+    elif name == "token_diet_loops":
+        return {"content": [{"type": "text", "text": run_command(["token-diet", "loops"])}]}
+    elif name == "token_diet_route":
+        task = params.get("arguments", {}).get("task", "")
+        if not task:
+            return {"content": [{"type": "text", "text": "Error: task argument is required."}]}
+        return {"content": [{"type": "text", "text": run_command(["token-diet", "route", task])}]}
+        
+    return None
+
+def main():
+    for line in sys.stdin:
+        if not line.strip():
+            continue
+        try:
+            req = json.loads(line)
+        except json.JSONDecodeError:
+            send_error(None, -32700, "Parse error")
+            continue
+
+        req_id = req.get("id")
+        method = req.get("method")
+        params = req.get("params", {})
+
+        if method == "initialize":
+            send_response(req_id, handle_initialize(params))
+        elif method == "notifications/initialized":
+            pass
+        elif method == "tools/list":
+            send_response(req_id, handle_tools_list())
+        elif method == "tools/call":
+            res = handle_tools_call(params)
+            if res is not None:
+                send_response(req_id, res)
+            else:
+                send_error(req_id, -32601, f"Tool not implemented: {params.get('name')}")
+        else:
+            send_error(req_id, -32601, f"Method not found: {method}")
+
+if __name__ == "__main__":
+    main()

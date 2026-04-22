@@ -70,11 +70,14 @@ load test_helper
 @test "uninstall.sh --force removes token-diet-dashboard binary" {
   echo "#!/bin/bash" > "$TMP_HOME/.local/bin/token-diet-dashboard"
   chmod +x "$TMP_HOME/.local/bin/token-diet-dashboard"
+  echo "#!/bin/bash" > "$TMP_HOME/.local/bin/token-diet-mcp"
+  chmod +x "$TMP_HOME/.local/bin/token-diet-mcp"
 
   run bash "$SCRIPTS_DIR/uninstall.sh" --force
 
   [ "$status" -eq 0 ]
   [ ! -f "$TMP_HOME/.local/bin/token-diet-dashboard" ]
+  [ ! -f "$TMP_HOME/.local/bin/token-diet-mcp" ]
 }
 
 # ---------------------------------------------------------------------------

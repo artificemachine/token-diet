@@ -70,6 +70,7 @@ Describe 'token-diet.ps1 — dispatch' {
         $out | Should -Match 'doctor'
         $out | Should -Match 'hook'
         $out | Should -Match 'mcp'
+        $out | Should -Match 'upstream'
     }
 }
 

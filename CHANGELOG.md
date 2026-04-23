@@ -12,6 +12,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Serena Runtime: Improved detection logic to validate actual `uvx` runnability and distinguish between Docker image presence and active container.
 - CLI: Fixed `token-diet mcp list` to show both tilth and serena hosts and return 0 even when diagnostics find issues.
 - Diagnostics: Fixed `token-diet doctor --json` to include `serena_mcp` registration data.
+- Hook: Optimized pre-commit to skip slow Pester tests on non-Windows by default (use `RUN_SLOW_TESTS=1` to run).
 - README: Added "Global vs. Per-Project" section and refined "Full Reset" instructions.
 
 ### Added

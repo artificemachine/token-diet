@@ -12,7 +12,7 @@
 
 set -euo pipefail
 
-readonly TD_VERSION="1.6.1"
+readonly TD_VERSION="1.7.1"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # --- Colors -------------------------------------------------------------------
@@ -513,9 +513,23 @@ cmd_mcp() {
       shift
       cmd_update --tilth-only --serena-only "$@"
       ;;
-    list|status)
-      cmd_doctor --json | python3 -c 'import json, sys; d=json.load(sys.stdin); print("\nRegistered MCP Hosts:"); 
-for h in d.get("tilth_mcp", {}).get("registered_hosts", []): print(f"  ✓ {h}")'
+                list|status)
+      (cmd_doctor --json 2>/dev/null || true) | python3 -c 'import json, sys; 
+try:
+    d=json.load(sys.stdin)
+except Exception:
+    d={}
+t_hosts = d.get("tilth_mcp", {}).get("hosts", {}).keys() if "tilth_mcp" in d else []
+if not t_hosts: t_hosts = d.get("tilth_mcp", {}).get("registered_hosts", [])
+s_hosts = d.get("serena_mcp", {}).get("registered_hosts", [])
+all_hosts = sorted(list(set(list(t_hosts) + list(s_hosts))))
+print("Registered MCP Hosts:")
+if not all_hosts: print("  (none)")
+for h in all_hosts:
+    st = []
+    if h in t_hosts: st.append("tilth")
+    if h in s_hosts: st.append("serena")
+    print("  ✓ %-16s (%s)" % (h, ", ".join(st)))'
       ;;
     *)
       echo "Usage: token-diet mcp [install|list]"
@@ -552,9 +566,23 @@ cmd_mcp() {
       shift
       cmd_update --tilth-only --serena-only "$@"
       ;;
-    list|status)
-      cmd_doctor --json | python3 -c 'import json, sys; d=json.load(sys.stdin); print("\nRegistered MCP Hosts:"); 
-for h in d.get("tilth_mcp", {}).get("registered_hosts", []): print(f"  ✓ {h}")'
+                list|status)
+      (cmd_doctor --json 2>/dev/null || true) | python3 -c 'import json, sys; 
+try:
+    d=json.load(sys.stdin)
+except Exception:
+    d={}
+t_hosts = d.get("tilth_mcp", {}).get("hosts", {}).keys() if "tilth_mcp" in d else []
+if not t_hosts: t_hosts = d.get("tilth_mcp", {}).get("registered_hosts", [])
+s_hosts = d.get("serena_mcp", {}).get("registered_hosts", [])
+all_hosts = sorted(list(set(list(t_hosts) + list(s_hosts))))
+print("Registered MCP Hosts:")
+if not all_hosts: print("  (none)")
+for h in all_hosts:
+    st = []
+    if h in t_hosts: st.append("tilth")
+    if h in s_hosts: st.append("serena")
+    print("  ✓ %-16s (%s)" % (h, ", ".join(st)))'
       ;;
     *)
       echo "Usage: token-diet mcp [install|list]"
@@ -1998,43 +2026,30 @@ PY
 
   # ── 4. Summary ──────────────────────────────────────────────────────────────
   if $json_mode; then
-    python3 - "$issues" "$tilth_doctor_json" \
+        python3 - "$issues" "$tilth_doctor_json" \
       "FINDINGS_SEP" "${findings[@]+"${findings[@]}"}" \
-      "COMPAT_SEP"   "${compat_results[@]+"${compat_results[@]}"}" << 'PY'
+      "COMPAT_SEP"   "${compat_results[@]+"${compat_results[@]}"}" \
+      "SERENA_HOSTS_SEP" "${serena_registered_hosts[@]+"${serena_registered_hosts[@]}"}" << 'PY'
 import json, sys
-
-args = sys.argv[1:]
-issues = int(args[0])
-tilth_doctor_raw = args[1]
-findings, compat_raw, current = [], [], None
+args = sys.argv[1:]; issues = int(args[0]); tilth_doctor_raw = args[1]
+findings, compat_raw, serena_hosts, current = [], [], [], None
 for a in args[2:]:
-    if a == "FINDINGS_SEP":  current = findings;   continue
-    if a == "COMPAT_SEP":    current = compat_raw; continue
-    if current is not None:  current.append(a)
-
+    if a == "FINDINGS_SEP": current = findings; continue
+    if a == "COMPAT_SEP": current = compat_raw; continue
+    if a == "SERENA_HOSTS_SEP": current = serena_hosts; continue
+    if current is not None: current.append(a)
 compat = {}
 for entry in compat_raw:
     parts = entry.split(":", 3)
     if len(parts) == 4:
         tool, status, ver, min_ver = parts
         compat[tool] = {"status": status, "version": ver, "min": min_ver}
-
 tilth_mcp = None
 if tilth_doctor_raw:
-    try:
-        tilth_mcp = json.loads(tilth_doctor_raw)
-    except Exception:
-        pass
-
-out = {
-    "issues": issues,
-    "healthy": issues == 0,
-    "findings": findings,
-    "compat": compat,
-}
-if tilth_mcp is not None:
-    out["tilth_mcp"] = tilth_mcp
-
+    try: tilth_mcp = json.loads(tilth_doctor_raw)
+    except: pass
+out = {"issues": issues, "healthy": issues == 0, "findings": findings, "compat": compat, "serena_mcp": { "registered_hosts": serena_hosts }}
+if tilth_mcp is not None: out["tilth_mcp"] = tilth_mcp
 print(json.dumps(out, indent=2))
 PY
   else

@@ -62,14 +62,11 @@ token-diet dashboard # Open the live browser stats
 If you need to start from a clean slate or remove the stack entirely:
 
 ```bash
-# 1. Remove all binaries, configs, and MCP registrations
+# 1. Remove all binaries (including RTK and tilth), configs, and MCP registrations
 token-diet uninstall --force
 
 # 2. (Optional) Remove Serena memories and logs
 rm -rf ~/.serena
-
-# 3. (Optional) Remove RTK history
-rm -rf ~/.rtk
 ```
 
 On Windows: `.\token-diet.ps1 uninstall -Force`

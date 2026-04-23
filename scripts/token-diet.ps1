@@ -159,19 +159,19 @@ function Invoke-Gain {
 
     Write-Output ''
     Write-Output 'Serena — LSP symbol navigation'
-    $serenaOk = (Test-Tool 'uvx') -or (Test-Tool 'uv')
-    if ($serenaOk) {
+    $serenaMode = Get-SerenaRuntimeMode
+    if ($serenaMode -ne 'none') {
         $memDir = Join-Path $env:USERPROFILE '.serena\memories'
         $logDir = Join-Path $env:USERPROFILE '.serena\logs'
+        Write-Output "  Runtime:      $serenaMode"
         Write-Output "  MCP hosts:    $(Get-HostsRegistered 'serena')"
         Write-Output "  Memories:     $(if (Test-Path $memDir) { @(Get-ChildItem $memDir).Count } else { 0 }) files"
-        Write-Output "  Session logs: $(if (Test-Path $logDir) { @(Get-ChildItem $logDir).Count } else { 0 }) days"
         Write-Ok 'Serena — active'
     } else {
         Write-Miss 'Serena not installed  ->  run: Install.ps1 -SerenaOnly'
     }
 
-    $active = ([int][bool]$s) + ([int](Test-Tool 'tilth')) + ([int]$serenaOk)
+    $active = ([int][bool]$s) + ([int](Test-Tool 'tilth')) + ([int]($serenaMode -ne 'none'))
     Write-Output ''
     Write-Output "  Tools active: $active/3"
     if ($active -eq 3)     { Write-Output "`n  Full stack active. Maximum token savings." }
@@ -184,8 +184,9 @@ function Invoke-Version {
     Write-Output "`ntoken-diet stack versions`n"
     if (Test-Tool 'rtk')  { Write-Ok  "RTK    $(& rtk --version 2>$null)" } else { Write-Miss 'RTK    not installed' }
     if (Test-Tool 'tilth'){ Write-Ok  "tilth  $(& tilth --version 2>$null)" } else { Write-Miss 'tilth  not installed' }
-    if (Test-Tool 'uvx')  { Write-Ok  "Serena (uvx: $(& uvx --version 2>$null))" }
-    elseif (Test-Tool 'uv'){ Write-Ok "Serena (uv: $(& uv --version 2>$null))" }
+    
+    $mode = Get-SerenaRuntimeMode
+    if ($mode -ne 'none') { Write-Ok "Serena (runtime: $mode)" }
     else                  { Write-Miss 'Serena not installed' }
     Write-Output ''
 }
@@ -211,9 +212,9 @@ function Invoke-Doctor([string[]]$Remaining) {
     if ($tilthVer) { if (-not $jsonMode) { Write-Output "  ✓  tilth   $tilthVer" } }
     else { if (-not $jsonMode) { Write-Output "  !  tilth   not found" }; $issues++; $findings += "tilth binary missing" }
 
-    $serenaRuntime = if (Test-Tool 'uvx') { "uvx" } elseif (Test-Tool 'uv') { "uv" } else { $null }
-    if ($serenaRuntime) { if (-not $jsonMode) { Write-Output "  ✓  serena  runtime: $serenaRuntime" } }
-    else { if (-not $jsonMode) { Write-Output "  !  serena  runtime (uvx/uv) not found" }; $issues++; $findings += "serena runtime missing" }
+    $serenaRuntime = Get-SerenaRuntimeMode
+    if ($serenaRuntime -ne 'none') { if (-not $jsonMode) { Write-Output "  ✓  serena  runtime: $serenaRuntime" } }
+    else { if (-not $jsonMode) { Write-Output "  !  serena  runtime not found" }; $issues++; $findings += "serena runtime missing" }
 
     # 2. RTK Hooks (Simplified for Windows)
     if (-not $jsonMode) {
@@ -251,7 +252,7 @@ function Invoke-Doctor([string[]]$Remaining) {
             healthy = ($issues -eq 0)
             findings = $findings
             tilth_mcp = @{
-                registered_hosts = @() # Simplified for Pester compatibility
+                registered_hosts = @() 
             }
         }
         $out | ConvertTo-Json | Write-Output
@@ -269,25 +270,7 @@ function Invoke-Doctor([string[]]$Remaining) {
 }
 
 function Invoke-Verify {
-    Write-Output '=== Token Stack Verification ==='
-    $allOk = $true
-    if (Test-Tool 'rtk')   { Write-Output "  [OK] RTK ........... $(& rtk --version 2>$null)" }
-    else                   { Write-Output '  [!]  RTK ........... not installed'; $allOk = $false }
-    if (Test-Tool 'tilth') {
-        Write-Output "  [OK] tilth ......... $(& tilth --version 2>$null)"
-        $tilthIssue = Get-CodexMcpCommandIssue 'tilth'
-        if ($tilthIssue) { Write-Output "  [!]  $tilthIssue"; $allOk = $false }
-    } else { Write-Output '  [!]  tilth ......... not installed'; $allOk = $false }
-    if ((Test-Tool 'uvx') -or (Test-Tool 'uv')) {
-        $v = if (Test-Tool 'uvx') { & uvx --version 2>$null } else { & uv --version 2>$null }
-        Write-Output "  [OK] Serena (uv) ... $v"
-    } else { Write-Output '  [!]  Serena ........ not installed'; $allOk = $false }
-    $serenaIssue = Get-CodexMcpCommandIssue 'serena'
-    if ($serenaIssue) { Write-Output "  [!]  $serenaIssue"; $allOk = $false }
-    Write-Output ''
-    if ($allOk) { Write-Output '  [OK] All tools installed. Token diet active.' }
-    else        { Write-Output '  [W]  Some tools or MCP registrations need attention.'; Write-Output ''; exit 1 }
-    Write-Output ''
+    Invoke-Doctor
 }
 
 function Invoke-Health {
@@ -301,9 +284,11 @@ function Invoke-Health {
         $tilthIssue = Get-CodexMcpCommandIssue 'tilth'
         if ($tilthIssue) { Write-Warn $tilthIssue; $issues++ }
     } else { Write-Miss 'tilth not found'; $issues++ }
-    if ((Test-Tool 'uvx') -or (Test-Tool 'uv')) {
-        Write-Ok "Serena  (hosts: $(Get-HostsRegistered 'serena'))"
-    } else { Write-Miss 'Serena not found  (uvx or uv required)'; $issues++ }
+    
+    $serenaMode = Get-SerenaRuntimeMode
+    if ($serenaMode -ne 'none') {
+        Write-Ok "Serena (runtime: $serenaMode)  (hosts: $(Get-HostsRegistered 'serena'))"
+    } else { Write-Miss 'Serena not found  (uvx or Docker required)'; $issues++ }
     $serenaIssue = Get-CodexMcpCommandIssue 'serena'
     if ($serenaIssue) { Write-Warn $serenaIssue; $issues++ }
     Write-Output ''
@@ -311,6 +296,52 @@ function Invoke-Health {
     Write-Output "  $issues issue(s) found — reinstall tools or repair MCP registrations"
     Write-Output ''
     exit 1
+}
+
+function Get-SerenaRuntimeMode {
+    $dockerImage = (Test-Tool 'docker') -and (docker image inspect token-diet/serena:latest 2>$null)
+    if ((Test-Tool 'docker') -and $dockerImage) {
+        $running = docker ps --filter ancestor=token-diet/serena:latest --format '{{.ID}}' 2>$null
+        if (-not [string]::IsNullOrWhiteSpace($running)) { return 'docker-running' }
+        return 'docker-image'
+    }
+    if (Test-Tool 'uvx') {
+        & uvx serena --version 2>$null | Out-Null
+        if ($LASTEXITCODE -eq 0) { return 'uvx' }
+        & uvx --from "git+https://github.com/celstnblacc/serena" serena --help 2>$null | Out-Null
+        if ($LASTEXITCODE -eq 0) { return 'uvx' }
+    }
+    return 'none'
+}
+
+function Invoke-SerenaStatus {
+    Write-Output "`ntoken-diet serena-status`n"
+
+    $mode = Get-SerenaRuntimeMode
+    $dockerAvailable = Test-Tool 'docker'
+    $dockerImage = $dockerAvailable -and (docker image inspect token-diet/serena:latest 2>$null)
+    $dockerRunning = $false
+    if ($dockerImage) {
+        $running = docker ps --filter ancestor=token-diet/serena:latest --format '{{.ID}}' 2>$null
+        $dockerRunning = -not [string]::IsNullOrWhiteSpace($running)
+    }
+
+    $uvxAvailable = Test-Tool 'uvx'
+    $uvxSerena = $false
+    if ($uvxAvailable) {
+        & uvx serena --version 2>$null | Out-Null
+        $uvxSerena = ($LASTEXITCODE -eq 0)
+    }
+
+    Write-Output ('  {0,-24} {1}' -f 'Runtime mode:', $mode)
+    Write-Output ('  {0,-24} {1}' -f 'uvx available:', [bool]$uvxAvailable)
+    Write-Output ('  {0,-24} {1}' -f 'uvx Serena runnable:', [bool]$uvxSerena)
+    Write-Output ('  {0,-24} {1}' -f 'Docker available:', [bool]$dockerAvailable)
+    if ($dockerAvailable) {
+        Write-Output ('  {0,-24} {1}' -f 'Docker image built:', [bool]$dockerImage)
+        Write-Output ('  {0,-24} {1}' -f 'Docker container running:', [bool]$dockerRunning)
+    }
+    Write-Output ''
 }
 
 function Invoke-Dashboard([string[]]$Remaining) {
@@ -786,6 +817,67 @@ function Invoke-Hook([string[]]$Remaining) {
     }
 }
 
+function Invoke-Upstream([string[]]$Remaining) {
+    $sub = if ($Remaining.Count -gt 0) { $Remaining[0] } else { 'help' }
+    $tool = if ($Remaining.Count -gt 1) { $Remaining[1] } else { '' }
+    $rtkUrl = 'https://github.com/rtk-ai/rtk.git'
+    $tilthUrl = 'https://github.com/jahala/tilth.git'
+    $serenaUrl = 'https://github.com/oraios/serena.git'
+
+    switch ($sub) {
+        'setup' {
+            Write-Output "Configuring upstream remotes in forks\..."
+            $forks = @{ rtk=$rtkUrl; tilth=$tilthUrl; serena=$serenaUrl }
+            foreach ($f in $forks.Keys) {
+                $dir = Join-Path $script:ScriptDir "..\forks\$f"
+                if (Test-Path $dir) {
+                    Push-Location $dir
+                    & git remote add upstream $forks[$f] 2>$null
+                    if ($LASTEXITCODE -ne 0) { & git remote set-url upstream $forks[$f] }
+                    Write-Output "  ✓ $f"
+                    Pop-Location
+                }
+            }
+            Write-Output "Setup complete."
+        }
+        'check' {
+            Write-Output "Checking for new commits from original authors..."
+            & git submodule foreach -q "
+                `$name = Split-Path `$displaypath -Leaf
+                git fetch upstream main --quiet 2>`$null; if (`$LASTEXITCODE -ne 0) { git fetch upstream master --quiet 2>`$null }
+                `$new = git log --oneline HEAD..upstream/main 2>`$null; if (`$LASTEXITCODE -ne 0) { `$new = git log --oneline HEAD..upstream/master 2>`$null }
+                if (`$new) {
+                    Write-Host -ForegroundColor Yellow `"`n[!] `$name has new updates upstream:`"
+                    `$new | % { Write-Output `"  `$_`" }
+                } else {
+                    Write-Output `"  ✓ `$name is up to date.`"
+                }
+            "
+            Write-Output "`nMaintenance Advice:"
+            Write-Output "1. Run 'token-diet upstream diff <tool>' to audit changes."
+            Write-Output "2. If safe, 'cd forks\<tool>; git merge upstream/main'."
+            Write-Output "3. RE-VERIFY SECURITY PATCHES (e.g. tilth path guards) after any merge!"
+        }
+        'diff' {
+            if (-not $tool) { Write-Error "specify tool (rtk|tilth|serena)"; exit 1 }
+            $dir = Join-Path $script:ScriptDir "..\forks\$tool"
+            if (-not (Test-Path $dir)) { Write-Error "tool dir not found: $dir"; exit 1 }
+            Write-Output "Showing diff: fork vs original author ($tool)"
+            Push-Location $dir
+            & git fetch upstream main --quiet 2>$null
+            & git diff HEAD..upstream/main
+            Pop-Location
+        }
+        default {
+            Write-Output "Usage: token-diet upstream [setup|check|diff]"
+            Write-Output ""
+            Write-Output "  setup      Configure 'upstream' remotes for all forks"
+            Write-Output "  check      Search for new commits in original repositories"
+            Write-Output "  diff <t>   Audit code differences for a specific tool"
+        }
+    }
+}
+
 function Invoke-Help {
     $helpText = @"
 
@@ -811,6 +903,7 @@ COMMANDS
   test-first <file>       Suggest test file counterpart for an implementation file
   strip [--stats] <file>  Strip comments from source file to reduce tokens
   diff-reads <file>       Suggest line ranges to read based on recent git diff
+  serena-status           Show Serena runtime details (mode/image/container/uvx)
   dashboard               Open live browser dashboard  [--port N]
   service <sub>           Always-on dashboard daemon  (install|uninstall|start|stop|status)
   version                 Show installed versions of all three tools
@@ -853,6 +946,7 @@ switch ($Command) {
     'test-first'                        { Invoke-TestFirst  $SubArgs }
     'strip'                             { Invoke-Strip      $SubArgs }
     'diff-reads'                        { Invoke-DiffReads  $SubArgs }
+    'serena-status'                     { Invoke-SerenaStatus }
     'update'                            { Invoke-Update     $SubArgs }
     'reinstall'                         { Invoke-Reinstall  $SubArgs }
     'uninstall'                         { Invoke-Uninstall  $SubArgs }

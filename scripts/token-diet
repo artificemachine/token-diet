@@ -230,20 +230,15 @@ except Exception:
   echo -e "${DIM}$(printf '%.0s─' {1..50})${NC}"
   echo -e "  ${DIM}Note: Serena reduces prompt size — not tracked per-command${NC}"
 
-  local serena_ok=false
-  # Check uvx availability (online mode) or Docker image (local mode)
-  if check_cmd uvx || docker image inspect token-diet/serena:latest &>/dev/null 2>&1; then
-    serena_ok=true
-  fi
+  local mode; mode=$(_serena_runtime_mode)
 
-  if $serena_ok; then
-    serena_ok=true
+  if [ "$mode" != "none" ]; then
     tools_active=$((tools_active + 1))
     local sh; sh=$(hosts_registered "serena")
-    local mem_count=0 log_days=0
+    local mem_count=0
     [ -d "$HOME/.serena/memories" ] && mem_count=$(ls "$HOME/.serena/memories/" 2>/dev/null | wc -l | tr -d ' ')
     
-    printf "  %-22s %s\n" "Runtime:"   "uvx (managed)"
+    printf "  %-22s %s\n" "Runtime:"   "$mode"
     printf "  %-22s %s\n" "MCP hosts:" "$sh"
     printf "  %-22s %s\n" "Memories:"  "$mem_count"
     ok "Serena — active"
@@ -299,10 +294,9 @@ cmd_version() {
     miss "tilth  not installed"
   fi
 
-  if check_cmd uvx; then
-    ok "Serena runtime: uvx (managed)"
-  elif check_cmd uv; then
-    ok "Serena runtime: uv"
+  local mode; mode=$(_serena_runtime_mode)
+  if [ "$mode" != "none" ]; then
+    ok "Serena runtime: $mode"
   else
     miss "Serena runtime not found"
   fi
@@ -1514,6 +1508,49 @@ cmd_serena_gc() {
   echo ""
 }
 
+_serena_runtime_mode() {
+  # Returns: docker-running, uvx, docker-image, or none
+  if check_cmd docker && docker ps --filter ancestor=token-diet/serena:latest --format "{{.ID}}" 2>/dev/null | grep -q "."; then
+    echo "docker-running"
+  elif check_cmd uvx && { uvx serena --version &>/dev/null || uvx --from "git+https://github.com/celstnblacc/serena" serena --help &>/dev/null; }; then
+    echo "uvx"
+  elif check_cmd docker && docker image inspect token-diet/serena:latest &>/dev/null; then
+    echo "docker-image"
+  else
+    echo "none"
+  fi
+}
+
+cmd_serena_status() {
+  local mode; mode=$(_serena_runtime_mode)
+  echo -e "\n${BOLD}token-diet serena-status${NC}\n"
+  
+  case "$mode" in
+    docker-running)
+      local cid; cid=$(docker ps --filter ancestor=token-diet/serena:latest --format "{{.ID}}")
+      ok "Serena runtime: Docker (container running: $cid)"
+      ;;
+    docker-image)
+      warn "Serena runtime: Docker image present, but container NOT running"
+      echo "  Run: docker compose -f docker/compose.yml up serena"
+      ;;
+    uvx)
+      ok "Serena runtime: uvx (managed)"
+      ;;
+    *)
+      miss "Serena runtime: NOT FOUND (neither uvx nor Docker usable)"
+      ;;
+  esac
+
+  echo ""
+  printf "  %-24s %s\n" "uvx available:" "$(check_cmd uvx && echo 'true' || echo 'false')"
+  printf "  %-24s %s\n" "Docker available:" "$(check_cmd docker && echo 'true' || echo 'false')"
+  if check_cmd docker; then
+    printf "  %-24s %s\n" "Docker image built:" "$(docker image inspect token-diet/serena:latest &>/dev/null && echo 'true' || echo 'false')"
+  fi
+  echo ""
+}
+
 # --- RTK toggle ---------------------------------------------------------------
 RTK_DISABLED_FLAG="$HOME/.config/token-diet/rtk-disabled"
 RTK_HOOK="$HOME/.claude/hooks/rtk-rewrite.sh"
@@ -2083,6 +2120,7 @@ case "${1:-gain}" in
   test-first)        shift; cmd_test_first "$@" ;;
   strip)             shift; cmd_strip "$@" ;;
   diff-reads)        shift; cmd_diff_reads "$@" ;;
+  serena-status)     cmd_serena_status ;;
   serena-gc)         shift; cmd_serena_gc "$@" ;;
   update)            shift; cmd_update "$@" ;;
   reinstall)         echo "Warning: 'reinstall' is deprecated. Use 'token-diet update --fresh' instead."; shift; cmd_update --fresh "$@" ;;

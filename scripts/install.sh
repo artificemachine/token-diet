@@ -1271,6 +1271,10 @@ main() {
   local any_arg=false
   if $has_args; then
     any_arg=true
+    # If user provided ONLY a modifier (like --local) but NO tool flags, we default to ALL tools.
+    if ! $do_rtk && ! $do_tilth && ! $do_serena; then
+      do_rtk=true; do_tilth=true; do_serena=true
+    fi
   elif $LOCAL_MODE || $SKIP_TESTS || $DRY_RUN || $VERBOSE || [ -n "${HOSTS_FILTER:-}" ] || ! $do_dedup; then
     any_arg=true
     do_rtk=true; do_tilth=true; do_serena=true

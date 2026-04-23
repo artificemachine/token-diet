@@ -45,22 +45,35 @@ def tilth_stats():
     return {"version": ver.split()[-1], "hosts": hosts}
 
 def serena_stats():
-    has_uvx    = run(["uvx", "--version"]) is not None
-    has_docker = run(["docker", "image", "inspect", "token-diet/serena:latest"]) is not None
-    if not has_uvx and not has_docker:
+    docker_image = run(["docker", "image", "inspect", "token-diet/serena:latest"]) is not None
+    docker_running_raw = run([
+        "docker", "ps",
+        "--filter", "ancestor=token-diet/serena:latest",
+        "--format", "{{.ID}}",
+    ])
+    docker_running = bool(docker_running_raw)
+
+    uvx_runtime = False
+    if run(["uvx", "--version"]) is not None:
+        uvx_runtime = (
+            run(["uvx", "serena", "--version"]) is not None
+            or run(["uvx", "--from", "git+https://github.com/celstnblacc/serena", "serena", "--help"]) is not None
+        )
+
+    if not uvx_runtime and not docker_image:
         return None
     mem_dir = pathlib.Path.home() / ".serena" / "memories"
     log_dir = pathlib.Path.home() / ".serena" / "logs"
     memories  = len(list(mem_dir.iterdir())) if mem_dir.exists() else 0
     log_days  = len(list(log_dir.iterdir())) if log_dir.exists() else 0
     hosts     = _registered_hosts("serena")
-    mode      = "docker" if has_docker else "uvx"
+    mode      = "docker-running" if docker_running else ("uvx" if uvx_runtime else "docker-image")
     version   = None
-    if has_docker:
+    if docker_image:
         label = run(["docker", "image", "inspect", "token-diet/serena:latest",
                      "--format", "{{index .Config.Labels \"org.opencontainers.image.version\"}}"])
         version = label.strip() if label and label.strip() else None
-    elif has_uvx:
+    elif uvx_runtime:
         ver_raw = run(["uvx", "serena", "--version"])
         version = ver_raw.split()[-1] if ver_raw else None
     return {"mode": mode, "version": version, "hosts": hosts, "memories": memories, "log_days": log_days}
@@ -486,6 +499,9 @@ function render(d){
     const sVer=s.version?` ${s.version}`:'';
     cards+=`<div class=tool>${badge(true)} Serena${sVer} (${s.mode})</div>`;
     cards+=`<div class=stat><span class=sl>Mode</span><span class=sv>${s.mode}</span></div>`;
+    if(s.mode==='docker-image') cards+=`<div class=stat><span class=sl>Status</span><span class=sv style="color:#e3b341">image present, container not running</span></div>`;
+    if(s.mode==='docker-running') cards+=`<div class=stat><span class=sl>Status</span><span class=sv style="color:#39d353">docker container running</span></div>`;
+    if(s.mode==='uvx') cards+=`<div class=stat><span class=sl>Status</span><span class=sv>uvx runtime available</span></div>`;
     if(s.version) cards+=`<div class=stat><span class=sl>Version</span><span class=sv>${s.version}</span></div>`;
     cards+=`<div class=stat><span class=sl>Memories</span><span class=sv>${s.memories} files</span></div>`;
     cards+=`<div class=stat><span class=sl>Session logs</span><span class=sv>${s.log_days} days</span></div>`;

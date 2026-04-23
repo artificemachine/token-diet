@@ -16,6 +16,17 @@
 - **Bigger Context**: Fit 5x more information into the same context window.
 - **Faster Agents**: Fewer tokens mean faster responses and fewer "out of context" errors.
 
+### Global vs. Per-Project?
+All three tools are installed **Globally** as binaries, but they operate with **Project-Level** context.
+
+| Tool | Installation | Scope of Work |
+| :--- | :--- | :--- |
+| **RTK** | **Global** (`~/.local/bin`) | **Per-Project History**: RTK stores command history in `~/.rtk/history.json`. `token-diet` allows you to define per-project `.token-budget` files to govern costs. |
+| **tilth** | **Global** (`~/.local/bin`) | **Per-Project Scanning**: When an agent calls tilth, it scans the files in your **current project directory**. It doesn't store permanent state between projects. |
+| **Serena** | **Global** (uvx/Docker) | **Per-Project Memories**: Serena's "Memories" (learned code patterns) are project-specific. It reads from and learns your active project directory. |
+
+**In short:** You install them once (Global), but your AI agent uses them to optimize whichever project folder you currently have open (Per-Project).
+
 ---
 
 ## Quick Start

@@ -30,6 +30,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - `token-diet serena-status`: New command (Bash + PowerShell) for deep Serena runtime diagnostics.
 - Dashboard: Added visual indicators for Serena status (Image vs. Container vs. uvx).
 
+## [1.7.1] — 2026-04-22
+
+### Fixed
+- `scripts/install.sh`: Fix modifier-only logic to correctly default to all tools when no specific tool flag is provided (e.g. `install.sh --verbose`).
+- Serena Runtime: Improved detection logic to validate actual `uvx` runnability and distinguish between Docker image presence and active container.
+- Serena Runtime: Added `--headless` flag to all registrations by default to prevent unwanted dashboard popups.
+- CLI: Fixed `token-diet mcp list` to show both tilth and serena hosts and return 0 even when diagnostics find issues.
+- README: Added "Global vs. Per-Project" section to clarify tool scope and refined "Full Reset" instructions to explicitly mention RTK and tilth removal.
+- Diagnostics: Fixed `token-diet doctor --json` to include `serena_mcp` registration data.
+
+### Added
+- `token-diet serena-status`: New command (Bash + PowerShell) for deep Serena runtime diagnostics.
+- Dashboard: Added visual indicators for Serena status (Image vs. Container vs. uvx).
+
 ## [1.7.0] — 2026-04-22
 
 ### Added

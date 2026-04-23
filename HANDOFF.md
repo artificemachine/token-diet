@@ -1,34 +1,47 @@
-# token-diet v1.7.1 Handoff
+# Session Handoff — v1.7.1 (Hardened & Agent-Optimized)
 
-## Release Overview
-The **token-diet v1.7.1** release is now live. This version solidifies the MCP server transformation (v1.7.0) by integrating crucial runtime diagnostics and installation fixes.
+## Executive Summary
+This session successfully evolved **token-diet** from a user-facing dashboard into an active, **agent-aware optimization layer**. The stack has been converted into an MCP server, hardened via a 7-stage pipeline, and refined for cross-platform production use.
 
-## Key Changes
-- **MCP Server Conversion**: The entire stack is now an MCP server, providing AI agents with first-class observability into their token consumption.
-- **`token-diet upstream`**: A new cross-platform command to track and audit changes from original tool authors while preserving your audited security patches.
-- **Serena Runtime Diagnostics**: 
-  - New `serena-status` command for deep detection of uvx vs. Docker modes.
-  - Visual status indicators in the dashboard.
-- **Installer Fix**: modifier-only flags (e.g., `install.sh --verbose`) now correctly default to installing the full stack.
+## 1. Core Evolution: The MCP Server (v1.7.0)
+The project now acts as a "brain" for AI agents.
+- **New Server**: `scripts/token-diet-mcp` (Zero-dependency Python).
+- **Agent Tools**:
+  - `token_diet_health`: Diagnostics and host checks.
+  - `token_diet_savings`: Exact token efficiency metrics.
+  - `token_diet_budget`: Project-specific usage tracking.
+  - `token_diet_loops`: AI command repetition detection.
+  - `token_diet_route`: Decision engine for tool selection (`tilth`/`Serena`/`RTK`).
 
-## Documentation
-- **1-Minute README**: Redesigned for immediate understanding of the stack's value.
-- **Enterprise Guide**: New dedicated documentation for air-gapped deployments.
+## 2. Platform Parity & Maintenance (v1.7.1)
+- **`token-diet upstream`**: New cross-platform command (Bash + PowerShell) to track and audit updates from original authors (`rtk-ai`, `jahala`, `oraios`) while preserving your security-patched forks.
+- **Improved Serena Detection**: Distinguishes between Docker image presence, active container, and `uvx` runnability.
+- **`token-diet serena-status`**: New command for deep runtime diagnostics.
+- **Headless Mode**: All Serena registrations are now `--headless` by default to prevent desktop popups during AI coding sessions.
 
-## Testing & Quality
-- **Bash/Bats**: 110 tests passing.
-- **Python/Pytest**: 5 tests passing (100% coverage on MCP server).
-- **PowerShell/Pester**: 38 tests passing (Verified on macOS and Windows).
-- **Security**: Passed full ShipGuard scan.
+## 3. CLI & UX Refinements
+- **Unified Interface**:
+  - `token-diet hook [on|off]`: Replaces `no-rtk`/`use-rtk`.
+  - `token-diet update --fresh`: Replaces `reinstall`.
+  - `token-diet doctor`: Now includes `verify` logic and deep diagnostics.
+- **1-Minute README**: Completely redesigned for immediate understanding.
+- **Enterprise Guide**: New documentation for air-gapped/offline deployments (`docs/enterprise.md`).
+- **Global vs. Project**: Clarified that tools are installed globally but operate with per-project context.
 
-## Current State
-- **Branch**: `main` is up to date with `origin/main`.
-- **Tag**: `v1.7.1` is pushed and points to the latest commit.
+## 4. Hardening & Quality
+- **Gauntlet Passed**: Successfully completed all 7 stages (Security, Threat Model, Code Quality, QA, UX, Simplify, Docker).
+- **Security**: Passed full **ShipGuard** scan. Added Docker healthchecks for `serena`.
+- **Testing**: 176 total tests (138 Bash, 38 PowerShell).
+- **Performance**: Pre-commit hook optimized to skip slow PowerShell tests on macOS/Linux unless `RUN_SLOW_TESTS=1` is set.
 
-Ready for deployment.
-EOF
+## 5. Current State
+- **Main Branch**: Clean, up-to-date, and pushed.
+- **Tags**: `v1.7.1` is live and force-pushed to the final hardened commit.
+- **Installers**: `install.sh` and `Install.ps1` are fully optimized and verified.
 
-## Update (v1.7.1 Final Refinements)
-- **Headless Serena**: All Serena MCP registrations now include the `--headless` flag by default. This ensures the native Serena dashboard does not pop up automatically during AI coding sessions.
-- **Improved Host Tracking**: Fixed `token-diet doctor` and `token-diet mcp list` to correctly detect Serena registrations in both global (`$HOME/.claude.json`) and local settings.
-- **Clarified Scope**: README now includes a "Global vs. Per-Project" section explaining that tools are installed once but work contextually.
+## Next Recommended Steps
+1.  **Agent Prompting**: Remind your AI agent to run `token-diet route` when unsure which tool to use.
+2.  **Auto-Repair**: Consider expanding the `doctor` command to automatically trigger `repair` for detected issues.
+3.  **Docker Management**: Use `token-diet serena-status` if the Serena MCP tool ever feels sluggish.
+
+Ready for production deployment.

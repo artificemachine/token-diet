@@ -185,13 +185,24 @@ cmd_gain() {
     local json
     json=$(rtk gain --format json 2>/dev/null)
     local cmds saved input pct ms
-    read -r cmds input saved pct ms <<< "$(echo "$json" | python3 -c "
-import sys,json
+    local arch="$HOME/.config/token-diet/archived_stats.json"
+        read -r cmds input saved pct ms <<< "$(echo "$json" | python3 - "$arch" << 'PY'
+import sys,json,pathlib
+arch_p = pathlib.Path(sys.argv[1])
 try:
-    d=json.load(sys.stdin)['summary']
-    print(d['total_commands'],d['total_input'],d['total_saved'],round(d['avg_savings_pct'],1),d['total_time_ms'])
-except Exception:
-    print('0 0 0 0.0 0')")"
+    live = json.load(sys.stdin).get('summary', {})
+    cmds, inp, saved, time = live.get('total_commands', 0), live.get('total_input', 0), live.get('total_saved', 0), live.get('total_time_ms', 0)
+except:
+    cmds, inp, saved, time = 0, 0, 0, 0
+if arch_p.exists():
+    try:
+        a = json.loads(arch_p.read_text())
+        cmds += a.get('cmds', 0); inp += a.get('input', 0); saved += a.get('saved', 0); time += a.get('time_ms', 0)
+    except: pass
+pct = round((saved / inp * 100), 1) if inp > 0 else 0.0
+print(f"{cmds} {inp} {saved} {pct} {time}")
+PY
+)"  
 
     printf "  %-22s %s\n"  "Commands filtered:"  "$cmds"
     printf "  %-22s %s\n"  "Tokens in:"          "$(human_tokens "$input")"
@@ -248,8 +259,7 @@ except Exception:
 
   echo -e "${DIM}$(printf '%.0s─' {1..50})${NC}"
   if $rtk_ok; then
-    local saved; saved=$(rtk gain --format json 2>/dev/null | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['summary']['total_saved'] if 'summary' in d else 0)" 2>/dev/null || echo "0")
-    local pct; pct=$(rtk gain --format json 2>/dev/null | python3 -c "import sys,json; d=json.load(sys.stdin); print(round(d['summary']['avg_savings_pct'],1) if 'summary' in d else 0.0)" 2>/dev/null || echo "0.0")
+    # Use the aggregated values from above
     printf "  Combined savings (tracked): %s (%s%%)\n" \
       "$(human_tokens "$saved")" "$pct"
     echo -e "\n  ${DIM}tilth + Serena savings are structural (smaller prompts, fewer turns)${NC}"
@@ -608,6 +618,47 @@ cmd_hook() {
       echo "Usage: token-diet hook [on|off]"
       ;;
   esac
+}
+
+cmd_clean() {
+  local hist="$HOME/.rtk/history.json"
+  local sqlite="$HOME/Library/Application Support/rtk/history.db"
+  local arch="$HOME/.config/token-diet/archived_stats.json"
+  mkdir -p "$(dirname "$arch")"
+
+  echo -e "\n\033[1mtoken-diet clean\033[0m\n"
+
+  # Capture current totals
+  local json; json=$(rtk gain --format json 2>/dev/null)
+  if [ -n "$json" ]; then
+    python3 - "$arch" "$json" << 'PY'
+import json, sys, pathlib
+arch_p = pathlib.Path(sys.argv[1]); live = json.loads(sys.argv[2])["summary"]
+data = {"cmds": 0, "input": 0, "saved": 0, "time_ms": 0}
+if arch_p.exists():
+    try: data = json.loads(arch_p.read_text())
+    except: pass
+data["cmds"]    += live.get("total_commands", 0)
+data["input"]   += live.get("total_input", 0)
+data["saved"]   += live.get("total_saved", 0)
+data["time_ms"] += live.get("total_time_ms", 0)
+arch_p.write_text(json.dumps(data, indent=2) + "\n")
+PY
+    echo "  ✓ Totals carried forward to archived_stats.json"
+  fi
+
+  if [ -f "$hist" ]; then
+    mv "$hist" "${hist}.$(date +%s).bak"
+    echo "  ✓ JSON history archived."
+  fi
+  if [ -f "$sqlite" ]; then
+    mv "$sqlite" "${sqlite}.$(date +%s).bak"
+    rm -f "${sqlite}-wal" "${sqlite}-shm"
+    echo "  ✓ SQLite history archived."
+  fi
+  
+  echo "  ✓ A fresh, fast history will start on your next command."
+  echo ""
 }
 
 cmd_upstream() {
@@ -2088,7 +2139,7 @@ COMMANDS
   doctor            Deep configuration and hook diagnosis  [--json]
   repair            Fix what doctor finds: RTK hooks, stale MCP commands  [--dry-run] [--json]
   mcp               Manage MCP server registrations  [install|list]
-  upstream          Manage and verify original repository updates  [setup|check|diff]
+  clean             Archive and reset RTK history to speed up dashboard\n  upstream          Manage and verify original repository updates  [setup|check|diff]
   hook              Toggle RTK hook  [on|off]
   breakdown         Top commands by tokens saved  [--limit N]
   explain <cmd>     Token cost breakdown for a specific command
@@ -2126,6 +2177,7 @@ case "${1:-gain}" in
   doctor|verify)     shift; cmd_doctor "$@" ;;
   repair)            shift; cmd_repair "$@" ;;
   mcp)               shift; cmd_mcp "$@" ;;
+  clean)             cmd_clean ;;
   upstream)          shift; cmd_upstream "$@" ;;
   hook)              shift; cmd_hook "$@" ;;
   breakdown)         shift; cmd_breakdown "$@" ;;

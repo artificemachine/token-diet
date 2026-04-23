@@ -333,7 +333,7 @@ confirm_hosts() {
   if [ "${#detected_slugs[@]}" -le 1 ]; then return; fi   # nothing to choose from
 
   # --hosts flag supplied — apply without prompting
-  if [ -n "$HOSTS_FILTER" ]; then
+  if [ -n "$HOSTS_FILTER" ] && [ "$HOSTS_FILTER" != "all" ]; then
     for slug in "${slugs[@]}"; do
       if ! echo ",$HOSTS_FILTER," | grep -qi ",$slug,"; then
         _host_disable "$slug"
@@ -629,11 +629,11 @@ install_serena() {
     if [ "${DRY_RUN:-false}" = "true" ]; then
       $LOCAL_MODE \
         && dryrun "claude mcp add --scope user serena -- docker run ... token-diet/serena:latest --context=claude-code" \
-        || dryrun "claude mcp add --scope user serena -- uvx --from git+${SERENA_REPO} serena start-mcp-server --context=claude-code --project-from-cwd"
+        || dryrun "claude mcp add --scope user serena -- uvx --from git+${SERENA_REPO} serena start-mcp-server --context=claude-code --headless --project-from-cwd"
     elif $LOCAL_MODE; then
       claude mcp add --scope user serena -- \
         docker run --rm -i -v "\$(pwd):/workspace:ro" --network none \
-        token-diet/serena:latest --context=claude-code --project /workspace \
+        token-diet/serena:latest --context=claude-code --headless --project /workspace \
         2>/dev/null \
         && ok "Serena MCP: Claude Code (Docker)" \
         || warn "Serena MCP: Claude Code setup failed (may already exist)"
@@ -663,7 +663,7 @@ install_serena() {
 # Serena MCP server (added by token-diet, Docker mode)
 [mcp_servers.serena]
 command = "docker"
-args = ["run", "--rm", "-i", "-v", ".:/workspace:ro", "--network", "none", "token-diet/serena:latest", "--context=codex", "--project", "/workspace"]
+args = ["run", "--rm", "-i", "-v", ".:/workspace:ro", "--network", "none", "token-diet/serena:latest", "--context=codex", "--headless", "--project", "/workspace"]
 TOML
         else
           cat >> "$codex_config" << TOML
@@ -671,7 +671,7 @@ TOML
 # Serena MCP server (added by token-diet)
 [mcp_servers.serena]
 command = "uvx"
-args = ["--from", "git+${SERENA_REPO}", "serena", "start-mcp-server", "--context=codex", "--project-from-cwd"]
+args = ["--from", "git+${SERENA_REPO}", "serena", "start-mcp-server", "--context=codex", "--headless", "--project-from-cwd"]
 TOML
         fi
         ok "Serena MCP: Codex CLI"

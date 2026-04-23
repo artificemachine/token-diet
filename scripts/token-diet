@@ -1733,6 +1733,7 @@ PY
   }
 
   local cc_cfg="$HOME/.claude/settings.json"
+  local cc_global="$HOME/.claude.json"
   local cd_mac="$HOME/Library/Application Support/Claude/claude_desktop_config.json"
   local cd_linux="$HOME/.config/Claude/claude_desktop_config.json"
   local oc_cfg="$HOME/.opencode.json"
@@ -1981,6 +1982,7 @@ PY
     2>/dev/null)
 
     if [ -n "$registered" ]; then
+      serena_registered_hosts+=("$host_label")
       local first_word; first_word=$(echo "$registered" | awk '{print $1}')
       if mcp_command_exists "$first_word"; then
         $json_mode || ok "  ${host_label}   registered   ${DIM}${registered}${NC}"
@@ -1999,6 +2001,7 @@ PY
     [ -f "$HOME/.codex/config.toml" ] || return 0
     local codex_cmd; codex_cmd=$(codex_mcp_command "$tool" 2>/dev/null || echo "")
     if [ -n "$codex_cmd" ]; then
+      serena_registered_hosts+=("codex")
       if mcp_command_exists "$codex_cmd"; then
         $json_mode || ok "  codex       registered   ${DIM}${codex_cmd}${NC}"
       else
@@ -2012,12 +2015,14 @@ PY
   }
 
   local cc_cfg="$HOME/.claude/settings.json"
+  local cc_global="$HOME/.claude.json"
   local cd_mac="$HOME/Library/Application Support/Claude/claude_desktop_config.json"
   local cd_linux="$HOME/.config/Claude/claude_desktop_config.json"
   local oc_cfg="$HOME/.opencode.json"
 
   $json_mode || echo -e "  ${BOLD}serena${NC}"
   _doctor_check_mcp_json "serena" "claude-code"    "$cc_cfg"
+  _doctor_check_mcp_json "serena" "claude-code"    "$cc_global"
   _doctor_check_mcp_json "serena" "claude-desktop" "$cd_mac"
   _doctor_check_mcp_json "serena" "claude-desktop" "$cd_linux"
   _doctor_check_mcp_json "serena" "opencode"       "$oc_cfg"

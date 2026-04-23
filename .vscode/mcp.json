@@ -19,7 +19,7 @@
       "args": [
         "--mcp"
       ],
-      "command": "tilth"
+      "command": "/Users/airm2max/.local/bin/tilth"
     }
   }
 }

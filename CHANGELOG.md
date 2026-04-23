@@ -4,6 +4,16 @@ All notable changes to token-diet will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [1.7.1] — 2026-04-22
+
+### Fixed
+- `scripts/install.sh`: Fix modifier-only logic to correctly default to all tools when no specific tool flag is provided (e.g. `install.sh --verbose`).
+- Serena Runtime: Improved detection logic to validate actual `uvx` runnability and distinguish between Docker image presence and active container.
+
+### Added
+- `token-diet serena-status`: New command (Bash + PowerShell) for deep Serena runtime diagnostics.
+- Dashboard: Added visual indicators for Serena status (Image vs. Container vs. uvx).
+
 ## [1.7.0] — 2026-04-22
 
 ### Added

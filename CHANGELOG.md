@@ -522,3 +522,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Serena: Added `--headless` flag to all MCP registrations for silent operation.
 - Diagnostics: Fixed `token-diet doctor --json` to include `serena_mcp` data.
 - Diagnostics: Added `$HOME/.claude.json` to Serena registration checks.
+
+## [1.7.2] - 2026-04-23
+### Fixed
+- Dashboard: `budget_stats()` infinite-loop under launchd when CWD is `/` (parent-of-root is root, so the walk-up loop never terminated and the HTTP server wedged). Replaced `while d.parts` with an explicit `parent == d` fixed-point guard.
+- Dashboard: `main()` now prints the serving URL and a clear error (with the PID holding the port) on `OSError`, auto-opens the browser (`webbrowser` was imported but never called), and handles Ctrl+C cleanly instead of exiting silently with code 1.
+- Dashboard: Added a 30s timeout to the auto-rotate `subprocess.run(["token-diet", "clean"])` call so a hanging clean cannot wedge `/api/stats`.
+
+### Restored
+- Dashboard UI: Sparkline bars for the last 14 days, avg-efficiency bar, weekly-projection metric, "tools active N/3" summary, per-tool tooltips (`data-tip`), serena mode/memories/log_days rows, budget progress bar with warn-line marker, top-days breakdown table, and missing-host hints. These were dropped by the v1.7.1 MCP rewrite.
+- `_budget_entry()` now emits `unlimited`, `installed_at`, and `~`-relative paths consumed by the restored UI.
+- `projection_stats()` now includes `avg_daily_saved`, `avg_pct`, and `days_sampled`.

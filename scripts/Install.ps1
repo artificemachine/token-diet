@@ -573,9 +573,9 @@ function Install-Serena {
     # Claude Code
     if ($script:HasClaude) {
         if ($Local) {
-            $claudeArgs = $serenaArgsBase + @("--context=claude-code", "--project", "/workspace")
+            $claudeArgs = $serenaArgsBase + @("--context=claude-code", "--headless", "--project", "/workspace")
         } else {
-            $claudeArgs = $serenaArgsBase + @("--context=claude-code", "--project-from-cwd")
+            $claudeArgs = $serenaArgsBase + @("--context=claude-code", "--headless", "--project-from-cwd")
         }
         if ($DryRun) {
             Write-DryRun "claude mcp add --scope user serena -- $serenaCmdName $($claudeArgs -join ' ')"
@@ -605,7 +605,7 @@ function Install-Serena {
 # Serena MCP server (added by token-diet, Docker mode)
 [mcp_servers.serena]
 command = "docker"
-args = ["run", "--rm", "-i", "-v", ".:/workspace:ro", "--network", "none", "token-diet/serena:latest", "--context=codex", "--project", "/workspace"]
+args = ["run", "--rm", "-i", "-v", ".:/workspace:ro", "--network", "none", "token-diet/serena:latest", "--context=codex", "--headless", "--project", "/workspace"]
 "@
                 } else {
                     $tomlBlock = @"
@@ -613,7 +613,7 @@ args = ["run", "--rm", "-i", "-v", ".:/workspace:ro", "--network", "none", "toke
 # Serena MCP server (added by token-diet)
 [mcp_servers.serena]
 command = "uvx"
-args = ["--from", "git+$SERENA_REPO", "serena", "start-mcp-server", "--context=codex", "--project-from-cwd"]
+args = ["--from", "git+$SERENA_REPO", "serena", "start-mcp-server", "--context=codex", "--headless", "--project-from-cwd"]
 "@
                 }
                 Add-Content -Path $codexConfig -Value $tomlBlock -Encoding UTF8
@@ -635,7 +635,7 @@ args = ["--from", "git+$SERENA_REPO", "serena", "start-mcp-server", "--context=c
   "servers": {
     "serena": {
       "command": "uvx",
-      "args": ["--from", "git+$SERENA_REPO", "serena", "start-mcp-server", "--context=ide", "--project-from-cwd"]
+      "args": ["--from", "git+$SERENA_REPO", "serena", "start-mcp-server", "--context=ide", "--headless", "--project-from-cwd"]
     },
     "tilth": {
       "command": "tilth",
@@ -664,13 +664,13 @@ args = ["--from", "git+$SERENA_REPO", "serena", "start-mcp-server", "--context=c
                     $serenaEntry = [PSCustomObject]@{
                         command = "docker"
                         args    = @("run", "--rm", "-i", "-v", "`$(pwd):/workspace:ro", "--network", "none",
-                                    "token-diet/serena:latest", "--context=claude-code", "--project", "/workspace")
+                                    "token-diet/serena:latest", "--context=claude-code", "--headless", "--project", "/workspace")
                     }
                 } else {
                     $serenaEntry = [PSCustomObject]@{
                         command = "uvx"
                         args    = @("--from", "git+$SERENA_REPO", "serena", "start-mcp-server",
-                                    "--context=claude-code", "--project-from-cwd")
+                                    "--context=claude-code", "--headless", "--project-from-cwd")
                     }
                 }
                 $data.mcpServers | Add-Member -NotePropertyName "serena" -NotePropertyValue $serenaEntry -Force
@@ -707,13 +707,13 @@ args = ["--from", "git+$SERENA_REPO", "serena", "start-mcp-server", "--context=c
                     $serenaEntry = [PSCustomObject]@{
                         command = "docker"
                         args    = @("run", "--rm", "-i", "-v", "`$(pwd):/workspace:ro", "--network", "none",
-                                    "token-diet/serena:latest", "--context=ide", "--project", "/workspace")
+                                    "token-diet/serena:latest", "--context=ide", "--headless", "--project", "/workspace")
                     }
                 } else {
                     $serenaEntry = [PSCustomObject]@{
                         command = "uvx"
                         args    = @("--from", "git+$SERENA_REPO", "serena", "start-mcp-server",
-                                    "--context=ide", "--project-from-cwd")
+                                    "--context=ide", "--headless", "--project-from-cwd")
                     }
                 }
                 $data.mcpServers | Add-Member -NotePropertyName "serena" -NotePropertyValue $serenaEntry -Force

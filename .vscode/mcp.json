@@ -6,6 +6,7 @@
         "git+https://github.com/celstnblacc/serena",
         "serena",
         "start-mcp-server",
+        "--headless",
         "--context=ide",
         "--project-from-cwd"
       ],

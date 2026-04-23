@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 - `scripts/install.sh`: Fix modifier-only logic to correctly default to all tools when no specific tool flag is provided (e.g. `install.sh --verbose`).
+- Serena Runtime: Added `--headless` flag to all registrations by default to prevent unwanted dashboard popups.
 - Serena Runtime: Improved detection logic to validate actual `uvx` runnability and distinguish between Docker image presence and active container.
 - CLI: Fixed `token-diet mcp list` to show both tilth and serena hosts and return 0 even when diagnostics find issues.
 - Diagnostics: Fixed `token-diet doctor --json` to include `serena_mcp` registration data.
@@ -20,6 +21,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 - `scripts/install.sh`: Fix modifier-only logic to correctly default to all tools when no specific tool flag is provided (e.g. `install.sh --verbose`).
+- Serena Runtime: Added `--headless` flag to all registrations by default to prevent unwanted dashboard popups.
 - Serena Runtime: Improved detection logic to validate actual `uvx` runnability and distinguish between Docker image presence and active container.
 - CLI: Fixed `token-diet mcp list` to show both tilth and serena hosts and return 0 even when diagnostics find issues.
 - Diagnostics: Fixed `token-diet doctor --json` to include `serena_mcp` registration data.

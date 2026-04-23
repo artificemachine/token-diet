@@ -640,7 +640,7 @@ install_serena() {
     else
       claude mcp add --scope user serena -- \
         uvx --from "git+${SERENA_REPO}" serena start-mcp-server \
-        --context=claude-code --project-from-cwd \
+        --context=claude-code --headless --project-from-cwd \
         2>/dev/null \
         && ok "Serena MCP: Claude Code" \
         || warn "Serena MCP: Claude Code setup failed (may already exist)"
@@ -691,7 +691,7 @@ TOML
   "servers": {
     "serena": {
       "command": "uvx",
-      "args": ["--from", "git+https://github.com/celstnblacc/serena", "serena", "start-mcp-server", "--context=ide", "--project-from-cwd"]
+      "args": ["--from", "git+https://github.com/celstnblacc/serena", "serena", "start-mcp-server", "--context=ide", "--headless", "--project-from-cwd"]
     },
     "tilth": {
       "command": "tilth",
@@ -728,7 +728,7 @@ data["mcpServers"]["serena"] = {
     "command": "docker",
     "args": ["run","--rm","-i","-v","$(pwd):/workspace:ro",
              "--network","none","token-diet/serena:latest",
-             "--context=ide","--project","/workspace"]
+             "--context=ide","--headless","--project","/workspace"]
 }
 with open(cfg, "w") as f:
     json.dump(data, f, indent=2)
@@ -752,7 +752,7 @@ data.setdefault("mcpServers", {})
 data["mcpServers"]["serena"] = {
     "command": "uvx",
     "args": ["--from", "git+" + repo, "serena", "start-mcp-server",
-             "--context=ide", "--project-from-cwd"]
+             "--context=ide", "--headless", "--project-from-cwd"]
 }
 with open(cfg, "w") as f:
     json.dump(data, f, indent=2)
@@ -789,7 +789,7 @@ data["mcpServers"]["serena"] = {
     "command": "docker",
     "args": ["run", "--rm", "-i", "-v", "$(pwd):/workspace:ro",
              "--network", "none", "token-diet/serena:latest",
-             "--context=claude-code", "--project", "/workspace"]
+             "--context=claude-code", "--headless", "--project", "/workspace"]
 }
 with open(cfg, "w") as f:
     json.dump(data, f, indent=2)
@@ -812,7 +812,7 @@ data.setdefault("mcpServers", {})
 data["mcpServers"]["serena"] = {
     "command": "uvx",
     "args": ["--from", "git+" + repo, "serena", "start-mcp-server",
-             "--context=claude-code", "--project-from-cwd"]
+             "--context=claude-code", "--headless", "--project-from-cwd"]
 }
 with open(cfg, "w") as f:
     json.dump(data, f, indent=2)

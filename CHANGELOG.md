@@ -12,33 +12,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Serena Runtime: Improved detection logic to validate actual `uvx` runnability and distinguish between Docker image presence and active container.
 - CLI: Fixed `token-diet mcp list` to show both tilth and serena hosts and return 0 even when diagnostics find issues.
 - Diagnostics: Fixed `token-diet doctor --json` to include `serena_mcp` registration data.
-
-### Added
-- `token-diet serena-status`: New command (Bash + PowerShell) for deep Serena runtime diagnostics.
-- Dashboard: Added visual indicators for Serena status (Image vs. Container vs. uvx).
-
-## [1.7.1] — 2026-04-22
-
-### Fixed
-- `scripts/install.sh`: Fix modifier-only logic to correctly default to all tools when no specific tool flag is provided (e.g. `install.sh --verbose`).
-- Serena Runtime: Added `--headless` flag to all registrations by default to prevent unwanted dashboard popups.
-- Serena Runtime: Improved detection logic to validate actual `uvx` runnability and distinguish between Docker image presence and active container.
-- CLI: Fixed `token-diet mcp list` to show both tilth and serena hosts and return 0 even when diagnostics find issues.
-- Diagnostics: Fixed `token-diet doctor --json` to include `serena_mcp` registration data.
-
-### Added
-- `token-diet serena-status`: New command (Bash + PowerShell) for deep Serena runtime diagnostics.
-- Dashboard: Added visual indicators for Serena status (Image vs. Container vs. uvx).
-
-## [1.7.1] — 2026-04-22
-
-### Fixed
-- `scripts/install.sh`: Fix modifier-only logic to correctly default to all tools when no specific tool flag is provided (e.g. `install.sh --verbose`).
-- Serena Runtime: Improved detection logic to validate actual `uvx` runnability and distinguish between Docker image presence and active container.
-- Serena Runtime: Added `--headless` flag to all registrations by default to prevent unwanted dashboard popups.
-- CLI: Fixed `token-diet mcp list` to show both tilth and serena hosts and return 0 even when diagnostics find issues.
-- README: Added "Global vs. Per-Project" section to clarify tool scope and refined "Full Reset" instructions to explicitly mention RTK and tilth removal.
-- Diagnostics: Fixed `token-diet doctor --json` to include `serena_mcp` registration data.
+- README: Added "Global vs. Per-Project" section and refined "Full Reset" instructions.
 
 ### Added
 - `token-diet serena-status`: New command (Bash + PowerShell) for deep Serena runtime diagnostics.
@@ -101,32 +75,32 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 * `scripts/tkd` renamed to `scripts/token-diet` — binary is now `token-diet` (was `tkd`)
 * `scripts/tkd-dashboard` renamed to `scripts/token-diet-dashboard`
-* `install.sh` — `install_tkd()` renamed to `install_token_diet()`; writes `token-diet.md` to `~/.claude/` and `~/.codex/` and registers `@token-diet.md` in host instruction files
+* `install.sh` — `install_tkd()` renamed to `install_token_diet()`; writes `token-diet.md` to `$HOME/.claude/` and `$HOME/.codex/` and registers `@token-diet.md` in host instruction files
 * `README.md` — Dashboard & CLI section and project structure updated to reflect `token-diet` binary name
 
 ### Added
 
-* `~/.claude/token-diet.md` and `~/.codex/token-diet.md` — unified token-diet CLI reference injected into AI host configs on install
+* `$HOME/.claude/token-diet.md` and `$HOME/.codex/token-diet.md` — unified token-diet CLI reference injected into AI host configs on install
 * `.project-hooks/pre-commit` — project-level pre-commit hook running `install.sh --dry-run`
 
 ## [1.1.2] - 2026-04-01
 
 ### Fixed
 
-* `scripts/install.sh` — set `web_dashboard: false` in `~/.serena/serena_config.yml` to fully disable Serena's built-in pywebview app; on macOS each registered host spawned a native window even with `open_on_launch: false`
+* `scripts/install.sh` — set `web_dashboard: false` in `$HOME/.serena/serena_config.yml` to fully disable Serena's built-in pywebview app; on macOS each registered host spawned a native window even with `open_on_launch: false`
 
 ## [1.1.1] - 2026-04-01
 
 ### Fixed
 
-* `scripts/install.sh` — patch `~/.serena/serena_config.yml` to set `web_dashboard_open_on_launch: false` after Serena registration, preventing multiple browser tabs from opening when Serena is registered in multiple AI hosts
+* `scripts/install.sh` — patch `$HOME/.serena/serena_config.yml` to set `web_dashboard_open_on_launch: false` after Serena registration, preventing multiple browser tabs from opening when Serena is registered in multiple AI hosts
 
 ## [1.1.0] - 2026-04-01
 
 ### Added
 
 * `scripts/tkd` — global CLI dashboard: `tkd gain`, `tkd dashboard`, `tkd version`, `tkd verify`
-* `scripts/tkd-dashboard` — stdlib-only Python browser dashboard (auto-refreshing, dark theme, RTK bar chart, host detection); installed to `~/.local/bin/tkd-dashboard`
+* `scripts/tkd-dashboard` — stdlib-only Python browser dashboard (auto-refreshing, dark theme, RTK bar chart, host detection); installed to `$HOME/.local/bin/tkd-dashboard`
 * `scripts/install.sh` — `--dry-run` flag: previews all install steps without making changes
 * `scripts/Install.ps1` — `-DryRun` switch: previews all install steps without making changes
 * `README.md` — Dashboard & CLI section documenting `tkd` commands and browser dashboard
@@ -143,7 +117,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
-* `install.sh` — OpenCode Serena integration now writes to `~/.opencode.json` instead of printing info-only
+* `install.sh` — OpenCode Serena integration now writes to `$HOME/.opencode.json` instead of printing info-only
 * `Install.ps1` — OpenCode Serena integration now writes to `%USERPROFILE%\.opencode.json` instead of manual-config warning
 * Both scripts pass `--context=ide` to Serena for OpenCode (correct context for non-LSP agent hosts)
 
@@ -159,12 +133,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 * `scripts/tkd` renamed to `scripts/token-diet` — binary is now `token-diet` (was `tkd`)
 * `scripts/tkd-dashboard` renamed to `scripts/token-diet-dashboard`
-* `install.sh` — `install_tkd()` renamed to `install_token_diet()`; writes `token-diet.md` to `~/.claude/` and `~/.codex/` and registers `@token-diet.md` in host instruction files
+* `install.sh` — `install_tkd()` renamed to `install_token_diet()`; writes `token-diet.md` to `$HOME/.claude/` and `$HOME/.codex/` and registers `@token-diet.md` in host instruction files
 * `README.md` — Dashboard & CLI section and project structure updated to reflect `token-diet` binary name
 
 ### Added
 
-* `~/.claude/token-diet.md` and `~/.codex/token-diet.md` — unified token-diet CLI reference injected into AI host configs on install
+* `$HOME/.claude/token-diet.md` and `$HOME/.codex/token-diet.md` — unified token-diet CLI reference injected into AI host configs on install
 * `.project-hooks/pre-commit` — project-level pre-commit hook running `install.sh --dry-run`
 
 ## [Unreleased]
@@ -172,7 +146,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ### Added
 
 * `token-diet health` — lightweight health check subcommand: reports tool availability and MCP host registrations; exits 0 when all 3 tools healthy, exits 1 otherwise
-* `scripts/uninstall.sh` — standalone bash uninstaller; reverses all install.sh writes across 15+ filesystem locations; supports `--dry-run`, `--force`, `--include-data`, `--include-docker`; preserves `~/.serena/memories` by default
+* `scripts/uninstall.sh` — standalone bash uninstaller; reverses all install.sh writes across 15+ filesystem locations; supports `--dry-run`, `--force`, `--include-data`, `--include-docker`; preserves `$HOME/.serena/memories` by default
 * `tests/test_helper.bash` — shared bats fixtures: sandboxed `$HOME` and `$PATH` per test, `mock_cmd()`, `mock_cmd_with_gain()`, `mock_mcp_config()`, `mock_install_prereqs()`
 * `tests/token-diet.bats` — bats tests for CLI dispatch: help, health (missing/all/MCP hosts), uninstall dispatch
 * `tests/install.bats` — bats tests for `install.sh --dry-run`, `uninstall.sh --dry-run/--force/--include-data`
@@ -186,7 +160,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Added (Iteration 1 continued)
 
-* `scripts/install.sh` — `--verbose` flag: shows full build output instead of `tail -5`; logs to `~/.local/share/token-diet/install.log` with 512 KB rotation via `show_output()` and `rotate_log()`
+* `scripts/install.sh` — `--verbose` flag: shows full build output instead of `tail -5`; logs to `$HOME/.local/share/token-diet/install.log` with 512 KB rotation via `show_output()` and `rotate_log()`
 * `scripts/Install.ps1` — `-Verbose` switch: replaces `Select-Object -Last 5` with `Show-Output` helper; logs to `%LOCALAPPDATA%\Programs\token-diet\install.log`
 * `scripts/Uninstall.ps1` — Windows uninstaller: mirrors `uninstall.sh` for all Windows paths; supports `-DryRun`, `-Force`, `-IncludeData`, `-IncludeDocker`
 * `tests/Uninstall.Tests.ps1` — Pester v5 tests for Windows uninstaller (run on Windows/WSL)
@@ -246,7 +220,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 * **`token-diet test-first <file>`** — suggests conventional test file counterpart for Python, Rust, TypeScript, Go, JS
 * **`scripts/uninstall.sh`** — standalone bash uninstaller (macOS/Linux)
 * **`scripts/Uninstall.ps1`** — PowerShell uninstaller (Windows); `-DryRun`, `-Force`, `-IncludeData`
-* **`scripts/install.sh --verbose`** — full build output instead of `tail -5`; logs to `~/.local/share/token-diet/install.log`
+* **`scripts/install.sh --verbose`** — full build output instead of `tail -5`; logs to `$HOME/.local/share/token-diet/install.log`
 * **Test suite** — 61 bats tests + 16 pytest tests; pre-commit hook runs full suite on every commit
 
 ## [1.2.1] — 2026-04-02
@@ -266,8 +240,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [1.2.2] — 2026-04-02
 
 ### Fixed
-* `token-diet verify` no longer crashes when run from `~/.local/bin` (inline fallback when `install.sh` is absent)
-* `scripts/install.sh` now copies itself as `token-diet-install.sh` to `~/.local/bin` so future verify calls can delegate to it
+* `token-diet verify` no longer crashes when run from `$HOME/.local/bin` (inline fallback when `install.sh` is absent)
+* `scripts/install.sh` now copies itself as `token-diet-install.sh` to `$HOME/.local/bin` so future verify calls can delegate to it
 * `test_budget_stats_returns_none_when_no_budget_file` now mocks `Path.cwd()` to prevent a stray `.token-budget` in the project root from breaking test isolation
 
 ## [1.2.3] — 2026-04-02
@@ -310,7 +284,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [1.2.9] — 2026-04-03
 
 ### Added
-* `scripts/token-diet` — `health` now detects stale Codex tilth MCP registrations: parses `~/.codex/config.toml` and warns if the configured command path no longer exists
+* `scripts/token-diet` — `health` now detects stale Codex tilth MCP registrations: parses `$HOME/.codex/config.toml` and warns if the configured command path no longer exists
 * `scripts/install.sh` — `--verify` likewise warns on stale Codex tilth MCP command path
 * `tests/token-diet.bats` — 2 new tests covering stale Codex path detection in `health`
 * `tests/install.bats` — 1 new test covering `--verify` stale Codex path warning
@@ -378,7 +352,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [1.3.0] — 2026-04-07
 
 ### Added
-* `scripts/install.sh` — Cowork (Claude Desktop) support: auto-detected via `~/Library/Application Support/Claude/claude_desktop_config.json`
+* `scripts/install.sh` — Cowork (Claude Desktop) support: auto-detected via `$HOME/Library/Application Support/Claude/claude_desktop_config.json`
 * `scripts/install.sh` — RTK awareness doc written to Claude Desktop config dir (LLM instructed to prefix commands with `rtk`; no hook mechanism available)
 * `scripts/install.sh` — Serena + tilth MCP entries injected into `claude_desktop_config.json` (stdlib `python3`, supports both normal and `--local` Docker mode)
 * `scripts/install.sh` — `token-diet.md` written to Claude Desktop config dir for Cowork sessions
@@ -413,14 +387,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [1.3.3] — 2026-04-07
 
 ### Added
-* `scripts/token-diet` — `no-rtk` command: temporarily disables the RTK Claude Code hook via a sentinel file (`~/.config/token-diet/rtk-disabled`); patches the hook to respect it (idempotent)
+* `scripts/token-diet` — `no-rtk` command: temporarily disables the RTK Claude Code hook via a sentinel file (`$HOME/.config/token-diet/rtk-disabled`); patches the hook to respect it (idempotent)
 * `scripts/token-diet` — `use-rtk` command: removes the sentinel file and re-enables RTK filtering
 * `tests/token-diet.bats` — 6 tests covering `no-rtk`/`use-rtk` toggle behaviour
 
 ## [1.3.4] - 2026-04-07
 
 ### Fixed
-* `scripts/install.sh` — copy `uninstall.sh` to `~/.local/bin/` during installation so `token-diet uninstall` works from the installed binary
+* `scripts/install.sh` — copy `uninstall.sh` to `$HOME/.local/bin/` during installation so `token-diet uninstall` works from the installed binary
 * `scripts/token-diet` — `cmd_uninstall()` now falls back gracefully to sibling `uninstall.sh` rather than hard-failing when the script isn't on PATH; emits a clear reinstall hint on missing file
 
 ## [1.3.5] - 2026-04-07
@@ -481,7 +455,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 * `forks/rtk` — bump submodule to v0.34.5: clippy clean on Rust 1.94 (7 lint fixes)
 * `forks/tilth` — bump submodule to v0.6.1: clippy clean on Rust 1.94 (9 lint fixes)
 * `config/compat.json` — rtk tested→0.34.5, tilth tested→0.6.1
-* `scripts/install.sh` — symlink RTK and tilth from `~/.cargo/bin/` into `~/.local/bin/` instead of copying; macOS security policy (SIGKILL) kills copied Rust binaries in `~/.local/bin` but honours symlinks
+* `scripts/install.sh` — symlink RTK and tilth from `$HOME/.cargo/bin/` into `$HOME/.local/bin/` instead of copying; macOS security policy (SIGKILL) kills copied Rust binaries in `$HOME/.local/bin` but honours symlinks
 * `scripts/token-diet` + `scripts/token-diet.ps1` — version bump 1.4.1 → 1.4.2
 
 ## [1.4.3] - 2026-04-13
@@ -524,7 +498,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [1.6.0] - 2026-04-20
 
 ### Added
-* OpenCode prompt rule injection — `install.sh` now writes the token-diet + RTK + tilth + Serena usage rules into `~/.config/opencode/opencode.json` under `mode.build.prompt` and `mode.plan.prompt`, wrapped in `<!-- token-diet:begin -->` / `<!-- token-diet:end -->` markers. Previously binaries and MCP servers installed fine for OpenCode, but the usage rules never reached the model because OpenCode does not read `@file.md` include syntax or `~/.claude/CLAUDE.md`. Rules live at `scripts/lib/opencode-rules.md` and are re-usable for any other non-Claude prompt-string host.
+* OpenCode prompt rule injection — `install.sh` now writes the token-diet + RTK + tilth + Serena usage rules into `$HOME/.config/opencode/opencode.json` under `mode.build.prompt` and `mode.plan.prompt`, wrapped in `<!-- token-diet:begin -->` / `<!-- token-diet:end -->` markers. Previously binaries and MCP servers installed fine for OpenCode, but the usage rules never reached the model because OpenCode does not read `@file.md` include syntax or `$HOME/.claude/CLAUDE.md`. Rules live at `scripts/lib/opencode-rules.md` and are re-usable for any other non-Claude prompt-string host.
 * `uninstall.sh` strips the token-diet block from OpenCode prompts, preserving user-authored text outside the markers.
 * 4 bats tests covering injection, idempotency, user-text preservation, and clean removal.
 
@@ -538,3 +512,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ### Added
 
 * New bats test: `install.sh --skip-tests (modifier-only) still triggers Serena MCP + opencode rules`. Proves the fix by driving the wizard with canned stdin (`install-all=y, dedup=y, local=n, proceed=y`) and asserting the token-diet begin marker lands in `opencode.json`. Total 138 bats tests, 0 failures.
+
+## [1.7.1] — 2026-04-23
+### Fixed
+- CLI: Improved `token-diet mcp list` to show both Tilth and Serena hosts.
+- README: Added "Global vs. Per-Project" scope explanation.
+- README: Clarified that `uninstall --force` removes Tilth and RTK.
+- Serena: Added `--headless` flag to all MCP registrations for silent operation.
+- Diagnostics: Fixed `token-diet doctor --json` to include `serena_mcp` data.
+- Diagnostics: Added `$HOME/.claude.json` to Serena registration checks.

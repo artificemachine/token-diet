@@ -19,7 +19,7 @@
       "args": [
         "--mcp"
       ],
-      "command": "tilth"
+      "command": "/Users/<redacted>/.local/bin/tilth"
     }
   }
 }

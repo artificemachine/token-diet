@@ -543,3 +543,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ### Fixed
 - `tests/token-diet.Tests.ps1` mock rtk/tilth scripts now use `ValueFromRemainingArguments` so `--format` and `--version` reach the script body instead of being silently bound as named parameters by PowerShell. Pre-existing bug that hid any test coverage of `rtk gain --format json` via the mock.
 - `tests/token-diet.Tests.ps1` PATH concatenation now uses `[System.IO.Path]::PathSeparator` so the MockBin directory actually lands on PATH on macOS/Linux (the hardcoded `;` only worked on Windows).
+
+## [1.7.4] - 2026-04-24
+### Fixed
+- `scripts/install.sh` Codex CLI Serena registration used a fragile `grep -q "serena"` idempotency check that false-matched on any line containing the substring "serena" — including vestigial orphan arrays from bad pastes. This caused the installer to log "already configured" and silently skip writing the real `[mcp_servers.serena]` block. Changed to `grep -Eq '^\[mcp_servers\.serena\]'` so the check requires the anchored TOML table header. Two new regression tests in `tests/install.bats` cover both the bug (stray substring present -> must still register) and the correct no-op behavior (real header present -> no duplicate block).

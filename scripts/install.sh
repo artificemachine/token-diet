@@ -650,7 +650,10 @@ install_serena() {
   # Codex CLI
   if $HAS_CODEX; then
     local codex_config="$HOME/.codex/config.toml"
-    if [ -f "$codex_config" ] && grep -q "serena" "$codex_config" 2>/dev/null; then
+    # Anchor to the actual TOML table header, not any substring.
+    # A stray orphan line like `["--from", "git+...serena", ...]` or a comment
+    # containing "serena" must NOT be treated as a real registration.
+    if [ -f "$codex_config" ] && grep -Eq '^\[mcp_servers\.serena\]' "$codex_config" 2>/dev/null; then
       ok "Serena MCP: Codex CLI (already configured)"
     else
       if [ "${DRY_RUN:-false}" = "true" ]; then

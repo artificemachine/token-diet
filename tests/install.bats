@@ -446,3 +446,47 @@ assert servers["serena"]["command"] == "uvx", servers["serena"]
 assert "--project-from-cwd" in servers["serena"]["args"], servers["serena"]["args"]
 PY
 }
+
+# ---------------------------------------------------------------------------
+# install.sh: codex serena idempotency uses anchored TOML table header
+# Regression guard: prior behavior used bare `grep -q "serena"` which
+# false-matched stray orphan arrays containing the string "serena"
+# (vestigial pasted args lines) and silently skipped the real registration.
+# ---------------------------------------------------------------------------
+
+@test "install.sh registers Serena in codex config when only a stray 'serena' substring exists" {
+  mock_install_prereqs
+  # Config has NO real [mcp_servers.serena] block but a stray args line
+  # containing "serena". The old bare-grep check treated this as
+  # "already configured" and skipped real registration.
+  cat > "$TMP_HOME/.codex/config.toml" << 'TOML'
+[mcp_servers.tilth]
+command = "/some/path/tilth"
+args = ["--mcp"]
+
+# Vestigial orphan from a bad paste — contains the substring "serena"
+["--from", "git+https://github.com/celstnblacc/serena", "serena", "start-mcp-server"]
+TOML
+
+  run bash "$SCRIPTS_DIR/install.sh" --serena-only --hosts codex
+  [ "$status" -eq 0 ]
+
+  # A real [mcp_servers.serena] table header must now be present on its own line
+  grep -Eq '^\[mcp_servers\.serena\]' "$TMP_HOME/.codex/config.toml"
+}
+
+@test "install.sh does not duplicate Serena block when a real [mcp_servers.serena] header already exists" {
+  mock_install_prereqs
+  cat > "$TMP_HOME/.codex/config.toml" << 'TOML'
+[mcp_servers.serena]
+command = "uvx"
+args = ["--from", "git+https://github.com/celstnblacc/serena", "serena", "start-mcp-server", "--context=codex", "--headless", "--project-from-cwd"]
+TOML
+
+  run bash "$SCRIPTS_DIR/install.sh" --serena-only --hosts codex
+  [ "$status" -eq 0 ]
+
+  local header_count
+  header_count=$(grep -cE '^\[mcp_servers\.serena\]' "$TMP_HOME/.codex/config.toml")
+  [ "$header_count" -eq 1 ]
+}

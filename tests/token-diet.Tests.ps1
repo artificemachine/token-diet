@@ -10,9 +10,9 @@ BeforeAll {
 
     # Stub rtk
     Set-Content "$script:MockBin\rtk.ps1" @'
-param([string[]]$Remaining)
+param([Parameter(ValueFromRemainingArguments=$true)][string[]]$Remaining)
 if ($Remaining -contains '--version') { Write-Output 'rtk 0.34.3'; exit 0 }
-if ($Remaining -contains '--format' -and $Remaining -contains 'json') {
+if (($Remaining -contains '--format') -and ($Remaining -contains 'json')) {
     Write-Output '{"summary":{"total_commands":5,"total_input":1000,"total_saved":800,"avg_savings_pct":80.0,"total_time_ms":1234}}'
     exit 0
 }
@@ -25,12 +25,13 @@ exit 0
 
     # Stub tilth
     Set-Content "$script:MockBin\tilth.ps1" @'
-param([string[]]$Remaining)
+param([Parameter(ValueFromRemainingArguments=$true)][string[]]$Remaining)
 if ($Remaining -contains '--version') { Write-Output 'tilth 0.5.7'; exit 0 }
 exit 0
 '@
 
-    $env:PATH = "$script:MockBin;$env:PATH"
+    $script:PathSep = [System.IO.Path]::PathSeparator
+    $env:PATH = "$script:MockBin$script:PathSep$env:PATH"
 }
 
 Describe 'token-diet.ps1 — dispatch' {
@@ -84,6 +85,88 @@ Describe 'token-diet.ps1 — version' {
         $out = (& pwsh -NoProfile -File $script:PS1 '--version' 2>&1) -join ' '
         $LASTEXITCODE | Should -Be 0
         $out | Should -Match '^token-diet \d+\.\d+\.\d+'
+    }
+}
+
+Describe 'token-diet.ps1 — gain: archived_stats carry-forward' {
+    BeforeEach {
+        $script:IsoHome = Join-Path $TestDrive ('iso-gain-' + [guid]::NewGuid().ToString().Substring(0,8))
+        New-Item -ItemType Directory -Path (Join-Path $script:IsoHome '.config/token-diet') -Force | Out-Null
+    }
+
+    It 'gain: sums live rtk summary with archived_stats totals' {
+        $arch = Join-Path $script:IsoHome '.config/token-diet/archived_stats.json'
+        @{ cmds = 500; input = 1000000; saved = 800000; time_ms = 60000 } | ConvertTo-Json | Set-Content $arch
+        # Mock rtk returns: 5 cmds, 1000 in, 800 saved, 1234ms
+        $out = & pwsh -NoProfile -Command "`$env:HOME='$script:IsoHome'; `$env:USERPROFILE='$script:IsoHome'; `$env:APPDATA=(Join-Path '$script:IsoHome' 'AppData'); `$env:PATH='$script:MockBin'; & '$script:PS1' gain 2>&1" | Out-String
+        # Expected totals: 505 cmds, 1.0M in (1000000 + 1000 = 1001000), 800.8K saved, 80% efficiency
+        $out | Should -Match 'Commands filtered:\s+505'
+        $out | Should -Match 'Tokens saved:\s+800\.8K\s+\(80'
+        $out | Should -Match 'includes 500 archived commands'
+    }
+
+    It 'gain: works with live rtk only when no archived_stats file exists' {
+        # No archived_stats.json in IsoHome
+        $out = & pwsh -NoProfile -Command "`$env:HOME='$script:IsoHome'; `$env:USERPROFILE='$script:IsoHome'; `$env:APPDATA=(Join-Path '$script:IsoHome' 'AppData'); `$env:PATH='$script:MockBin'; & '$script:PS1' gain 2>&1" | Out-String
+        $out | Should -Match 'Commands filtered:\s+5'
+        $out | Should -Not -Match 'includes \d+ archived commands'
+    }
+
+    It 'gain: treats malformed archived_stats.json as absent (no crash)' {
+        $arch = Join-Path $script:IsoHome '.config/token-diet/archived_stats.json'
+        Set-Content $arch 'not valid json {{{'
+        $out = & pwsh -NoProfile -Command "`$env:HOME='$script:IsoHome'; `$env:USERPROFILE='$script:IsoHome'; `$env:APPDATA=(Join-Path '$script:IsoHome' 'AppData'); `$env:PATH='$script:MockBin'; & '$script:PS1' gain 2>&1" | Out-String
+        $LASTEXITCODE | Should -Be 0
+        $out | Should -Match 'Commands filtered:\s+5'
+    }
+}
+
+Describe 'token-diet.ps1 — clean: archived_stats write + history rotation' {
+    BeforeEach {
+        $script:IsoHome = Join-Path $TestDrive ('iso-clean-' + [guid]::NewGuid().ToString().Substring(0,8))
+        New-Item -ItemType Directory -Path $script:IsoHome -Force | Out-Null
+    }
+
+    It 'clean: creates archived_stats.json with live rtk totals when none exists' {
+        $out = & pwsh -NoProfile -Command "`$env:HOME='$script:IsoHome'; `$env:USERPROFILE='$script:IsoHome'; `$env:APPDATA=(Join-Path '$script:IsoHome' 'AppData'); `$env:PATH='$script:MockBin'; & '$script:PS1' clean 2>&1" | Out-String
+        $LASTEXITCODE | Should -Be 0
+        $arch = Join-Path $script:IsoHome '.config/token-diet/archived_stats.json'
+        Test-Path $arch | Should -BeTrue
+        $d = Get-Content $arch -Raw | ConvertFrom-Json
+        $d.cmds    | Should -Be 5
+        $d.input   | Should -Be 1000
+        $d.saved   | Should -Be 800
+        $d.time_ms | Should -Be 1234
+    }
+
+    It 'clean: adds live rtk totals onto existing archived totals' {
+        $archDir = Join-Path $script:IsoHome '.config/token-diet'
+        New-Item -ItemType Directory -Path $archDir -Force | Out-Null
+        $arch = Join-Path $archDir 'archived_stats.json'
+        @{ cmds = 100; input = 50000; saved = 40000; time_ms = 10000 } | ConvertTo-Json | Set-Content $arch
+        & pwsh -NoProfile -Command "`$env:HOME='$script:IsoHome'; `$env:USERPROFILE='$script:IsoHome'; `$env:APPDATA=(Join-Path '$script:IsoHome' 'AppData'); `$env:PATH='$script:MockBin'; & '$script:PS1' clean 2>&1" | Out-Null
+        $d = Get-Content $arch -Raw | ConvertFrom-Json
+        $d.cmds    | Should -Be 105    # 100 + 5 (from mock rtk)
+        $d.input   | Should -Be 51000  # 50000 + 1000
+        $d.saved   | Should -Be 40800  # 40000 + 800
+        $d.time_ms | Should -Be 11234
+    }
+
+    It 'clean: moves $HOME/.rtk/history.json to timestamped .bak when present' {
+        $rtkDir = Join-Path $script:IsoHome '.rtk'
+        New-Item -ItemType Directory -Path $rtkDir -Force | Out-Null
+        $hist = Join-Path $rtkDir 'history.json'
+        Set-Content $hist '{"commands":[]}'
+        & pwsh -NoProfile -Command "`$env:HOME='$script:IsoHome'; `$env:USERPROFILE='$script:IsoHome'; `$env:APPDATA=(Join-Path '$script:IsoHome' 'AppData'); `$env:PATH='$script:MockBin'; & '$script:PS1' clean 2>&1" | Out-Null
+        Test-Path $hist | Should -BeFalse
+        @(Get-ChildItem $rtkDir -Filter 'history.json.*.bak').Count | Should -Be 1
+    }
+}
+
+Describe 'token-diet.ps1 — help includes clean' {
+    It 'help text mentions the clean command' {
+        $out = (& pwsh -NoProfile -File $script:PS1 'help' 2>&1) -join ' '
+        $out | Should -Match 'clean'
     }
 }
 

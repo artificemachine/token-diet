@@ -533,3 +533,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Dashboard UI: Sparkline bars for the last 14 days, avg-efficiency bar, weekly-projection metric, "tools active N/3" summary, per-tool tooltips (`data-tip`), serena mode/memories/log_days rows, budget progress bar with warn-line marker, top-days breakdown table, and missing-host hints. These were dropped by the v1.7.1 MCP rewrite.
 - `_budget_entry()` now emits `unlimited`, `installed_at`, and `~`-relative paths consumed by the restored UI.
 - `projection_stats()` now includes `avg_daily_saved`, `avg_pct`, and `days_sampled`.
+
+## [1.7.3] - 2026-04-24
+### Added
+- Windows parity: `Invoke-Gain` in `scripts/token-diet.ps1` now reads `~/.config/token-diet/archived_stats.json` and sums archived totals with live RTK totals, matching the bash `cmd_gain` behavior shipped earlier. This closes the UX gap where Windows users saw only post-rotation totals after running `token-diet clean`.
+- Windows parity: `Invoke-Clean` in `scripts/token-diet.ps1` archives RTK history (`~/.rtk/history.json` and OS-specific `history.db` under the Rust dirs::data_dir convention: `%APPDATA%\rtk` on Windows, `~/Library/Application Support/rtk` on macOS, `$XDG_DATA_HOME/rtk` on Linux) and carries cumulative totals forward into `archived_stats.json`. Added to the `clean` dispatch and `help` text.
+- Version bump to 1.7.3 in both `scripts/token-diet` and `scripts/token-diet.ps1` (PS1 was stale at 1.6.1 — this is the first coordinated bump since v1.6.1 on Windows).
+
+### Fixed
+- `tests/token-diet.Tests.ps1` mock rtk/tilth scripts now use `ValueFromRemainingArguments` so `--format` and `--version` reach the script body instead of being silently bound as named parameters by PowerShell. Pre-existing bug that hid any test coverage of `rtk gain --format json` via the mock.
+- `tests/token-diet.Tests.ps1` PATH concatenation now uses `[System.IO.Path]::PathSeparator` so the MockBin directory actually lands on PATH on macOS/Linux (the hardcoded `;` only worked on Windows).

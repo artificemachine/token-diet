@@ -22,7 +22,7 @@ if ($args -and $args.Count -gt 0) { $SubArgs += $args }
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-$script:TD_VERSION = '1.6.1'
+$script:TD_VERSION = '1.7.3'
 if ($Version) { Write-Output "token-diet $script:TD_VERSION"; exit 0 }
 $ScriptDir = $PSScriptRoot
 
@@ -131,17 +131,56 @@ function Get-RtkHistory {
 
 # --- Commands -----------------------------------------------------------------
 
+function Get-UserHome {
+    if ($env:HOME)        { return $env:HOME }
+    if ($env:USERPROFILE) { return $env:USERPROFILE }
+    return $HOME
+}
+
+function Get-ArchivedStats {
+    $arch = Join-Path (Get-UserHome) '.config/token-diet/archived_stats.json'
+    if (-not (Test-Path $arch)) { return $null }
+    try { return Get-Content $arch -Raw | ConvertFrom-Json } catch { return $null }
+}
+
 function Invoke-Gain {
     Write-Output "`n=== token-diet gain ===`n"
     Write-Output 'RTK — command output compression'
 
     $s = Get-RtkSummary
-    if ($s) {
-        Write-Output ('  Commands filtered:     {0}' -f $s.total_commands)
-        Write-Output ('  Tokens in:             {0}' -f (Format-Tokens $s.total_input))
-        Write-Output ('  Tokens saved:          {0}  ({1}%)' -f (Format-Tokens $s.total_saved), [math]::Round($s.avg_savings_pct,1))
-        Write-Output ('  Exec time:             {0}' -f (Format-Ms $s.total_time_ms))
-        Write-Ok "RTK $(& rtk --version 2>$null) — active"
+    $arch = Get-ArchivedStats
+
+    if ($s -or $arch) {
+        $liveCmds  = if ($s) { [long]$s.total_commands } else { 0 }
+        $liveInput = if ($s) { [long]$s.total_input    } else { 0 }
+        $liveSaved = if ($s) { [long]$s.total_saved    } else { 0 }
+        $liveTime  = if ($s) { [long]$s.total_time_ms  } else { 0 }
+
+        $archCmds  = if ($arch) { [long]$arch.cmds    } else { 0 }
+        $archInput = if ($arch) { [long]$arch.input   } else { 0 }
+        $archSaved = if ($arch) { [long]$arch.saved   } else { 0 }
+        $archTime  = if ($arch) { [long]$arch.time_ms } else { 0 }
+
+        $totalCmds  = $liveCmds  + $archCmds
+        $totalInput = $liveInput + $archInput
+        $totalSaved = $liveSaved + $archSaved
+        $totalTime  = $liveTime  + $archTime
+        $totalPct   = if ($totalInput -gt 0) { [math]::Round(($totalSaved / $totalInput * 100), 1) } else { 0.0 }
+
+        Write-Output ('  Commands filtered:     {0}' -f $totalCmds)
+        Write-Output ('  Tokens in:             {0}' -f (Format-Tokens $totalInput))
+        Write-Output ('  Tokens saved:          {0}  ({1}%)' -f (Format-Tokens $totalSaved), $totalPct)
+        Write-Output ('  Exec time:             {0}' -f (Format-Ms $totalTime))
+        if ($arch -and $s) {
+            Write-Output ('  (includes {0} archived commands from previous rotations)' -f $archCmds)
+        } elseif ($arch -and -not $s) {
+            Write-Output '  (archived-only: RTK not currently installed)'
+        }
+        if ($s) {
+            Write-Ok "RTK $(& rtk --version 2>$null) - active"
+        } else {
+            Write-Miss 'RTK not installed  ->  run: Install.ps1 -RtkOnly'
+        }
     } else {
         Write-Miss 'RTK not installed  ->  run: Install.ps1 -RtkOnly'
     }
@@ -878,6 +917,69 @@ function Invoke-Upstream([string[]]$Remaining) {
     }
 }
 
+function Get-RtkHistoryDbPath {
+    # RTK uses Rust's dirs::data_dir() conventions for history.db
+    $userHome = Get-UserHome
+    if ($IsWindows -or $env:OS -eq 'Windows_NT') {
+        $appData = if ($env:APPDATA) { $env:APPDATA } else { Join-Path $userHome 'AppData/Roaming' }
+        return Join-Path $appData 'rtk\history.db'
+    } elseif ($IsMacOS) {
+        return Join-Path $userHome 'Library/Application Support/rtk/history.db'
+    } else {
+        $xdg = if ($env:XDG_DATA_HOME) { $env:XDG_DATA_HOME } else { Join-Path $userHome '.local/share' }
+        return Join-Path $xdg 'rtk/history.db'
+    }
+}
+
+function Invoke-Clean {
+    $userHome = Get-UserHome
+    $histJson = Join-Path $userHome '.rtk/history.json'
+    $histDb   = Get-RtkHistoryDbPath
+    $arch     = Join-Path $userHome '.config/token-diet/archived_stats.json'
+    $archDir  = Split-Path $arch -Parent
+    if (-not (Test-Path $archDir)) { New-Item -ItemType Directory -Path $archDir -Force | Out-Null }
+
+    Write-Output "`n=== token-diet clean ===`n"
+
+    $live = Get-RtkSummary
+    if ($live) {
+        $data = [ordered]@{ cmds = 0; input = 0; saved = 0; time_ms = 0 }
+        if (Test-Path $arch) {
+            try {
+                $existing = Get-Content $arch -Raw | ConvertFrom-Json
+                $data.cmds    = [long]$existing.cmds
+                $data.input   = [long]$existing.input
+                $data.saved   = [long]$existing.saved
+                $data.time_ms = [long]$existing.time_ms
+            } catch { }
+        }
+        $data.cmds    += [long]$live.total_commands
+        $data.input   += [long]$live.total_input
+        $data.saved   += [long]$live.total_saved
+        $data.time_ms += [long]$live.total_time_ms
+        ($data | ConvertTo-Json) + "`n" | Set-Content -Path $arch -NoNewline
+        Write-Output "  Totals carried forward to archived_stats.json"
+    } else {
+        Write-Output "  RTK not available - skipping totals carry-forward"
+    }
+
+    $ts = [int][double]::Parse((Get-Date -UFormat %s))
+    if (Test-Path $histJson) {
+        Move-Item $histJson "$histJson.$ts.bak" -Force
+        Write-Output "  JSON history archived."
+    }
+    if (Test-Path $histDb) {
+        Move-Item $histDb "$histDb.$ts.bak" -Force
+        $walPath = "$histDb-wal"; $shmPath = "$histDb-shm"
+        if (Test-Path $walPath) { Remove-Item $walPath -Force }
+        if (Test-Path $shmPath) { Remove-Item $shmPath -Force }
+        Write-Output "  SQLite history archived."
+    }
+
+    Write-Output "  A fresh, fast history will start on your next command."
+    Write-Output ""
+}
+
 function Invoke-Help {
     $helpText = @"
 
@@ -906,6 +1008,7 @@ COMMANDS
   serena-status           Show Serena runtime details (mode/image/container/uvx)
   dashboard               Open live browser dashboard  [--port N]
   service <sub>           Always-on dashboard daemon  (install|uninstall|start|stop|status)
+  clean                   Archive RTK history + carry totals forward (frees disk, keeps stats)
   version                 Show installed versions of all three tools
   update                  Update tools  [-Fresh] [installer flags]
   uninstall               Remove all token-diet components  [-DryRun] [-Force]
@@ -940,6 +1043,7 @@ switch ($Command) {
     'loops'                             { Invoke-Loops }
     'dashboard'                         { Invoke-Dashboard  $SubArgs }
     'service'                           { Invoke-Service    $SubArgs }
+    'clean'                             { Invoke-Clean }
     { $_ -in 'version','versions' }     { Invoke-Version }
     'route'                             { Invoke-Route      $SubArgs }
     'leaks'                             { Invoke-Leaks }

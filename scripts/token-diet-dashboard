@@ -288,12 +288,13 @@ def collect():
     live_time  = daily_data["summary"]["total_time_ms"] if daily_data else 0
 
     arch_file = pathlib.Path.home() / ".config" / "token-diet" / "archived_stats.json"
-    arch_input = 0; arch_saved = 0; arch_cmds = 0; arch_time = 0
+    arch_input = 0; arch_saved = 0; arch_cmds = 0; arch_time = 0; arch_daily = []
     if arch_file.exists():
         try:
             a = json.loads(arch_file.read_text())
             arch_input = a.get("input", 0); arch_saved = a.get("saved", 0)
             arch_cmds = a.get("cmds", 0); arch_time = a.get("time_ms", 0)
+            arch_daily = a.get("daily", [])
         except: pass
 
     total_input = live_input + arch_input
@@ -301,6 +302,23 @@ def collect():
     total_cmds  = live_cmds + arch_cmds
     total_time  = live_time + arch_time
     total_pct   = round((total_saved / total_input * 100), 1) if total_input > 0 else 0.0
+
+    # Merge daily data for trends and breakdown
+    daily_map = {d["date"]: d for d in arch_daily}
+    for d in (daily_data.get("daily", []) if daily_data else []):
+        date = d["date"]
+        if date in daily_map:
+            # Merge stats for same day (happens if cleaned mid-day)
+            a = daily_map[date]
+            a["commands"] += d["commands"]
+            a["saved_tokens"] += d["saved_tokens"]
+            tin = a.get("input_tokens", 0) + d.get("input_tokens", 0)
+            a["input_tokens"] = tin
+            if tin > 0: a["savings_pct"] = (a["saved_tokens"] / tin) * 100
+        else:
+            daily_map[date] = d
+    
+    combined_daily = sorted(daily_map.values(), key=lambda x: x["date"])
 
     alerts = []
     # (OMITTING DUPLICATE ALERT LOGIC FOR BREVITY - it was already there)
@@ -317,14 +335,14 @@ def collect():
                 "total_commands": total_cmds, "avg_savings_pct": total_pct,
                 "total_time_ms": total_time
             },
-            "daily": daily_data.get("daily", [])[-14:] if daily_data else []
+            "daily": combined_daily[-14:]
         },
         "tilth": tilth_stats(),
         "serena": serena_stats(),
-        "breakdown": {"top_days": sorted(daily_data.get("daily", []), key=lambda x: x.get("saved_tokens", 0), reverse=True)[:5]} if daily_data else None,
+        "breakdown": {"top_days": sorted(combined_daily, key=lambda x: x.get("saved_tokens", 0), reverse=True)[:5]},
         "budget": budget,
         "budgets": all_budget_files(total_input, active_file),
-        "projection": projection_stats(daily_data),
+        "projection": projection_stats({"daily": combined_daily}),
         "missing_hosts": {"tilth": _missing_hosts("tilth"), "serena": _missing_hosts("serena")},
         "alerts": alerts,
         "cached_at": datetime.datetime.now().strftime("%H:%M:%S")

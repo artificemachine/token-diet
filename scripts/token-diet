@@ -628,23 +628,46 @@ cmd_clean() {
 
   echo -e "\n\033[1mtoken-diet clean\033[0m\n"
 
-  # Capture current totals
-  local json; json=$(rtk gain --format json 2>/dev/null)
+  # Capture current totals and daily history
+  local json; json=$(rtk gain --daily --format json 2>/dev/null)
   if [ -n "$json" ]; then
     python3 - "$arch" "$json" << 'PY'
 import json, sys, pathlib
-arch_p = pathlib.Path(sys.argv[1]); live = json.loads(sys.argv[2])["summary"]
-data = {"cmds": 0, "input": 0, "saved": 0, "time_ms": 0}
+arch_p = pathlib.Path(sys.argv[1]); live_data = json.loads(sys.argv[2])
+live = live_data["summary"]
+live_daily = live_data.get("daily", [])
+
+data = {"cmds": 0, "input": 0, "saved": 0, "time_ms": 0, "daily": []}
 if arch_p.exists():
     try: data = json.loads(arch_p.read_text())
     except: pass
+
+# 1. Update summary
 data["cmds"]    += live.get("total_commands", 0)
 data["input"]   += live.get("total_input", 0)
 data["saved"]   += live.get("total_saved", 0)
 data["time_ms"] += live.get("total_time_ms", 0)
+
+# 2. Update daily history (keep last 30 days)
+arch_daily = {d["date"]: d for d in data.get("daily", [])}
+for d in live_daily:
+    date = d["date"]
+    if date in arch_daily:
+        # Merge stats for same day
+        a = arch_daily[date]
+        a["commands"] += d["commands"]
+        a["saved_tokens"] += d["saved_tokens"]
+        # Recalculate pct
+        total_in = a.get("input_tokens", 0) + d.get("input_tokens", 0)
+        a["input_tokens"] = total_in
+        if total_in > 0: a["savings_pct"] = (a["saved_tokens"] / total_in) * 100
+    else:
+        arch_daily[date] = d
+
+data["daily"] = sorted(arch_daily.values(), key=lambda x: x["date"])[-30:]
 arch_p.write_text(json.dumps(data, indent=2) + "\n")
 PY
-    echo "  ✓ Totals carried forward to archived_stats.json"
+    echo "  ✓ Totals and daily history carried forward to archived_stats.json"
   fi
 
   if [ -f "$hist" ]; then

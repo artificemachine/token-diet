@@ -62,10 +62,22 @@ token-diet dashboard # Open the live browser stats
 | :--- | :--- |
 | `token-diet gain` | **Status**: See how many tokens you've saved today. |
 | `token-diet dashboard` | **Live UI**: Open the browser dashboard with persistent daily history. |
+| `token-diet health` | **Check**: Quick health check of tools and registrations. |
 | `token-diet mcp list` | **Hosts**: See which AI hosts (Gemini, Claude, etc.) are currently optimized. |
 | `token-diet budget hubs` | **Discovery**: Register "Project Hubs" (e.g. `~/Projects`) for automatic discovery. |
 | `token-diet budget status` | **Governance**: Check usage against your project budget. |
 | `token-diet doctor` | **Debug**: Run deep diagnostics on your setup. |
+| `token-diet repair` | **Fix**: Automatically fix hook and registration issues. |
+| `token-diet clean` | **Archive**: Reset RTK history while preserving daily totals. |
+| `token-diet hook off` | **Toggle**: Temporarily disable the RTK output filter. |
+| `token-diet breakdown` | **Analytics**: Show top commands by token savings. |
+| `token-diet explain` | **Inspect**: Break down costs for a specific command. |
+| `token-diet loops` | **Safety**: Detect and flag agent loop patterns. |
+| `token-diet route` | **Advisory**: Suggest which tool fits a specific task. |
+| `token-diet leaks` | **Audit**: Detect redundant file reads in history. |
+| `token-diet test-first` | **Strategy**: Suggest test files to read before implementation. |
+| `token-diet diff-reads` | **Context**: Suggest minimal line ranges to read based on git diff. |
+| `token-diet uninstall` | **Remove**: Cleanly remove all binaries and registrations. |
 
 ---
 

@@ -506,10 +506,7 @@ function render(d){
 
   // One full card per .token-budget file
   if(d.budgets&&d.budgets.length){
-    // Filter: only show the Active budget and the Global budget (~/.token-budget)
-    const displayBudgets = d.budgets.filter(b => b.is_active || b.file === "~/.token-budget");
-    
-    displayBudgets.forEach(b=>{
+    d.budgets.forEach(b=>{
       const sc=b.status==='ok'?'ok':b.status==='warn'?'warn':'off';
       const bc=b.status==='ok'?'#39d353':b.status==='warn'?'#e3b341':'#f85149';
       const hard=b.unlimited?'unlimited':fmt(b.hard);

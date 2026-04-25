@@ -217,6 +217,20 @@ def projection_stats(data):
         "avg_pct": round(avg_pct, 1),
         "days_sampled": len(recent),
     }
+def _get_version():
+    ver_raw = run(["token-diet", "--version"])
+    if ver_raw:
+        return ver_raw.split()[-1]
+    # Fallback: parse from sibling script file
+    try:
+        td_bin = pathlib.Path(__file__).parent / "token-diet"
+        if td_bin.exists():
+            for line in td_bin.read_text().splitlines()[:50]:
+                if "TD_VERSION=" in line:
+                    return line.split("=")[1].strip().strip("\"").strip("'")
+    except: pass
+    return "1.7.5"
+
 def collect():
     now = time.time()
     if _CACHE["data"] and now < _CACHE["expires"]:
@@ -250,7 +264,7 @@ def collect():
     active_file = str(pathlib.Path.home() / budget["file"].replace("~/", "")) if budget else None
 
     data = {
-        "version": "1.7.1",
+        "version": _get_version(),
         "rtk": {
             "version": run(["rtk", "--version"]).split()[-1] if run(["rtk", "--version"]) else None,
             "summary": {

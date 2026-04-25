@@ -494,7 +494,7 @@ function render(d){
   cards+='<div class=card><h2 data-tip="LSP = Language Server Protocol. A language server understands your codebase deeply: go-to-definition, find-references, call graphs, cross-file symbols. Serena exposes this to the LLM so it navigates by meaning instead of reading whole files - fewer turns, smaller prompts.">Serena - LSP navigation</h2>';
   if(s){
     const sVer=s.version?` ${s.version}`:'';
-    cards+=`<div class=tool>${badge(true)} Serena${sVer} (${s.mode})</div>`;
+    cards+=`<div class=tool>${badge(true)} Serena${sVer}</div>`;
     cards+=`<div class=stat><span class=sl>Mode</span><span class=sv>${s.mode}</span></div>`;
     if(s.mode==='docker-image') cards+=`<div class=stat><span class=sl>Status</span><span class=sv style="color:#e3b341">image present, container not running</span></div>`;
     if(s.mode==='docker-running') cards+=`<div class=stat><span class=sl>Status</span><span class=sv style="color:#39d353">docker container running</span></div>`;

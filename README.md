@@ -47,7 +47,7 @@ token-diet health
 ```
 
 ### 3. Use
-Once installed, your AI agent (Claude Code, Codex, VS Code, etc.) will automatically use the optimized tools. You can monitor your diet via the CLI or dashboard:
+Once installed, your AI agent (Claude Code, Codex, Gemini CLI, VS Code, etc.) will automatically use the optimized tools. You can monitor your diet via the CLI or dashboard:
 
 ```bash
 token-diet           # See your total token savings
@@ -60,11 +60,25 @@ token-diet dashboard # Open the live browser stats
 
 | Command | Purpose |
 | :--- | :--- |
-| `token-diet gain` | **Dashboard**: See how many tokens you've saved today. |
-| `token-diet mcp list` | **Status**: See which AI hosts are currently optimized. |
-| `token-diet hook off` | **Toggle**: Temporarily disable optimization for raw output. |
+| `token-diet gain` | **Status**: See how many tokens you've saved today. |
+| `token-diet dashboard` | **Live UI**: Open the browser dashboard with persistent daily history. |
+| `token-diet mcp list` | **Hosts**: See which AI hosts (Gemini, Claude, etc.) are currently optimized. |
+| `token-diet budget hubs` | **Discovery**: Register "Project Hubs" (e.g. `~/Projects`) for automatic discovery. |
 | `token-diet budget status` | **Governance**: Check usage against your project budget. |
 | `token-diet doctor` | **Debug**: Run deep diagnostics on your setup. |
+
+---
+
+## Smart Discovery
+`token-diet` automatically finds your `.token-budget` files using a hybrid logic:
+1.  **RTK History**: It remembers every project you've ever worked in.
+2.  **Project Hubs**: It scans your registered code roots (e.g., `~/Dev`).
+3.  **Local Context**: It always checks your current folder and its neighbors.
+
+Register a new hub to see all its project budgets on the dashboard:
+```bash
+token-diet budget hubs add ~/Work
+```
 
 ---
 

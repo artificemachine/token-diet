@@ -561,3 +561,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Dashboard: Support for the \`"servers"\` key in MCP JSON configurations (common in VS Code settings).
 - Dashboard: Visual highlight (ACTIVE badge + green border) for the specific budget file currently being enforced for your workspace.
 - Dashboard: Improved path visibility to distinguish between global, group, and project-specific budgets.
+
+## [1.7.6] — 2026-04-25
+
+### Added
+- **Persistent Daily History**: \`token-diet clean\` now preserves a 30-day daily breakdown in the archive.
+- **Dashboard History Merging**: The dashboard now automatically merges archived and live daily stats for accurate "Top Days" tracking.
+- **Context-Aware Discovery**: The dashboard now uses the last recorded RTK project as context for budget highlighting and VS Code registration detection.
+
+### Fixed
+- Dashboard: Reverted budget filtering to show all discovered budgets (Global, Group, and Project) while maintaining the ACTIVE highlight.
+- Dashboard: Simplifed Serena card by removing redundant Mode/Status lines and fixing version detection.
+- Dashboard: Dynamic versioning now correctly pulls from the \`token-diet\` binary.

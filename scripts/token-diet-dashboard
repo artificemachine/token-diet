@@ -55,6 +55,28 @@ def serena_stats():
     docker_image = run(["docker", "image", "inspect", "token-diet/serena:latest"], timeout=2) is not None
     uvx_version = run(["uvx", "--version"], timeout=2) is not None
     if not docker_image and not uvx_version: return None
+    
+    version = None
+    if docker_image:
+        version = run(["docker", "image", "inspect", "token-diet/serena:latest", "--format", '{{ index .Config.Labels "org.opencontainers.image.version" }}'], timeout=2)
+    
+    # Robust fallback: look for forks/serena/pyproject.toml in script path and CWD
+    if not version or version == "<no value>":
+        candidates = [
+            pathlib.Path(__file__).parent.parent / "forks" / "serena" / "pyproject.toml",
+            pathlib.Path.cwd() / "forks" / "serena" / "pyproject.toml",
+            pathlib.Path.home() / "DevOpsSec" / "token-diet" / "forks" / "serena" / "pyproject.toml"
+        ]
+        for pyp in candidates:
+            if pyp.exists():
+                try:
+                    for line in pyp.read_text().splitlines():
+                        if "version =" in line:
+                            version = line.split("=")[1].strip().strip("\"").strip("'")
+                            break
+                    if version: break
+                except: pass
+
     docker_running = False
     if docker_image:
         running_raw = run(["docker", "ps", "--filter", "ancestor=token-diet/serena:latest", "--format", "{{.ID}}"], timeout=2)
@@ -65,7 +87,7 @@ def serena_stats():
     log_days  = len(list(log_dir.iterdir())) if log_dir.exists() else 0
     hosts     = _registered_hosts("serena")
     mode      = "docker-running" if docker_running else ("uvx" if uvx_version else "docker-image")
-    return {"mode": mode, "version": None, "hosts": hosts, "memories": memories, "log_days": log_days}
+    return {"mode": mode, "version": version if version and version != "<no value>" else None, "hosts": hosts, "memories": memories, "log_days": log_days}
 
 def _get_last_project():
     home = pathlib.Path.home()

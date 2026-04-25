@@ -965,6 +965,47 @@ PY
       fi
       ;;
 
+    hubs)
+      local cfg_dir="$HOME/.config/token-diet"
+      local cfg_file="$cfg_dir/config.json"
+      mkdir -p "$cfg_dir"
+      if [[ "${1:-}" == "add" && -n "${2:-}" ]]; then
+        local new_hub="$2"
+        # Convert to relative to home if possible
+        new_hub="${new_hub/#$HOME/~}"
+        python3 - "$cfg_file" "$new_hub" << 'PY'
+import json, sys, pathlib
+path = pathlib.Path(sys.argv[1])
+new_h = sys.argv[2]
+try: data = json.loads(path.read_text())
+except: data = {}
+hubs = data.get("project_hubs", [])
+if new_h not in hubs:
+    hubs.append(new_h)
+    data["project_hubs"] = hubs
+    path.write_text(json.dumps(data, indent=2))
+    print(f"Added hub: {new_h}")
+else:
+    print(f"Hub already exists: {new_h}")
+PY
+      elif [[ "${1:-}" == "list" || -z "${1:-}" ]]; then
+        echo -e "\n  ${BOLD}Project Hubs${NC} (scanned for budgets)"
+        echo -e "  ${DIM}$(printf '%.0s─' {1..40})${NC}"
+        python3 - "$cfg_file" << 'PY'
+import json, sys, pathlib
+path = pathlib.Path(sys.argv[1])
+try:
+    hubs = json.loads(path.read_text()).get("project_hubs", [])
+    for h in hubs: print(f"    {h}")
+    if not hubs: print("    (no hubs configured)")
+except: print("    (no hubs configured)")
+PY
+        echo -e "\n  Run: ${BOLD}token-diet budget hubs add ~/Projects${NC}\n"
+      else
+        echo "Usage: token-diet budget hubs <list|add <path>>" >&2
+      fi
+      ;;
+
     status)
       local budget_file global_file="$HOME/.token-budget"
       budget_file=$(find_budget_file) || budget_file=$(ensure_global_budget)
@@ -2143,7 +2184,7 @@ COMMANDS
   hook              Toggle RTK hook  [on|off]
   breakdown         Top commands by tokens saved  [--limit N]
   explain <cmd>     Token cost breakdown for a specific command
-  budget <init|status>  Per-project token budget with warn/hard thresholds
+  budget <init|status|hubs> Per-project token budget with hubs discovery
   loops             Detect agent loop patterns (commands run 3+ times)
   route <task>      Suggest which tool (tilth/Serena/RTK) best fits the task
   leaks             Detect files read multiple times in RTK history

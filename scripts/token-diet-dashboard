@@ -495,10 +495,6 @@ function render(d){
   if(s){
     const sVer=s.version?` ${s.version}`:'';
     cards+=`<div class=tool>${badge(true)} Serena${sVer}</div>`;
-    cards+=`<div class=stat><span class=sl>Mode</span><span class=sv>${s.mode}</span></div>`;
-    if(s.mode==='docker-image') cards+=`<div class=stat><span class=sl>Status</span><span class=sv style="color:#e3b341">image present, container not running</span></div>`;
-    if(s.mode==='docker-running') cards+=`<div class=stat><span class=sl>Status</span><span class=sv style="color:#39d353">docker container running</span></div>`;
-    if(s.mode==='uvx') cards+=`<div class=stat><span class=sl>Status</span><span class=sv>uvx runtime available</span></div>`;
     if(s.version) cards+=`<div class=stat><span class=sl>Version</span><span class=sv>${s.version}</span></div>`;
     cards+=`<div class=stat><span class=sl>Memories</span><span class=sv>${s.memories} files</span></div>`;
     cards+=`<div class=stat><span class=sl>Session logs</span><span class=sv>${s.log_days} days</span></div>`;

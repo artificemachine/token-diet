@@ -14,7 +14,7 @@ When attempting to start the Codex CLI (`codex`), the application failed with a 
 ```text
 [DANGER] codex FULL permission (Bypassing Sandbox) !!
 Error loading config.toml:
-/Users/airm2max/.codex/config.toml:144:10: unclosed table, expected `]`
+~/.codex/config.toml:144:10: unclosed table, expected `]`
     |
 144 | ["--from", "git+https://github.com/celstnblacc/serena", "serena", "start-mcp-server", "--context=codex", "--project-from-cwd"]
     |          ^

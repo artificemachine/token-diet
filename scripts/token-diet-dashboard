@@ -67,6 +67,17 @@ def serena_stats():
     mode      = "docker-running" if docker_running else ("uvx" if uvx_version else "docker-image")
     return {"mode": mode, "version": None, "hosts": hosts, "memories": memories, "log_days": log_days}
 
+def _get_last_project():
+    home = pathlib.Path.home()
+    db = home / "Library/Application Support/rtk/history.db"
+    if db.exists():
+        try:
+            cmd = ["sqlite3", str(db), "SELECT project_path FROM commands WHERE project_path != '' ORDER BY timestamp DESC LIMIT 1;"]
+            res = subprocess.run(cmd, capture_output=True, text=True, timeout=1).stdout.strip()
+            if res: return pathlib.Path(res)
+        except: pass
+    return pathlib.Path.cwd()
+
 def _registered_hosts(tool):
     found = []
     home = pathlib.Path.home()
@@ -76,7 +87,7 @@ def _registered_hosts(tool):
         (home / "Library/Application Support/Claude/claude_desktop_config.json", "claude-desktop"),
         (home / ".config/Claude/claude_desktop_config.json", "claude-desktop"),
         (home / ".opencode.json", "opencode"),
-        (home / ".gemini/settings.json", "gemini"),
+        (home / ".gemini" / "settings.json", "gemini"),
         (home / ".codex" / "config.toml", "codex"),
     ]
     for path, label in candidates:
@@ -91,8 +102,8 @@ def _registered_hosts(tool):
                 found.append(label)
         except: pass
 
-    # Walk up to find .vscode/mcp.json or .vscode/settings.json
-    curr = pathlib.Path.cwd()
+    # Walk up from last project to find .vscode/mcp.json
+    curr = _get_last_project()
     while True:
         vscode = curr / ".vscode" / "mcp.json"
         if vscode.exists() and tool in vscode.read_text().lower():
@@ -110,8 +121,20 @@ def _registered_hosts(tool):
 _ALL_HOSTS = ["claude-code", "claude-desktop", "opencode", "codex", "vscode", "gemini"]
 
 def _missing_hosts(tool):
-    registered = set(_registered_hosts(tool))
-    return [h for h in _ALL_HOSTS if h not in registered]
+    reg = _registered_hosts(tool)
+    missing = [h for h in _ALL_HOSTS if h not in reg]
+    home = pathlib.Path.home()
+    really_missing = []
+    for m in missing:
+        exists = False
+        if m == "claude-code": exists = (home / ".claude").exists() or (home / ".claude.json").exists()
+        elif m == "claude-desktop": exists = (home / "Library/Application Support/Claude").exists() or (home / ".config/Claude").exists()
+        elif m == "opencode": exists = (home / ".opencode.json").exists()
+        elif m == "vscode": exists = (_get_last_project() / ".vscode").exists()
+        elif m == "gemini": exists = (home / ".gemini").exists()
+        elif m == "codex": exists = (home / ".codex").exists()
+        if exists: really_missing.append(m)
+    return really_missing
 
 def _read_budget_file(path):
     try: return json.loads(path.read_text())
@@ -133,7 +156,7 @@ def _budget_entry(cfg, total_input, file_path, is_active=False):
 
 def budget_stats(total_input):
     home = pathlib.Path.home(); global_path = home / ".token-budget"
-    project_path = None; d = pathlib.Path.cwd()
+    project_path = None; d = _get_last_project()
     while True:
         p = d / ".token-budget"
         if p.exists(): project_path = p; break
@@ -465,14 +488,17 @@ function render(d){
 
   // One full card per .token-budget file
   if(d.budgets&&d.budgets.length){
-    d.budgets.forEach(b=>{
+    // Filter: only show the Active budget and the Global budget (~/.token-budget)
+    const displayBudgets = d.budgets.filter(b => b.is_active || b.file === "~/.token-budget");
+    
+    displayBudgets.forEach(b=>{
       const sc=b.status==='ok'?'ok':b.status==='warn'?'warn':'off';
       const bc=b.status==='ok'?'#39d353':b.status==='warn'?'#e3b341':'#f85149';
       const hard=b.unlimited?'unlimited':fmt(b.hard);
       const remaining=b.unlimited?'unlimited':fmt(Math.max(0,b.hard-b.used));
       const activeBadge = b.is_active ? ' <span class="badge ok">ACTIVE</span>' : '';
       const cardStyle = b.is_active ? 'style="border: 2px solid #39d353"' : '';
-      cards+=`<div class=card ${cardStyle}><h2 data-tip="Per-project token spending limit. Warn threshold triggers a yellow alert. Hard stop (0 = unlimited) blocks further usage. Stored in .token-budget - cascades from project folder up to ~/.token-budget global default.">Token Budget${activeBadge}</h2>`;
+      cards+=`<div class=card ${cardStyle}><h2 data-tip="Per-project token spending limit. Stored in .token-budget - cascades from project folder up to ~/.token-budget global default.">Token Budget${activeBadge}</h2>`;
       cards+=`<div class=tool><span class="badge ${sc}">${b.status.toUpperCase()}</span></div>`;
       cards+=`<div class=stat><span class=sl>Used</span><span class=sv>${fmt(b.used)}</span></div>`;
       cards+=`<div class=stat><span class=sl>Warn at</span><span class=sv>${fmt(b.warn)}</span></div>`;

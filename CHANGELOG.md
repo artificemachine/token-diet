@@ -547,3 +547,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [1.7.4] - 2026-04-24
 ### Fixed
 - `scripts/install.sh` Codex CLI Serena registration used a fragile `grep -q "serena"` idempotency check that false-matched on any line containing the substring "serena" — including vestigial orphan arrays from bad pastes. This caused the installer to log "already configured" and silently skip writing the real `[mcp_servers.serena]` block. Changed to `grep -Eq '^\[mcp_servers\.serena\]'` so the check requires the anchored TOML table header. Two new regression tests in `tests/install.bats` cover both the bug (stray substring present -> must still register) and the correct no-op behavior (real header present -> no duplicate block).
+
+## [1.7.5] — 2026-04-25
+
+### Added
+- **Budget Discovery Hubs**: New logic to automatically discover .token-budget files across all your projects without a slow full-disk scan. Uses a hybrid of RTK history, local siblings, and explicit "Project Hubs".
+- \`token-diet budget hubs <list|add <path>>\`: New CLI command to manage your project scan roots.
+- \`scripts/install.sh\`: Added an interactive prompt during installation to seed your first Project Hubs.
+- **Gemini CLI Support**: Added \`rtk init -g --gemini\` support to register TILTH/SERENA and install the RTK \`beforeTool\` hook in \`~/.gemini/settings.json\`.
+
+### Fixed
+- Dashboard: \`_registered_hosts\` now walks up the directory tree to find \`.vscode/mcp.json\`, ensuring VS Code registration is detected even when started from a subfolder.
+- Dashboard: Support for the \`"servers"\` key in MCP JSON configurations (common in VS Code settings).
+- Dashboard: Visual highlight (ACTIVE badge + green border) for the specific budget file currently being enforced for your workspace.
+- Dashboard: Improved path visibility to distinguish between global, group, and project-specific budgets.

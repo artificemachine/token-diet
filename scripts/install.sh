@@ -1316,7 +1316,45 @@ main() {
   # Install token-diet dashboard command
   install_token_diet
 
+  setup_project_hubs
+
   verify_stack
+}
+
+# --- Discovery Configuration --------------------------------------------------
+setup_project_hubs() {
+  # Skip in CI or if already configured
+  [ -t 0 ] || return 0
+  local cfg_dir="${HOME}/.config/token-diet"
+  local cfg_file="${cfg_dir}/config.json"
+  if [ -f "$cfg_file" ]; then return 0; fi
+
+  header "Discovery Configuration"
+  echo "token-diet can automatically find all your project budgets."
+  echo "Where do you usually keep your project folders?"
+  echo -e "${DIM}(Example: ~/Projects, ~/Code)${NC}"
+  echo ""
+  
+  local user_hubs
+  printf "  Enter path(s) [leave blank to skip]: "
+  read -r user_hubs || true
+  
+  if [ -n "$user_hubs" ]; then
+    mkdir -p "$cfg_dir"
+    python3 - "$cfg_file" "$user_hubs" << 'PY'
+import json, sys, pathlib
+path = pathlib.Path(sys.argv[1])
+raw = sys.argv[2].replace(",", " ").split()
+hubs = [h.strip() for h in raw if h.strip()]
+home = str(pathlib.Path.home())
+hubs = [h.replace(home, "~") for h in hubs]
+with open(path, "w") as f:
+    json.dump({"project_hubs": hubs}, f, indent=2)
+PY
+    ok "Saved project hubs to $cfg_file"
+  else
+    info "Skipped hub configuration. You can add them later via: token-diet budget hubs add <path>"
+  fi
 }
 
 main "$@"

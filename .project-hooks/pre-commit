@@ -47,4 +47,28 @@ if command -v pwsh &>/dev/null && pwsh -NoProfile -Command "Get-Module -ListAvai
   fi
 fi
 
+# Documentation Sync Check
+# Ensure all primary subcommands are mentioned in README.md
+echo "token-diet: verifying documentation sync..."
+# Extract command names from help output
+COMMANDS=$(bash "$REPO_ROOT/scripts/token-diet" --help | sed -n '/COMMANDS/,/TOOLS/p' | grep '^  [a-z]' | awk '{print $1}')
+MISSING=()
+for CMD in $COMMANDS; do
+  # Skip internal/redundant/low-level commands to avoid noise
+  if [[ "$CMD" =~ ^(gain|service|upstream|version|update|serena-gc|strip)$ ]]; then continue; fi
+  
+  # Look for "token-diet <cmd>" in any code context or bold text
+  if ! grep -qiE "(\`token-diet $CMD|token-diet $CMD\`|\*\*token-diet $CMD\*\*)" "$REPO_ROOT/README.md"; then
+    MISSING+=("$CMD")
+  fi
+done
+
+if [ ${#MISSING[@]} -ne 0 ]; then
+  echo -e "\033[0;31m[BLOCKED] Documentation out of sync!\033[0m"
+  echo "The following subcommands are in code but not documented in README.md:"
+  for M in "${MISSING[@]}"; do echo "  - $M"; done
+  echo -e "\nUpdate README.md before committing."
+  exit 1
+fi
+
 echo "token-diet: pre-commit checks passed."

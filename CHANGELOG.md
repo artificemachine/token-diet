@@ -574,3 +574,4 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Dashboard: Simplifed Serena card by removing redundant Mode/Status lines and fixing version detection.
 - Dashboard: Dynamic versioning now correctly pulls from the \`token-diet\` binary.
 - 2026-04-25: v1.7.7 — fix pre-commit doc-sync regex; add 11 missing subcommands to README quick-reference table
+- 2026-04-27: fix(doctor): fallback MCP registration checks when tilth doctor is unavailable; replace deprecated serena --headless flags with --open-web-dashboard false in installers

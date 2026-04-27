@@ -629,18 +629,18 @@ install_serena() {
     if [ "${DRY_RUN:-false}" = "true" ]; then
       $LOCAL_MODE \
         && dryrun "claude mcp add --scope user serena -- docker run ... token-diet/serena:latest --context=claude-code" \
-        || dryrun "claude mcp add --scope user serena -- uvx --from git+${SERENA_REPO} serena start-mcp-server --context=claude-code --headless --project-from-cwd"
+        || dryrun "claude mcp add --scope user serena -- uvx --from git+${SERENA_REPO} serena start-mcp-server --context=claude-code --open-web-dashboard false --project-from-cwd"
     elif $LOCAL_MODE; then
       claude mcp add --scope user serena -- \
         docker run --rm -i -v "\$(pwd):/workspace:ro" --network none \
-        token-diet/serena:latest --context=claude-code --headless --project /workspace \
+        token-diet/serena:latest --context=claude-code --open-web-dashboard false --project /workspace \
         2>/dev/null \
         && ok "Serena MCP: Claude Code (Docker)" \
         || warn "Serena MCP: Claude Code setup failed (may already exist)"
     else
       claude mcp add --scope user serena -- \
         uvx --from "git+${SERENA_REPO}" serena start-mcp-server \
-        --context=claude-code --headless --project-from-cwd \
+        --context=claude-code --open-web-dashboard false --project-from-cwd \
         2>/dev/null \
         && ok "Serena MCP: Claude Code" \
         || warn "Serena MCP: Claude Code setup failed (may already exist)"
@@ -666,7 +666,7 @@ install_serena() {
 # Serena MCP server (added by token-diet, Docker mode)
 [mcp_servers.serena]
 command = "docker"
-args = ["run", "--rm", "-i", "-v", ".:/workspace:ro", "--network", "none", "token-diet/serena:latest", "--context=codex", "--headless", "--project", "/workspace"]
+args = ["run", "--rm", "-i", "-v", ".:/workspace:ro", "--network", "none", "token-diet/serena:latest", "--context=codex", "--open-web-dashboard", "false", "--project", "/workspace"]
 TOML
         else
           cat >> "$codex_config" << TOML
@@ -674,7 +674,7 @@ TOML
 # Serena MCP server (added by token-diet)
 [mcp_servers.serena]
 command = "uvx"
-args = ["--from", "git+${SERENA_REPO}", "serena", "start-mcp-server", "--context=codex", "--headless", "--project-from-cwd"]
+args = ["--from", "git+${SERENA_REPO}", "serena", "start-mcp-server", "--context=codex", "--open-web-dashboard", "false", "--project-from-cwd"]
 TOML
         fi
         ok "Serena MCP: Codex CLI"
@@ -694,7 +694,7 @@ TOML
   "servers": {
     "serena": {
       "command": "uvx",
-      "args": ["--from", "git+https://github.com/celstnblacc/serena", "serena", "start-mcp-server", "--context=ide", "--headless", "--project-from-cwd"]
+      "args": ["--from", "git+https://github.com/celstnblacc/serena", "serena", "start-mcp-server", "--context=ide", "--open-web-dashboard", "false", "--project-from-cwd"]
     },
     "tilth": {
       "command": "tilth",
@@ -731,7 +731,7 @@ data["mcpServers"]["serena"] = {
     "command": "docker",
     "args": ["run","--rm","-i","-v","$(pwd):/workspace:ro",
              "--network","none","token-diet/serena:latest",
-             "--context=ide","--headless","--project","/workspace"]
+             "--context=ide","--open-web-dashboard", "false","--project","/workspace"]
 }
 with open(cfg, "w") as f:
     json.dump(data, f, indent=2)
@@ -755,7 +755,7 @@ data.setdefault("mcpServers", {})
 data["mcpServers"]["serena"] = {
     "command": "uvx",
     "args": ["--from", "git+" + repo, "serena", "start-mcp-server",
-             "--context=ide", "--headless", "--project-from-cwd"]
+             "--context=ide", "--open-web-dashboard", "false", "--project-from-cwd"]
 }
 with open(cfg, "w") as f:
     json.dump(data, f, indent=2)
@@ -792,7 +792,7 @@ data["mcpServers"]["serena"] = {
     "command": "docker",
     "args": ["run", "--rm", "-i", "-v", "$(pwd):/workspace:ro",
              "--network", "none", "token-diet/serena:latest",
-             "--context=claude-code", "--headless", "--project", "/workspace"]
+             "--context=claude-code", "--open-web-dashboard", "false", "--project", "/workspace"]
 }
 with open(cfg, "w") as f:
     json.dump(data, f, indent=2)
@@ -815,7 +815,7 @@ data.setdefault("mcpServers", {})
 data["mcpServers"]["serena"] = {
     "command": "uvx",
     "args": ["--from", "git+" + repo, "serena", "start-mcp-server",
-             "--context=claude-code", "--headless", "--project-from-cwd"]
+             "--context=claude-code", "--open-web-dashboard", "false", "--project-from-cwd"]
 }
 with open(cfg, "w") as f:
     json.dump(data, f, indent=2)

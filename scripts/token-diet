@@ -2028,6 +2028,68 @@ cmd_doctor() {
   $json_mode || { echo ""; echo -e "${BOLD}MCP registrations${NC}"; \
                   echo -e "${DIM}$(printf '%.0s─' {1..50})${NC}"; }
 
+  local cc_cfg="$HOME/.claude/settings.json"
+  local cc_global="$HOME/.claude.json"
+  local cd_mac="$HOME/Library/Application Support/Claude/claude_desktop_config.json"
+  local cd_linux="$HOME/.config/Claude/claude_desktop_config.json"
+  local oc_cfg="$HOME/.opencode.json"
+  local -a tilth_registered_hosts=() serena_registered_hosts=()
+
+  _doctor_check_mcp_json() {
+    local tool="$1" host_label="$2" cfg="$3" hosts_var="$4"
+    [ -f "$cfg" ] || return 0  # host not installed — skip silently
+
+    local registered
+    registered=$(python3 - "$cfg" "$tool" << 'PY'
+import json, sys
+try:
+    d = json.load(open(sys.argv[1]))
+    servers = d.get("mcpServers", {})
+    key = next((k for k in servers if sys.argv[2].lower() in k.lower()), None)
+    if key is None:
+        sys.exit(1)
+    v = servers[key]
+    cmd = v.get("command", "")
+    args = v.get("args", [])
+    print(cmd + (" " + " ".join(str(a) for a in args) if args else ""))
+except Exception:
+    sys.exit(1)
+PY
+    2>/dev/null)
+
+    if [ -n "$registered" ]; then
+      eval "${hosts_var}+=(\"$host_label\")"
+      local first_word; first_word=$(echo "$registered" | awk '{print $1}')
+      if mcp_command_exists "$first_word"; then
+        $json_mode || ok "  ${host_label}   registered   ${DIM}${registered}${NC}"
+      else
+        $json_mode || warn "  ${host_label}   registered but command missing: ${first_word}"
+        _issue "${tool} ${host_label}: registered but '${first_word}' not in PATH"
+      fi
+    else
+      $json_mode || miss "  ${host_label}   not registered  →  run: bash install.sh"
+      _issue "${tool} ${host_label}: not registered"
+    fi
+  }
+
+  _doctor_check_mcp_codex() {
+    local tool="$1" hosts_var="$2"
+    [ -f "$HOME/.codex/config.toml" ] || return 0
+    local codex_cmd; codex_cmd=$(codex_mcp_command "$tool" 2>/dev/null || echo "")
+    if [ -n "$codex_cmd" ]; then
+      eval "${hosts_var}+=(\"codex\")"
+      if mcp_command_exists "$codex_cmd"; then
+        $json_mode || ok "  codex       registered   ${DIM}${codex_cmd}${NC}"
+      else
+        $json_mode || warn "  codex       registered but command missing: ${codex_cmd}"
+        _issue "${tool} codex: registered but '${codex_cmd}' not in PATH"
+      fi
+    else
+      $json_mode || miss "  codex       not registered  →  run: bash install.sh"
+      _issue "${tool} codex: not registered"
+    fi
+  }
+
   # tilth: delegate to `tilth doctor` which covers all 22 hosts
   local tilth_doctor_json=""
   if $tilth_ok; then
@@ -2066,82 +2128,31 @@ except Exception as e:
         _issue "tilth: not registered in any MCP host (run: tilth install <host>)"
       fi
     else
-      # tilth doctor returned nothing (old binary without doctor subcommand) — soft skip
-      $json_mode || dim "  tilth   (doctor subcommand not available — upgrade tilth to v0.6.0+)"
+      # Fallback for older tilth versions without `doctor --json`.
+      $json_mode || dim "  tilth   (doctor subcommand not available — using direct MCP config checks)"
+      if ! $json_mode; then
+        echo -e "  ${BOLD}tilth${NC}"
+      fi
+      _doctor_check_mcp_json "tilth" "claude-code"    "$cc_cfg"    "tilth_registered_hosts"
+      _doctor_check_mcp_json "tilth" "claude-code"    "$cc_global" "tilth_registered_hosts"
+      _doctor_check_mcp_json "tilth" "claude-desktop" "$cd_mac"    "tilth_registered_hosts"
+      _doctor_check_mcp_json "tilth" "claude-desktop" "$cd_linux"  "tilth_registered_hosts"
+      _doctor_check_mcp_json "tilth" "opencode"       "$oc_cfg"    "tilth_registered_hosts"
+      _doctor_check_mcp_codex "tilth" "tilth_registered_hosts"
+      $json_mode || echo ""
     fi
   else
     $json_mode || dim "  tilth   (skipped — binary not installed)"
   fi
 
   # serena: manual check for the four common hosts
-  _doctor_check_mcp_json() {
-    local tool="$1" host_label="$2" cfg="$3"
-    [ -f "$cfg" ] || return 0  # host not installed — skip silently
-
-    local registered
-    registered=$(python3 - "$cfg" "$tool" << 'PY'
-import json, sys
-try:
-    d = json.load(open(sys.argv[1]))
-    servers = d.get("mcpServers", {})
-    key = next((k for k in servers if sys.argv[2].lower() in k.lower()), None)
-    if key is None:
-        sys.exit(1)
-    v = servers[key]
-    cmd = v.get("command", "")
-    args = v.get("args", [])
-    print(cmd + (" " + " ".join(str(a) for a in args) if args else ""))
-except Exception:
-    sys.exit(1)
-PY
-    2>/dev/null)
-
-    if [ -n "$registered" ]; then
-      serena_registered_hosts+=("$host_label")
-      local first_word; first_word=$(echo "$registered" | awk '{print $1}')
-      if mcp_command_exists "$first_word"; then
-        $json_mode || ok "  ${host_label}   registered   ${DIM}${registered}${NC}"
-      else
-        $json_mode || warn "  ${host_label}   registered but command missing: ${first_word}"
-        _issue "${tool} ${host_label}: registered but '${first_word}' not in PATH"
-      fi
-    else
-      $json_mode || miss "  ${host_label}   not registered  →  run: bash install.sh"
-      _issue "${tool} ${host_label}: not registered"
-    fi
-  }
-
-  _doctor_check_mcp_codex() {
-    local tool="$1"
-    [ -f "$HOME/.codex/config.toml" ] || return 0
-    local codex_cmd; codex_cmd=$(codex_mcp_command "$tool" 2>/dev/null || echo "")
-    if [ -n "$codex_cmd" ]; then
-      serena_registered_hosts+=("codex")
-      if mcp_command_exists "$codex_cmd"; then
-        $json_mode || ok "  codex       registered   ${DIM}${codex_cmd}${NC}"
-      else
-        $json_mode || warn "  codex       registered but command missing: ${codex_cmd}"
-        _issue "${tool} codex: registered but '${codex_cmd}' not in PATH"
-      fi
-    else
-      $json_mode || miss "  codex       not registered  →  run: bash install.sh"
-      _issue "${tool} codex: not registered"
-    fi
-  }
-
-  local cc_cfg="$HOME/.claude/settings.json"
-  local cc_global="$HOME/.claude.json"
-  local cd_mac="$HOME/Library/Application Support/Claude/claude_desktop_config.json"
-  local cd_linux="$HOME/.config/Claude/claude_desktop_config.json"
-  local oc_cfg="$HOME/.opencode.json"
-
   $json_mode || echo -e "  ${BOLD}serena${NC}"
-  _doctor_check_mcp_json "serena" "claude-code"    "$cc_cfg"
-  _doctor_check_mcp_json "serena" "claude-code"    "$cc_global"
-  _doctor_check_mcp_json "serena" "claude-desktop" "$cd_mac"
-  _doctor_check_mcp_json "serena" "claude-desktop" "$cd_linux"
-  _doctor_check_mcp_json "serena" "opencode"       "$oc_cfg"
-  _doctor_check_mcp_codex "serena"
+  _doctor_check_mcp_json "serena" "claude-code"    "$cc_cfg"    "serena_registered_hosts"
+  _doctor_check_mcp_json "serena" "claude-code"    "$cc_global" "serena_registered_hosts"
+  _doctor_check_mcp_json "serena" "claude-desktop" "$cd_mac"    "serena_registered_hosts"
+  _doctor_check_mcp_json "serena" "claude-desktop" "$cd_linux"  "serena_registered_hosts"
+  _doctor_check_mcp_json "serena" "opencode"       "$oc_cfg"    "serena_registered_hosts"
+  _doctor_check_mcp_codex "serena" "serena_registered_hosts"
   $json_mode || echo ""
 
   # ── 4. Summary ──────────────────────────────────────────────────────────────

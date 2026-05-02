@@ -4,6 +4,13 @@ All notable changes to token-diet will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [1.7.8] — 2026-05-02
+
+### Fixed
+- Dashboard: Added `--no-open` / `--no-browser` to skip automatic browser launch.
+- Dashboard services: macOS launchd, Linux systemd, and Windows Task Scheduler now disable browser auto-open by default.
+- Windows budget: `token-diet budget status` now resolves the global budget path through the cross-platform home helper instead of `$env:USERPROFILE`, fixing null-path failures in PowerShell-on-macOS test environments.
+
 ## [1.7.1] — 2026-04-22
 
 ### Fixed

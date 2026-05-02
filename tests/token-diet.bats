@@ -12,6 +12,7 @@ load test_helper
   [ "$status" -eq 0 ]
   [[ "$output" == *"USAGE"* ]]
   [[ "$output" == *"COMMANDS"* ]]
+  [[ "$output" == *"--no-open"* ]]
 }
 
 @test "token-diet help (subcommand) exits 0" {

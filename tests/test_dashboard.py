@@ -43,6 +43,22 @@ def test_rtk_stats_returns_none_when_data_missing(dashboard_mod):
     """rtk_stats() returns None when data is None."""
     assert dashboard_mod.rtk_stats(None) is None
 
+def test_should_open_browser_defaults_true(dashboard_mod, monkeypatch):
+    """should_open_browser() defaults to enabled when unset."""
+    monkeypatch.delenv("TOKEN_DIET_DASHBOARD_OPEN_BROWSER", raising=False)
+    assert dashboard_mod.should_open_browser() is True
+
+@pytest.mark.parametrize("value", ["0", "false", "no", "off", "FALSE"])
+def test_should_open_browser_honors_disable_flag(dashboard_mod, monkeypatch, value):
+    """should_open_browser() disables browser opening for explicit false-like values."""
+    monkeypatch.setenv("TOKEN_DIET_DASHBOARD_OPEN_BROWSER", value)
+    assert dashboard_mod.should_open_browser() is False
+
+def test_should_open_browser_honors_no_open_flag(dashboard_mod, monkeypatch):
+    """should_open_browser() disables browser opening when --no-open is present."""
+    monkeypatch.delenv("TOKEN_DIET_DASHBOARD_OPEN_BROWSER", raising=False)
+    assert dashboard_mod.should_open_browser(["--no-open"]) is False
+
 def test_registered_hosts_detection(dashboard_mod, tmp_path):
     """_registered_hosts() finds tools in various host config files."""
     home = tmp_path / "home"
@@ -94,4 +110,3 @@ def test_projection_stats(dashboard_mod):
     res = dashboard_mod.projection_stats(fake_data)
     # average saved is 1500. weekly = 1500 * 7 = 10500.
     assert res["weekly_projection"] == 10500
-

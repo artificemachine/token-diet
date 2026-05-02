@@ -22,7 +22,7 @@ if ($args -and $args.Count -gt 0) { $SubArgs += $args }
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-$script:TD_VERSION = '1.7.7'
+$script:TD_VERSION = '1.7.8'
 if ($Version) { Write-Output "token-diet $script:TD_VERSION"; exit 0 }
 $ScriptDir = $PSScriptRoot
 
@@ -385,7 +385,7 @@ function Invoke-SerenaStatus {
 
 function Invoke-Dashboard([string[]]$Remaining) {
     if ($Remaining -contains '--help' -or $Remaining -contains '-h' -or $Remaining -contains 'help') {
-        Write-Output 'Usage: token-diet.ps1 dashboard [--port N]'
+        Write-Output 'Usage: token-diet.ps1 dashboard [--no-open]'
         return
     }
     $dashBin = Join-Path $ScriptDir 'token-diet-dashboard'
@@ -413,7 +413,7 @@ function Invoke-Service([string[]]$Remaining) {
             New-Item -ItemType Directory -Force -Path $logDir | Out-Null
             # Remove stale task if present
             schtasks /Delete /TN $taskName /F 2>$null | Out-Null
-            $action  = "cmd /c `"$py `"$dashBin`" >> `"$logFile`" 2>&1`""
+            $action  = "powershell -NoProfile -ExecutionPolicy Bypass -Command `"& { `$env:TOKEN_DIET_DASHBOARD_OPEN_BROWSER = '0'; & '$py' '$dashBin' 2>&1 | Out-File -Append -FilePath '$logFile' }`""
             $trigger = 'ONLOGON'
             schtasks /Create /TN $taskName /TR $action /SC $trigger /RL HIGHEST /F | Out-Null
             schtasks /Run /TN $taskName | Out-Null
@@ -517,7 +517,7 @@ function Invoke-Budget([string[]]$Remaining) {
     switch ($subcmd) {
         'init' {
             $isGlobal = $Remaining -contains '--global'
-            $target   = if ($isGlobal) { Join-Path $env:USERPROFILE '.token-budget' } else { Join-Path (Get-Location) '.token-budget' }
+            $target   = if ($isGlobal) { Join-Path (Get-UserHome) '.token-budget' } else { Join-Path (Get-Location) '.token-budget' }
             if (Test-Path $target) { Write-Output "  .token-budget already exists at $target"; return }
             $baseline = 0L
             $s = Get-RtkSummary; if ($s) { $baseline = [long]$s.total_input }
@@ -538,7 +538,8 @@ function Invoke-Budget([string[]]$Remaining) {
             }
         }
         'status' {
-            $globalBudget = Join-Path $env:USERPROFILE '.token-budget'
+            $userHome = Get-UserHome
+            $globalBudget = Join-Path $userHome '.token-budget'
             $rtkSummary   = Get-RtkSummary
             if (-not (Test-Path $globalBudget)) {
                 $bl = if ($rtkSummary) { [long]$rtkSummary.total_input } else { 0L }
@@ -547,7 +548,7 @@ function Invoke-Budget([string[]]$Remaining) {
             }
             # Walk up from cwd to find project override
             $budgetFile = $null
-            $dir = (Get-Location).Path; $homeDir = $env:USERPROFILE
+            $dir = (Get-Location).Path; $homeDir = $userHome
             while ($dir -and $dir.StartsWith($homeDir, [StringComparison]::OrdinalIgnoreCase)) {
                 $c = Join-Path $dir '.token-budget'
                 if (Test-Path $c) { $budgetFile = $c; break }
@@ -1006,7 +1007,7 @@ COMMANDS
   strip [--stats] <file>  Strip comments from source file to reduce tokens
   diff-reads <file>       Suggest line ranges to read based on recent git diff
   serena-status           Show Serena runtime details (mode/image/container/uvx)
-  dashboard               Open live browser dashboard  [--port N]
+  dashboard               Open live browser dashboard  [--no-open]
   service <sub>           Always-on dashboard daemon  (install|uninstall|start|stop|status)
   clean                   Archive RTK history + carry totals forward (frees disk, keeps stats)
   version                 Show installed versions of all three tools

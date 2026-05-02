@@ -12,7 +12,7 @@
 
 set -euo pipefail
 
-readonly TD_VERSION="1.7.7"
+readonly TD_VERSION="1.7.8"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # --- Colors -------------------------------------------------------------------
@@ -774,6 +774,8 @@ cmd_service() {
         <string>${PATH}</string>
         <key>HOME</key>
         <string>${HOME}</string>
+        <key>TOKEN_DIET_DASHBOARD_OPEN_BROWSER</key>
+        <string>0</string>
     </dict>
     <key>RunAtLoad</key>
     <true/>
@@ -838,6 +840,7 @@ After=network.target
 
 [Service]
 ExecStart=${py_bin} ${dashboard_bin}
+Environment=TOKEN_DIET_DASHBOARD_OPEN_BROWSER=0
 Restart=always
 RestartSec=5
 StandardOutput=append:${log_file}
@@ -2226,7 +2229,7 @@ COMMANDS
   strip [--stats] <file>  Strip comments from source file to reduce tokens
   diff-reads <file> Suggest line ranges to read based on recent git diff
   serena-gc         Detect and kill orphaned Serena/LSP processes  [--force]
-  dashboard         Open live browser dashboard  [--port N]
+  dashboard         Open live browser dashboard  [--no-open]
   service <sub>     Manage always-on dashboard daemon  (install|uninstall|start|stop|status)
   version           Show installed versions of all three tools
   update            Update tools  [--fresh] [installer flags]

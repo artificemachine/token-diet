@@ -67,6 +67,7 @@ Describe 'token-diet.ps1 — dispatch' {
         $out | Should -Match 'strip'
         $out | Should -Match 'diff-reads'
         $out | Should -Match 'dashboard'
+        $out | Should -Match '--no-open'
         $out | Should -Match 'version'
         $out | Should -Match 'doctor'
         $out | Should -Match 'hook'

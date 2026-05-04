@@ -589,3 +589,4 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Dashboard: Dynamic versioning now correctly pulls from the \`token-diet\` binary.
 - 2026-04-25: v1.7.7 — fix pre-commit doc-sync regex; add 11 missing subcommands to README quick-reference table
 - 2026-04-27: fix(doctor): fallback MCP registration checks when tilth doctor is unavailable; replace deprecated serena --headless flags with --open-web-dashboard false in installers
+- 2026-05-04: v1.7.10 — fix(install): use correct OpenCode XDG path (~/.config/opencode/opencode.json), lowercase mcp key, and {type, command[], enabled} entry shape; also register tilth and detect Windows venv binary path

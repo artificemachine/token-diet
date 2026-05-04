@@ -709,14 +709,25 @@ JSON
   fi
 
   # OpenCode
+  # Config file location: $HOME/.config/opencode/opencode.json (XDG standard).
+  # The legacy path $HOME/.opencode.json is checked as a fallback.
+  # OpenCode uses lowercase "mcp" key with objects that have "type", "command" array, and "enabled".
   if $HAS_OPENCODE; then
-    local oc_cfg="$HOME/.opencode.json"
+    local oc_cfg
+    if [ -f "$HOME/.config/opencode/opencode.json" ]; then
+      oc_cfg="$HOME/.config/opencode/opencode.json"
+    elif [ -f "$HOME/.opencode.json" ]; then
+      oc_cfg="$HOME/.opencode.json"
+    else
+      mkdir -p "$HOME/.config/opencode"
+      oc_cfg="$HOME/.config/opencode/opencode.json"
+    fi
     if [ "${DRY_RUN:-false}" = "true" ]; then
-      dryrun "Write mcpServers.serena entry to $oc_cfg"
+      dryrun "Write mcp.serena + mcp.tilth entries to $oc_cfg"
     elif $LOCAL_MODE; then
-      python3 - "$oc_cfg" <<'PYEOF'
-import json, sys, shutil
-cfg = sys.argv[1]
+      python3 - "$oc_cfg" "$PROJECT_ROOT" <<'PYEOF'
+import json, sys, shutil, os
+cfg, project_root = sys.argv[1], sys.argv[2]
 try:
     with open(cfg) as f: data = json.load(f)
 except FileNotFoundError:
@@ -726,18 +737,20 @@ except (json.JSONDecodeError, ValueError):
     shutil.copy2(cfg, backup)
     print(f"[token-diet] WARNING: malformed JSON in {cfg} — backed up to {backup}, starting fresh", file=sys.stderr)
     data = {}
-data.setdefault("mcpServers", {})
-data["mcpServers"]["serena"] = {
-    "command": "docker",
-    "args": ["run","--rm","-i","-v","$(pwd):/workspace:ro",
-             "--network","none","token-diet/serena:latest",
-             "--context=ide","--open-web-dashboard", "false","--project","/workspace"]
-}
+data.setdefault("mcp", {})
+serena_exe = os.path.join(project_root, "forks", "serena", ".venv", "Scripts", "serena-mcp-server.exe")
+if not os.path.exists(serena_exe):
+    serena_exe = os.path.join(project_root, "forks", "serena", ".venv", "bin", "serena-mcp-server")
+tilth_exe = os.path.join(project_root, "forks", "tilth", "target", "release", "tilth.exe")
+if not os.path.exists(tilth_exe):
+    tilth_exe = os.path.join(project_root, "forks", "tilth", "target", "release", "tilth")
+data["mcp"]["serena"] = {"type": "local", "command": [serena_exe], "enabled": True}
+data["mcp"]["tilth"]  = {"type": "local", "command": [tilth_exe, "mcp"], "enabled": True}
 with open(cfg, "w") as f:
     json.dump(data, f, indent=2)
     f.write("\n")
 PYEOF
-      ok "Serena MCP: OpenCode (Docker, $oc_cfg)"
+      ok "Serena + tilth MCP: OpenCode local ($oc_cfg)"
     else
       python3 - "$oc_cfg" "${SERENA_REPO}" <<'PYEOF'
 import json, sys, shutil
@@ -751,17 +764,23 @@ except (json.JSONDecodeError, ValueError):
     shutil.copy2(cfg, backup)
     print(f"[token-diet] WARNING: malformed JSON in {cfg} — backed up to {backup}, starting fresh", file=sys.stderr)
     data = {}
-data.setdefault("mcpServers", {})
-data["mcpServers"]["serena"] = {
-    "command": "uvx",
-    "args": ["--from", "git+" + repo, "serena", "start-mcp-server",
-             "--context=ide", "--open-web-dashboard", "false", "--project-from-cwd"]
+data.setdefault("mcp", {})
+data["mcp"]["serena"] = {
+    "type": "local",
+    "command": ["uvx", "--from", "git+" + repo, "serena", "start-mcp-server",
+                "--context=ide", "--open-web-dashboard", "false", "--project-from-cwd"],
+    "enabled": True
+}
+data["mcp"]["tilth"] = {
+    "type": "local",
+    "command": ["tilth", "mcp"],
+    "enabled": True
 }
 with open(cfg, "w") as f:
     json.dump(data, f, indent=2)
     f.write("\n")
 PYEOF
-      ok "Serena MCP: OpenCode ($oc_cfg)"
+      ok "Serena + tilth MCP: OpenCode ($oc_cfg)"
     fi
     inject_opencode_rules
   fi
@@ -1032,7 +1051,7 @@ if cfg.exists():
 PYEOF
     fi
 
-    for cfg in "$HOME/.claude/settings.json" "$HOME/Library/Application Support/Claude/claude_desktop_config.json" "$HOME/.config/Claude/claude_desktop_config.json" "$HOME/.opencode.json" "$COWORK_CFG"; do
+    for cfg in "$HOME/.claude/settings.json" "$HOME/Library/Application Support/Claude/claude_desktop_config.json" "$HOME/.config/Claude/claude_desktop_config.json" "$HOME/.config/opencode/opencode.json" "$HOME/.opencode.json" "$COWORK_CFG"; do
       if [ -f "$cfg" ]; then
         python3 - "$cfg" << 'PYEOF'
 import json, sys

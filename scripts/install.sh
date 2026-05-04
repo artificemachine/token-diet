@@ -630,20 +630,22 @@ install_serena() {
       $LOCAL_MODE \
         && dryrun "claude mcp add --scope user serena -- docker run ... token-diet/serena:latest --context=claude-code" \
         || dryrun "claude mcp add --scope user serena -- uvx --from git+${SERENA_REPO} serena start-mcp-server --context=claude-code --open-web-dashboard false --project-from-cwd"
+    elif claude mcp get serena &>/dev/null; then
+      ok "Serena MCP: Claude Code (already configured)"
     elif $LOCAL_MODE; then
       claude mcp add --scope user serena -- \
         docker run --rm -i -v "\$(pwd):/workspace:ro" --network none \
         token-diet/serena:latest --context=claude-code --open-web-dashboard false --project /workspace \
         2>/dev/null \
         && ok "Serena MCP: Claude Code (Docker)" \
-        || warn "Serena MCP: Claude Code setup failed (may already exist)"
+        || warn "Serena MCP: Claude Code setup failed"
     else
       claude mcp add --scope user serena -- \
         uvx --from "git+${SERENA_REPO}" serena start-mcp-server \
         --context=claude-code --open-web-dashboard false --project-from-cwd \
         2>/dev/null \
         && ok "Serena MCP: Claude Code" \
-        || warn "Serena MCP: Claude Code setup failed (may already exist)"
+        || warn "Serena MCP: Claude Code setup failed"
     fi
   fi
 

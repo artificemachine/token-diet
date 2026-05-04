@@ -219,19 +219,19 @@ PY
   python3 - "$TMP_HOME/.opencode.json" << 'PY'
 import json, sys
 d = json.load(open(sys.argv[1]))
-servers = d.get("mcpServers", {})
+servers = d.get("mcp", {})
 count = sum(1 for k in servers if "serena" in k.lower())
 assert count == 1, f"Expected 1 serena entry, got {count}: {list(servers.keys())}"
 PY
 }
 
-@test "install: --serena-only preserves unrelated mcpServers entries in opencode config" {
+@test "install: --serena-only preserves unrelated mcp entries in opencode config" {
   mock_install_prereqs
   mock_cmd opencode
   python3 -c "
 import json
 with open('$TMP_HOME/.opencode.json', 'w') as f:
-    json.dump({'mcpServers': {'other-tool': {'command': 'other'}}}, f)
+    json.dump({'mcp': {'other-tool': {'type': 'local', 'command': ['other'], 'enabled': True}}}, f)
     f.write('\n')
 "
 
@@ -241,7 +241,7 @@ with open('$TMP_HOME/.opencode.json', 'w') as f:
   python3 - "$TMP_HOME/.opencode.json" << 'PY'
 import json, sys
 d = json.load(open(sys.argv[1]))
-servers = d.get("mcpServers", {})
+servers = d.get("mcp", {})
 assert "other-tool" in servers, f"Unrelated entry was removed: {list(servers.keys())}"
 assert "serena" in servers, f"Serena entry missing: {list(servers.keys())}"
 PY
@@ -264,7 +264,7 @@ PY
   python3 - "$TMP_HOME/.opencode.json" << 'PY'
 import json, sys
 d = json.load(open(sys.argv[1]))
-servers = d.get("mcpServers", {})
+servers = d.get("mcp", {})
 assert "serena" in servers, f"serena missing after malformed-JSON recovery: {list(servers.keys())}"
 PY
 }

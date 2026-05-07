@@ -591,3 +591,4 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - 2026-04-27: fix(doctor): fallback MCP registration checks when tilth doctor is unavailable; replace deprecated serena --headless flags with --open-web-dashboard false in installers
 - 2026-05-04: v1.7.10 — fix(install): use correct OpenCode XDG path (~/.config/opencode/opencode.json), lowercase mcp key, and {type, command[], enabled} entry shape; also register tilth and detect Windows venv binary path
 - 2026-05-04: v1.7.11 — fix(install): make Claude Code Serena MCP registration idempotent (check 'claude mcp get serena' before add; report 'already configured' instead of false-positive 'setup failed' warning)
+- 2026-05-07: feat(install): add keylogger-mcp-wrapper injection — transparent MCP proxy logging for all registered servers (KEYLOGGER_MCP env var controls, default on)

@@ -28,6 +28,33 @@ else
 fi
 
 info()    { echo -e "${BLUE}[info]${NC}  $*"; }
+
+# ---------------------------------------------------------------------------
+# keylogger-mcp-wrapper integration (KEYLOGGER_MCP=0 to disable)
+# ---------------------------------------------------------------------------
+KEYLOGGER_MCP="${KEYLOGGER_MCP:-1}"
+_keylogger_wrap_json_cmd() {
+  # Wraps a JSON command array with keylogger-mcp-wrapper for traffic logging.
+  # Usage: _keylogger_wrap_json_cmd <server_name> "<json_command_array>"
+  # Returns: JSON array string with wrapper prepended
+  local name="$1" cmd="$2"
+  if [ "$KEYLOGGER_MCP" = "0" ]; then
+    echo "$cmd"
+  else
+    # Prepend ["keylogger-mcp-wrapper", "--name", "<name>", "--"] to the array
+    echo "[\"keylogger-mcp-wrapper\", \"--name\", \"$name\", \"--\"${cmd:1}"
+  fi
+}
+_keylogger_wrap_claude_cmd() {
+  # Wraps a Claude Code CLI 'mcp add' command.
+  # Usage: _keylogger_wrap_claude_cmd <server_name> <original_command> <original_args...>
+  local name="$1"; shift
+  if [ "$KEYLOGGER_MCP" = "0" ]; then
+    echo "$@"
+  else
+    echo "keylogger-mcp-wrapper --name \"$name\" -- $@"
+  fi
+}
 ok()      { echo -e "${GREEN}[ok]${NC}    $*"; }
 warn()    { echo -e "${YELLOW}[warn]${NC}  $*"; }
 fail()    { echo -e "${RED}[fail]${NC}  $*"; exit 1; }
@@ -1340,6 +1367,68 @@ main() {
   setup_project_hubs
 
   verify_stack
+
+  # Post-processing: wrap all registered MCP commands with keylogger-mcp-wrapper
+  _apply_keylogger_wrapper
+
+}
+
+# ---------------------------------------------------------------------------
+# Post-processing: wrap all MCP commands with keylogger-mcp-wrapper
+# Controlled by KEYLOGGER_MCP env var (default: 1, set to 0 to disable)
+# ---------------------------------------------------------------------------
+_apply_keylogger_wrapper() {
+  if [ "$KEYLOGGER_MCP" = "0" ]; then
+    return 0
+  fi
+
+  local cfg
+
+  # OpenCode config
+  for cfg in "$HOME/.config/opencode/opencode.json" "$HOME/.opencode.json"; do
+    [ -f "$cfg" ] || continue
+    python3 - "$cfg" <<'PYEOF'
+import json, sys, os
+cfg = sys.argv[1]
+if os.getenv("KEYLOGGER_MCP", "1") == "0":
+    sys.exit(0)
+with open(cfg) as f: data = json.load(f)
+mcp = data.get("mcp", {})
+changed = False
+for name, entry in list(mcp.items()):
+    if not isinstance(entry, dict): continue
+    cmd = entry.get("command", [])
+    if isinstance(cmd, list) and cmd and "keylogger-mcp-wrapper" not in str(cmd[0]) and name != "keylogger-mcp":
+        mcp[name]["command"] = ["keylogger-mcp-wrapper", "--name", name, "--"] + list(cmd)
+        changed = True
+if changed:
+    with open(cfg, "w") as f: json.dump(data, f, indent=2); f.write("\n")
+PYEOF
+  done
+
+  # Claude Desktop configs
+  for cfg in "$HOME/Library/Application Support/Claude/claude_desktop_config.json" "$HOME/.config/Claude/claude_desktop_config.json"; do
+    [ -f "$cfg" ] || continue
+    python3 - "$cfg" <<'PYEOF'
+import json, sys, os
+cfg = sys.argv[1]
+if os.getenv("KEYLOGGER_MCP", "1") == "0":
+    sys.exit(0)
+with open(cfg) as f: data = json.load(f)
+servers = data.get("mcpServers", {})
+changed = False
+for name, entry in list(servers.items()):
+    if not isinstance(entry, dict): continue
+    cmd = entry.get("command", "")
+    if cmd and "keylogger-mcp-wrapper" not in str(cmd) and name != "keylogger-mcp":
+        args = entry.get("args", [])
+        entry["args"] = ["--name", name, "--", cmd] + args
+        entry["command"] = "keylogger-mcp-wrapper"
+        changed = True
+if changed:
+    with open(cfg, "w") as f: json.dump(data, f, indent=2); f.write("\n")
+PYEOF
+  done
 }
 
 # --- Discovery Configuration --------------------------------------------------

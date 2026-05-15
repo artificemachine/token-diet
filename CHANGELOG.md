@@ -4,9 +4,10 @@ All notable changes to token-diet will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
-## [1.7.9] — 2026-05-02
+## [1.7.9] — 2026-05-14
 
 ### Fixed
+- Dashboard: "Top days by tokens saved" now ranks by savings efficiency % (min 10 commands) instead of absolute saved tokens. This prevents single outlier days from permanently dominating the list and ensures recent active days are always represented fairly.
 - Dashboard: Added `--no-open` / `--no-browser` to skip automatic browser launch.
 - Dashboard services: macOS launchd, Linux systemd, and Windows Task Scheduler now disable browser auto-open by default.
 - Windows budget: `token-diet budget status` now resolves the global budget path through the cross-platform home helper instead of `$env:USERPROFILE`, fixing null-path failures in PowerShell-on-macOS test environments.

@@ -347,7 +347,10 @@ def collect():
         },
         "tilth": tilth_stats(),
         "serena": serena_stats(),
-        "breakdown": {"top_days": sorted(combined_daily, key=lambda x: x.get("saved_tokens", 0), reverse=True)[:5]},
+        "breakdown": {"top_days": sorted(
+            [x for x in combined_daily if x.get("commands", 0) >= 10],
+            key=lambda x: x.get("savings_pct", 0), reverse=True
+        )[:5]},
         "budget": budget,
         "budgets": all_budget_files(total_input, active_file),
         "projection": projection_stats({"daily": combined_daily}),
@@ -562,7 +565,7 @@ function render(d){
   }
 
   // Breakdown card (top days by tokens saved)
-  cards+='<div class=card><h2 data-tip="Top days ranked by RTK tokens saved. Each bar in the RTK card represents one day. Green = 80%+ efficiency, yellow = 60\u201380%, red = below 60%.">Top days by tokens saved</h2>';
+  cards+='<div class=card><h2 data-tip="Top days ranked by RTK savings efficiency % (min 10 commands). Filters out low-volume days. Green = 80%+ efficiency, yellow = 60\u201380%, red = below 60%.">Top days by efficiency <small style=\\"font-weight:normal;font-size:0.75em;opacity:0.6\\">(savings %)</small></h2>';
   if(d.breakdown&&d.breakdown.top_days&&d.breakdown.top_days.length){
     cards+='<table class=cmd-table><tr><th>Date</th><th>Saved</th><th>Eff</th><th>Cmds</th></tr>';
     d.breakdown.top_days.slice(0,5).forEach(day=>{

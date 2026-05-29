@@ -144,19 +144,41 @@ hosts_registered() {
     "$HOME/.claude/settings.json"
     "$HOME/Library/Application Support/Claude/claude_desktop_config.json"
     "$HOME/.config/Claude/claude_desktop_config.json"
-    "$HOME/.opencode.json"
   )
+  _tool_in_cfg() {
+    python3 - "$1" "$2" << 'PY' 2>/dev/null
+import json, sys
+d = json.load(open(sys.argv[1]))
+# A config may have both "mcpServers" and "mcp" keys (e.g. opencode). Merge both.
+servers = {**d.get('mcpServers', {}), **d.get('mcp', {})}
+sys.exit(0 if any(sys.argv[2] in k.lower() for k in servers.keys()) else 1)
+PY
+  }
   for cfg in "${configs[@]}"; do
     [ -f "$cfg" ] || continue
-    if python3 -c "import json,sys; d=json.load(open('$cfg')); exit(0 if any('$tool' in k.lower() for k in d.get('mcpServers',{}).keys()) else 1)" 2>/dev/null; then
-      case "$cfg" in
-        *"Application Support"*) found+=("claude-desktop") ;;
-        *".claude.json"*)        found+=("claude-code") ;;
-        *settings.json*)         found+=("claude-code") ;;
-        *opencode*)              found+=("opencode") ;;
-      esac
-    fi
+    _tool_in_cfg "$cfg" "$tool" || continue
+    case "$cfg" in
+      *"Application Support"*) found+=("claude-desktop") ;;
+      *".claude.json"*)        found+=("claude-code") ;;
+      *settings.json*)         found+=("claude-code") ;;
+      *opencode*)              found+=("opencode") ;;
+    esac
   done
+
+  # OpenCode: check both legacy (~/.opencode.json) and XDG path together.
+  # Either file registering the tool counts as "opencode" registered.
+  # (Already handled above via the configs array; dedup if both matched.)
+  # Remove duplicate "opencode" entries from found.
+  local deduped=()
+  local seen_opencode=false
+  for h in "${found[@]}"; do
+    if [ "$h" = "opencode" ]; then
+      $seen_opencode && continue
+      seen_opencode=true
+    fi
+    deduped+=("$h")
+  done
+  found=("${deduped[@]}")
   # Codex
   codex_mcp_command "$tool" >/dev/null 2>&1 && found+=("codex")
   # VS Code
@@ -2066,7 +2088,9 @@ cmd_doctor() {
   local cc_global="$HOME/.claude.json"
   local cd_mac="$HOME/Library/Application Support/Claude/claude_desktop_config.json"
   local cd_linux="$HOME/.config/Claude/claude_desktop_config.json"
+  # OpenCode: prefer XDG path if it exists, fall back to legacy.
   local oc_cfg="$HOME/.opencode.json"
+  [ -f "$HOME/.config/opencode/opencode.json" ] && oc_cfg="$HOME/.config/opencode/opencode.json"
   local -a tilth_registered_hosts=() serena_registered_hosts=() icm_registered_hosts=()
 
   _doctor_check_mcp_json() {
@@ -2078,12 +2102,15 @@ cmd_doctor() {
 import json, sys
 try:
     d = json.load(open(sys.argv[1]))
-    servers = d.get("mcpServers", {})
+    # Merge mcpServers and mcp keys (opencode uses "mcp"; others use "mcpServers")
+    servers = {**d.get("mcpServers", {}), **d.get("mcp", {})}
     key = next((k for k in servers if sys.argv[2].lower() in k.lower()), None)
     if key is None:
         sys.exit(1)
     v = servers[key]
     cmd = v.get("command", "")
+    # opencode "command" may be a list
+    if isinstance(cmd, list): cmd = " ".join(cmd)
     args = v.get("args", [])
     print(cmd + (" " + " ".join(str(a) for a in args) if args else ""))
 except Exception:

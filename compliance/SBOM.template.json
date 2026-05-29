@@ -49,6 +49,17 @@
       "externalReferences": [
         { "type": "vcs", "url": "https://github.com/oraios/serena" }
       ]
+    },
+    {
+      "type": "application",
+      "name": "icm",
+      "version": "0.10.50",
+      "purl": "pkg:cargo/icm@0.10.50",
+      "description": "Infinite Context Memory — cross-tool persistent-memory MCP server",
+      "licenses": [{ "license": { "id": "Apache-2.0" } }],
+      "externalReferences": [
+        { "type": "vcs", "url": "https://github.com/rtk-ai/icm" }
+      ]
     }
   ]
 }

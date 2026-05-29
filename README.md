@@ -74,6 +74,7 @@ token-diet dashboard # Open the live browser stats
 | `token-diet explain` | **Inspect**: Break down costs for a specific command. |
 | `token-diet loops` | **Safety**: Detect and flag agent loop patterns. |
 | `token-diet route` | **Advisory**: Suggest which tool fits a specific task. |
+| `token-diet icm warmup` | **Memory**: One-time embedding-model download (~270 MB) to enable ICM cross-tool semantic recall; runs offline after. `token-diet icm status` shows state. |
 | `token-diet leaks` | **Audit**: Detect redundant file reads in history. |
 | `token-diet test-first` | **Strategy**: Suggest test files to read before implementation. |
 | `token-diet diff-reads` | **Context**: Suggest minimal line ranges to read based on git diff. |

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# token-diet installer — RTK + tilth + Serena on macOS/Linux
+# token-diet installer — RTK + tilth + Serena + ICM on macOS/Linux
 # Supports: Claude Code, Codex CLI, OpenCode, Copilot CLI, VS Code
 # Modes: --online (default, installs from fork repos) or --local (builds from forks/ submodules, no internet)
 #
@@ -18,6 +18,7 @@ PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 RTK_REPO="https://github.com/celstnblacc/rtk"
 TILTH_REPO="https://github.com/celstnblacc/tilth"
 SERENA_REPO="https://github.com/celstnblacc/serena"
+ICM_REPO="https://github.com/celstnblacc/icm"
 
 # Colors
 if [ -t 1 ]; then
@@ -190,7 +191,7 @@ ensure_git() {
 
   # Initialize submodules so forks/ is populated for --local builds
   if [ -f "$PROJECT_ROOT/.gitmodules" ]; then
-    info "Initializing submodules (forks/rtk, forks/tilth, forks/serena)..."
+    info "Initializing submodules (forks/rtk, forks/tilth, forks/serena, forks/icm)..."
     git -C "$PROJECT_ROOT" submodule update --init --recursive 2>&1 \
       | grep -E "Cloning|already|error" || true
     ok "Submodules ready"
@@ -884,6 +885,224 @@ PYEOF
   fi
 }
 
+# --- ICM ----------------------------------------------------------------------
+# ICM (Infinite Context Memory) — cross-tool persistent memory MCP server.
+# Build/install mirrors RTK (cargo + ~/.local/bin symlink for the macOS SIGKILL
+# issue). MCP registration mirrors Serena (self-written config entries). We never
+# call `icm init`: it bakes absolute current_exe() paths into ~20 host configs and
+# would violate the install-decoupling rule. We register the bare-PATH command
+# `icm serve --compact` ourselves instead.
+#
+# Embeddings policy (the air-gap decision):
+#   --local → keyword-only build (--no-default-features --features tui): fastembed
+#             is never compiled, so the binary physically cannot fetch a model.
+#   online  → embeddings compiled but DISABLED in config (embeddings.enabled=false)
+#             so nothing is fetched silently. `token-diet icm warmup` performs the
+#             one-time ~270 MB model download with consent; ICM then runs offline.
+install_icm() {
+  header "ICM (Infinite Context Memory)"
+
+  if check_command icm; then
+    ok "ICM already installed: $(icm --version 2>/dev/null || echo 'unknown')"
+    info "Upgrading..."
+  fi
+
+  if $LOCAL_MODE; then
+    verify_local_build "ICM" "$PROJECT_ROOT/forks/icm/crates/icm-cli/Cargo.toml"
+    if [ "${DRY_RUN:-false}" = "true" ]; then
+      dryrun "cargo install --path $PROJECT_ROOT/forks/icm/crates/icm-cli --no-default-features --features tui --force"
+    else
+      info "Building ICM from fork (keyword-only, air-gapped, no internet)..."
+      cargo install --path "$PROJECT_ROOT/forks/icm/crates/icm-cli" --no-default-features --features tui --force 2>&1 | show_output
+      ok "ICM built and installed from fork (keyword-only memory)"
+    fi
+  else
+    if [ "${DRY_RUN:-false}" = "true" ]; then
+      dryrun "cargo install --git $ICM_REPO icm-cli --force"
+    else
+      cargo install --git "$ICM_REPO" icm-cli --force 2>&1 | show_output
+      ok "ICM installed: $(icm --version 2>/dev/null)"
+    fi
+  fi
+
+  # Symlink cargo binary into ~/.local/bin — same macOS SIGKILL reason as RTK.
+  local cargo_icm="$HOME/.cargo/bin/icm"
+  local local_icm="$HOME/.local/bin/icm"
+  if [ -f "$cargo_icm" ] && [ "${DRY_RUN:-false}" != "true" ]; then
+    mkdir -p "$HOME/.local/bin"
+    ln -sf "$cargo_icm" "$local_icm"
+    ok "ICM symlinked: $local_icm → $cargo_icm"
+  fi
+
+  # Verify
+  if [ "${DRY_RUN:-false}" != "true" ]; then
+    if icm --version &>/dev/null; then
+      ok "ICM verification passed"
+    else
+      warn "ICM verification failed"
+      return
+    fi
+  fi
+
+  # Embeddings policy: the online build ships embeddings compiled but OFF by default
+  # (config default is enabled=true upstream) so nothing is fetched behind the
+  # firewall. `token-diet icm warmup` turns it on. Air-gapped builds have no
+  # embedding code at all, so this is a harmless no-op there.
+  if ! $LOCAL_MODE; then
+    local icm_cfg="$HOME/.config/icm/config.toml"
+    if [ "${DRY_RUN:-false}" = "true" ]; then
+      dryrun "Set [embeddings] enabled=false in $icm_cfg (warmup enables it)"
+    else
+      mkdir -p "$(dirname "$icm_cfg")"
+      python3 - "$icm_cfg" <<'PYEOF'
+import sys, re, pathlib
+p = pathlib.Path(sys.argv[1])
+text = p.read_text() if p.exists() else ""
+# Set enabled=false strictly inside the [embeddings] table — the config has many
+# other `enabled` keys (extraction, recall, cloud, ...) we must not touch.
+m = re.search(r'(?ms)^\[embeddings\][^\n]*\n(.*?)(?=^\[|\Z)', text)
+if m:
+    body = m.group(1)
+    if re.search(r'(?m)^\s*enabled\s*=', body):
+        body = re.sub(r'(?m)^(\s*enabled\s*=\s*).*$', r'\g<1>false', body, count=1)
+    else:
+        body = "enabled = false\n" + body
+    text = text[:m.start(1)] + body + text[m.end(1):]
+else:
+    prefix = text.rstrip() + "\n\n" if text.strip() else ""
+    text = prefix + "[embeddings]\nenabled = false\n"
+p.write_text(text)
+PYEOF
+      ok "ICM semantic search is OFF until warmup ($icm_cfg)"
+      info "  Enable cross-tool semantic recall (one-time ~270 MB model download):"
+      info "    token-diet icm warmup"
+    fi
+  fi
+
+  # --- MCP registration (self-written, NEVER 'icm init') ----------------------
+  # Always the bare-PATH command 'icm serve --compact' — no repo path, no docker,
+  # no uvx. Identical for local and online installs (icm is on PATH either way).
+  info "Registering ICM MCP server for detected hosts..."
+
+  # Claude Code
+  if $HAS_CLAUDE; then
+    if [ "${DRY_RUN:-false}" = "true" ]; then
+      dryrun "claude mcp add --scope user icm -- icm serve --compact"
+    elif claude mcp get icm &>/dev/null; then
+      ok "ICM MCP: Claude Code (already configured)"
+    else
+      claude mcp add --scope user icm -- icm serve --compact 2>/dev/null \
+        && ok "ICM MCP: Claude Code" \
+        || warn "ICM MCP: Claude Code setup failed"
+    fi
+  fi
+
+  # Codex CLI — anchor to the actual TOML table header, never a loose substring.
+  if $HAS_CODEX; then
+    local codex_config="$HOME/.codex/config.toml"
+    if [ -f "$codex_config" ] && grep -Eq '^\[mcp_servers\.icm\]' "$codex_config" 2>/dev/null; then
+      ok "ICM MCP: Codex CLI (already configured)"
+    elif [ "${DRY_RUN:-false}" = "true" ]; then
+      dryrun "Append [mcp_servers.icm] block to $codex_config"
+    else
+      mkdir -p "$HOME/.codex"
+      cat >> "$codex_config" << 'TOML'
+
+# ICM MCP server (added by token-diet)
+[mcp_servers.icm]
+command = "icm"
+args = ["serve", "--compact"]
+TOML
+      ok "ICM MCP: Codex CLI"
+    fi
+  fi
+
+  # VS Code — merge into the shared template (servers.icm). A merge (not a heredoc)
+  # so --icm-only populates it even when Serena did not rewrite the template.
+  if $HAS_VSCODE; then
+    local vscode_template="$HOME/.config/token-diet/vscode-mcp.template.json"
+    if [ "${DRY_RUN:-false}" = "true" ]; then
+      dryrun "Merge servers.icm into $vscode_template"
+    else
+      mkdir -p "$(dirname "$vscode_template")"
+      python3 - "$vscode_template" <<'PYEOF'
+import json, sys, pathlib
+p = pathlib.Path(sys.argv[1])
+try:
+    data = json.loads(p.read_text())
+except (FileNotFoundError, json.JSONDecodeError, ValueError):
+    data = {}
+data.setdefault("servers", {})
+data["servers"]["icm"] = {"command": "icm", "args": ["serve", "--compact"]}
+p.write_text(json.dumps(data, indent=2) + "\n")
+PYEOF
+      ok "ICM MCP: VS Code template ($vscode_template)"
+    fi
+  fi
+
+  # OpenCode — bare-PATH command (NOT a forks/ path; icm is always on PATH).
+  if $HAS_OPENCODE; then
+    local oc_cfg
+    if [ -f "$HOME/.config/opencode/opencode.json" ]; then
+      oc_cfg="$HOME/.config/opencode/opencode.json"
+    elif [ -f "$HOME/.opencode.json" ]; then
+      oc_cfg="$HOME/.opencode.json"
+    else
+      mkdir -p "$HOME/.config/opencode"
+      oc_cfg="$HOME/.config/opencode/opencode.json"
+    fi
+    if [ "${DRY_RUN:-false}" = "true" ]; then
+      dryrun "Write mcp.icm to $oc_cfg"
+    else
+      python3 - "$oc_cfg" <<'PYEOF'
+import json, sys, shutil
+cfg = sys.argv[1]
+try:
+    with open(cfg) as f: data = json.load(f)
+except FileNotFoundError:
+    data = {}
+except (json.JSONDecodeError, ValueError):
+    shutil.copy2(cfg, cfg + ".bak")
+    print(f"[token-diet] WARNING: malformed JSON in {cfg} — backed up to {cfg}.bak, starting fresh", file=sys.stderr)
+    data = {}
+data.setdefault("mcp", {})
+data["mcp"]["icm"] = {"type": "local", "command": ["icm", "serve", "--compact"], "enabled": True}
+with open(cfg, "w") as f:
+    json.dump(data, f, indent=2); f.write("\n")
+PYEOF
+      ok "ICM MCP: OpenCode ($oc_cfg)"
+    fi
+  fi
+
+  # Cowork (Claude Desktop)
+  if $HAS_COWORK; then
+    if [ "${DRY_RUN:-false}" = "true" ]; then
+      dryrun "Write mcpServers.icm to $COWORK_CFG"
+    else
+      python3 - "$COWORK_CFG" <<'PYEOF'
+import json, sys, shutil
+cfg = sys.argv[1]
+try:
+    with open(cfg) as f: data = json.load(f)
+except FileNotFoundError:
+    data = {}
+except (json.JSONDecodeError, ValueError):
+    shutil.copy2(cfg, cfg + ".bak")
+    data = {}
+data.setdefault("mcpServers", {})
+data["mcpServers"]["icm"] = {"command": "icm", "args": ["serve", "--compact"]}
+with open(cfg, "w") as f:
+    json.dump(data, f, indent=2); f.write("\n")
+PYEOF
+      ok "ICM MCP: Cowork / Claude Desktop ($COWORK_CFG)"
+    fi
+  fi
+
+  if $HAS_COPILOT; then
+    ok "ICM: Copilot CLI uses VS Code MCP config (shared)"
+  fi
+}
+
 # --- Overlap fix --------------------------------------------------------------
 configure_dedup() {
   header "Overlap fix (Serena dedup)"
@@ -947,6 +1166,19 @@ verify_stack() {
     all_ok=false
   fi
 
+  if check_command icm; then
+    ok "ICM ............. $(icm --version 2>/dev/null || echo 'installed')"
+    local icm_codex_issue
+    icm_codex_issue="$(codex_mcp_issue "icm")"
+    if [ -n "$icm_codex_issue" ]; then
+      warn "$icm_codex_issue"
+      all_ok=false
+    fi
+  else
+    warn "ICM ............. not installed"
+    all_ok=false
+  fi
+
   if $LOCAL_MODE; then
     if docker image inspect token-diet/serena:latest &>/dev/null; then
       ok "Serena .......... Docker image loaded"
@@ -995,14 +1227,14 @@ verify_stack() {
   |  Claude Code / Codex / OpenCode / Copilot CLI / VS Code          |
   |                     + Cowork (Claude Desktop)                     |
   +-------------------------------------------------------------------+
-           |                |                |
-      Code reading     Refactoring     Command output
-           |                |                |
-      +--------+      +---------+      +--------+
-      | tilth  |      | Serena  |      |  RTK   |
-      | (fast) |      |  (deep) |      | (filter)|
-      +--------+      +---------+      +--------+
-      tree-sitter        LSP           regex/truncate
+         |              |              |               |
+    Code reading   Refactoring   Command output   Persistent memory
+         |              |              |               |
+    +--------+    +---------+    +--------+      +--------+
+    | tilth  |    | Serena  |    |  RTK   |      |  ICM   |
+    | (fast) |    |  (deep) |    |(filter)|      |(memory)|
+    +--------+    +---------+    +--------+      +--------+
+    tree-sitter      LSP        regex/trunc      vec+FTS5
 
 EOF
 }
@@ -1093,7 +1325,7 @@ PYEOF
     cat > "$tkd_doc_file" << 'TKDDOC'
 # Token Diet — AI Context Optimization
 
-`token-diet` is a unified optimization layer for AI agents. It orchestrates RTK, tilth, and Serena to maximize context efficiency.
+`token-diet` is a unified optimization layer for AI agents. It orchestrates RTK, tilth, Serena, and ICM to maximize context efficiency.
 
 ## Core Commands
 
@@ -1112,6 +1344,7 @@ PYEOF
    - Use **tilth** for code reading and symbol search.
    - Use **Serena** for complex refactoring and diagnostics.
    - Use **RTK** for running commands and builds.
+   - Use **ICM** for persistent cross-session memory: recall past decisions and store new facts.
 3. **Be Precise**: Use `tilth_read` with line ranges (found via `token-diet diff-reads`) to minimize context waste.
 4. **Optimization**: If you detect you are looping or wasting tokens, run `token-diet loops` or `token-diet leaks` to self-audit.
 TKDDOC
@@ -1152,6 +1385,7 @@ Tools:
   RTK      CLI output compression (60-90% token savings)
   tilth    Smart code reading via tree-sitter AST
   Serena   IDE-like symbol navigation via LSP
+  ICM      Persistent cross-tool memory (MCP server)
 
 Hosts (auto-detected):
   Claude Code, Codex CLI, OpenCode, Copilot CLI, VS Code, Cowork (Claude Desktop)
@@ -1162,6 +1396,7 @@ Options:
   --rtk-only     Install only RTK
   --tilth-only   Install only tilth
   --serena-only  Install only Serena
+  --icm-only     Install only ICM
   --verify       Only verify current installation
   --no-dedup     Skip overlap fix configuration
   --skip-tests   Skip clippy + tests in --local mode (faster install)
@@ -1179,26 +1414,43 @@ EOF
 run_wizard() {
   echo ""
   echo -e "${BOLD}  token-diet interactive installer${NC}"
-  echo -e "${BLUE}  RTK + tilth + Serena — security-patched forks${NC}"
+  echo -e "${BLUE}  RTK + tilth + Serena + ICM — security-patched forks${NC}"
   echo ""
-  echo "  Tools:"
-  echo "    RTK    — CLI output compression (60-90% token savings)"
-  echo "    tilth  — smart code reading via tree-sitter AST"
-  echo "    Serena — IDE-like symbol navigation via LSP"
+  echo "  The stack — each tool is independent; install any subset:"
+  echo ""
+  echo -e "  ${BOLD}RTK${NC}     command output compression"
+  echo    "          What: a CLI proxy that filters verbose command output."
+  echo    "          Why:  long build / test / git output floods the context window."
+  echo    "          Gain: 60-90% fewer tokens on tracked commands (measured)."
+  echo -e "  ${BOLD}tilth${NC}   AST-aware code reading"
+  echo    "          What: tree-sitter reader returning symbols/structure, not whole files."
+  echo    "          Why:  reading entire files to find one function wastes context."
+  echo    "          Gain: ~38-44% smaller reads on average."
+  echo -e "  ${BOLD}Serena${NC}  LSP symbol navigation"
+  echo    "          What: language-server rename / find-references / diagnostics."
+  echo    "          Why:  precise refactors without re-reading files."
+  echo    "          Gain: fewer wrong edits and fewer prompt turns on multi-file work."
+  echo -e "  ${BOLD}ICM${NC}     persistent cross-tool memory"
+  echo    "          What: a memory MCP server shared across Claude, Codex, Gemini, OpenCode."
+  echo    "          Why:  recall past decisions and facts instead of re-explaining each session."
+  echo    "          Gain: cross-session, cross-tool continuity — recall replaces re-reading."
   echo ""
 
   local answer
-  read -rp "  Install all three tools? [Y/n] " answer
+  read -rp "  Install the full stack (all 4)? [Y/n]  (n = choose individually) " answer
   if [[ "$answer" =~ ^[Nn] ]]; then
-    local r t s
-    read -rp "    Install RTK?    [Y/n] " r
-    read -rp "    Install tilth?  [Y/n] " t
-    read -rp "    Install Serena? [Y/n] " s
+    echo ""
+    local r t s i
+    read -rp "    + RTK    — output compression, 60-90% fewer tokens?     [Y/n] " r
+    read -rp "    + tilth  — AST code reading, ~40% smaller reads?         [Y/n] " t
+    read -rp "    + Serena — rename / find-refs / diagnostics (LSP)?       [Y/n] " s
+    read -rp "    + ICM    — cross-tool memory, recall not re-explain?     [Y/n] " i
     [[ ! "$r" =~ ^[Nn] ]] && WIZ_RTK=true    || WIZ_RTK=false
     [[ ! "$t" =~ ^[Nn] ]] && WIZ_TILTH=true  || WIZ_TILTH=false
     [[ ! "$s" =~ ^[Nn] ]] && WIZ_SERENA=true || WIZ_SERENA=false
+    [[ ! "$i" =~ ^[Nn] ]] && WIZ_ICM=true    || WIZ_ICM=false
   else
-    WIZ_RTK=true; WIZ_TILTH=true; WIZ_SERENA=true
+    WIZ_RTK=true; WIZ_TILTH=true; WIZ_SERENA=true; WIZ_ICM=true
   fi
 
   WIZ_DEDUP=false
@@ -1224,6 +1476,7 @@ run_wizard() {
   $WIZ_RTK    && echo -e "  ${GREEN}+ RTK${NC}"
   $WIZ_TILTH  && echo -e "  ${GREEN}+ tilth${NC}"
   $WIZ_SERENA && echo -e "  ${GREEN}+ Serena${NC}"
+  $WIZ_ICM    && echo -e "  ${GREEN}+ ICM${NC}"
   $WIZ_DEDUP  && echo -e "  ${GREEN}+ Overlap fix${NC}"
   $WIZ_LOCAL  && echo -e "  ${YELLOW}  Mode: LOCAL (air-gapped)${NC}"
   echo ""
@@ -1238,7 +1491,7 @@ run_wizard() {
 
 # --- Main ---------------------------------------------------------------------
 main() {
-  local do_rtk=false do_tilth=false do_serena=false
+  local do_rtk=false do_tilth=false do_serena=false do_icm=false
   local do_dedup=true verify_only=false has_args=false
   LOCAL_MODE=false
   SKIP_TESTS=false
@@ -1257,6 +1510,7 @@ main() {
       --rtk-only)     has_args=true; do_rtk=true ;;
       --tilth-only)   has_args=true; do_tilth=true ;;
       --serena-only)  has_args=true; do_serena=true ;;
+      --icm-only)     has_args=true; do_icm=true ;;
       --verify)       has_args=true; verify_only=true ;;
       --local)        LOCAL_MODE=true ;;
       --no-dedup)     do_dedup=false ;;
@@ -1276,7 +1530,7 @@ main() {
   fi
 
   echo -e "\n${BOLD}=== token-diet ===${NC}"
-  echo -e "${BOLD}    RTK + tilth + Serena${NC}"
+  echo -e "${BOLD}    RTK + tilth + Serena + ICM${NC}"
   echo ""
   if [ "${DRY_RUN:-false}" = "true" ]; then
     echo -e "${MAGENTA}    *** DRY-RUN MODE — no changes will be made ***${NC}\n"
@@ -1297,16 +1551,16 @@ main() {
   if $has_args; then
     any_arg=true
     # If user provided ONLY a modifier (like --local) but NO tool flags, we default to ALL tools.
-    if ! $do_rtk && ! $do_tilth && ! $do_serena; then
-      do_rtk=true; do_tilth=true; do_serena=true
+    if ! $do_rtk && ! $do_tilth && ! $do_serena && ! $do_icm; then
+      do_rtk=true; do_tilth=true; do_serena=true; do_icm=true
     fi
   elif $LOCAL_MODE || $SKIP_TESTS || $DRY_RUN || $VERBOSE || [ -n "${HOSTS_FILTER:-}" ] || ! $do_dedup; then
     any_arg=true
-    do_rtk=true; do_tilth=true; do_serena=true
+    do_rtk=true; do_tilth=true; do_serena=true; do_icm=true
   fi
   if ! $any_arg; then
     run_wizard
-    do_rtk=$WIZ_RTK; do_tilth=$WIZ_TILTH; do_serena=$WIZ_SERENA
+    do_rtk=$WIZ_RTK; do_tilth=$WIZ_TILTH; do_serena=$WIZ_SERENA; do_icm=$WIZ_ICM
     do_dedup=$WIZ_DEDUP; LOCAL_MODE=$WIZ_LOCAL; SKIP_TESTS=$WIZ_SKIP_TESTS
   fi
 
@@ -1316,7 +1570,7 @@ main() {
   header "Prerequisites"
   ensure_git
   if ! $LOCAL_MODE; then ensure_curl; fi
-  if $do_rtk || $do_tilth; then ensure_rust; fi
+  if $do_rtk || $do_tilth || $do_icm; then ensure_rust; fi
   if $do_serena && ! $LOCAL_MODE; then ensure_uv; fi
   if $do_serena && $LOCAL_MODE; then ensure_docker; fi
 
@@ -1329,6 +1583,7 @@ main() {
   $do_rtk    && install_rtk
   $do_tilth  && install_tilth
   $do_serena && install_serena
+  $do_icm    && install_icm
 
   # Overlap fix
   if $do_dedup && $do_tilth && $do_serena; then

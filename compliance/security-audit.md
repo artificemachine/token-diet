@@ -45,12 +45,25 @@ Pre-deployment security review for the RTK + tilth + Serena stack.
 | Docker non-root | Verify Dockerfile runs as non-root user | ✅ `RUN useradd -m serena && USER serena` |
 | Docker no network | Verify compose.yml has `network_mode: none` | ✅ `network_mode: none` confirmed |
 
+### ICM
+
+| Check | Command | Pass? |
+|---|---|---|
+| License (Apache-2.0) | Verify `forks/icm/LICENSE` and NOTICE preserved | ✅ Apache-2.0; attribution carried in `compliance/LICENSE-THIRD-PARTY.md` |
+| IPC/stdio surface review | Review `icm serve --compact` (the MCP entry point) | ⚠️ `icm serve` exposes a stdio MCP/IPC surface — it speaks JSON-RPC over stdin/stdout to the host. Not a listening network socket, but it is the trust boundary: any host that registers icm can read/write the persistent memory store |
+| Network isolation (build-dependent) | Compare `--local` vs online/default build features | ⚠️ Clean **only** for `--local` builds: `cargo install --no-default-features --features tui` never compiles `fastembed`, so the binary physically cannot fetch a model. The online/default build compiles embeddings and `token-diet icm warmup` downloads ~270 MB (intfloat/multilingual-e5-base) from Hugging Face Hub on first run. Online installs write `[embeddings] enabled=false` into the ICM config file to suppress the download until warmup is run intentionally |
+| No `icm init` at install | Verify installer never runs `icm init` | ✅ token-diet writes MCP host entries itself; `icm init` is never invoked (it would bake absolute `current_exe()` paths into ~20 host configs — an install-decoupling violation) |
+| Bare-path MCP invocation | Verify MCP entries use `command "icm"` (no repo/forks path) | ✅ All host registrations use bare `icm serve --compact`; no `forks/` path embedded |
+| Memory store data leakage | Review the persistent memory store for cross-project leakage | ⬜ Not verified in this pass |
+| All tests pass | `cargo test --manifest-path forks/icm/Cargo.toml` | ⬜ Not run (requires full build) |
+
 ## Supply Chain
 
 | Check | Status |
 |---|---|
 | Forks on internal Git server (no GitHub dependency) | ⬜ Submodule URLs still point to github.com/celstnblacc — update for air-gapped deploy |
 | Submodule URLs point to internal server | ⬜ Same as above |
+| ICM fork on internal Git server | ⬜ `forks/icm` submodule URL still points to github.com/celstnblacc/icm (pinned tag icm-v0.10.50) — needs internal mirror for air-gapped deploy |
 | Cargo.lock committed (pinned Rust deps) | ✅ Both `forks/rtk/Cargo.lock` and `forks/tilth/Cargo.lock` committed |
 | Python deps pinned in requirements.txt | ✅ `forks/serena/uv.lock` committed |
 | Docker image built from pinned base (python:3.12-slim) | ⬜ Not verified in this pass |
@@ -64,6 +77,7 @@ Pre-deployment security review for the RTK + tilth + Serena stack.
 | RTK: no outbound connections | ✅ No network crates in source; outbound telemetry stripped |
 | tilth: no outbound connections | ✅ No network crates found in source |
 | Serena Docker: `network_mode: none` | ✅ Confirmed in compose.yml |
+| ICM: no outbound connections (`--local` build) | ✅ `--no-default-features --features tui` omits `fastembed`; binary cannot fetch a model. ⚠️ Online/default build downloads ~270 MB from HF Hub on `token-diet icm warmup` — disabled by default via `[embeddings] enabled=false` in the ICM config file |
 | LSP servers pre-installed (no auto-download) | ⬜ Requires smoke-test of Docker image |
 | No `uvx` at runtime (Docker-based) | ⬜ Not verified in this pass |
 
@@ -91,3 +105,4 @@ Pre-deployment security review for the RTK + tilth + Serena stack.
 | Date | Auditor | Scope | Notes |
 |---|---|---|---|
 | 2026-04-01 | Claude Code (automated) | cargo audit, pip-audit, grep checks, Docker config | Initial automated pass — critical checks green; manual items marked ⬜ for next pass |
+| 2026-05-29 | Claude Code (automated) | ICM onboarding as 4th tool — license, IPC/stdio surface, embeddings air-gap policy, supply chain | Added `### ICM` section; `--local` build is honest air-gap (no fastembed), online build fetches ~270 MB on warmup (disabled by default); submodule URL still on github.com/celstnblacc/icm — needs internal mirror |

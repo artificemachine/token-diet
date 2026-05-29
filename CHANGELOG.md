@@ -614,3 +614,4 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - 2026-05-29: fix(token-diet): replace undefined info() calls in cmd_icm warmup with echo — info is an install.sh helper not available in the CLI script
 - 2026-05-29: fix(token-diet): hosts_registered now checks ~/.claude.json (where claude mcp add --scope user writes) in addition to ~/.claude/settings.json — claude-code host was not showing in icm status/mcp list
 - 2026-05-29: fix(token-diet): hosts_registered and cmd_doctor now detect tools in ~/.config/opencode/opencode.json (XDG path) and handle configs with both mcpServers and mcp keys — opencode was showing serena but not icm/tilth because the XDG config was missed and the mcp key was shadowed by mcpServers
+- 2026-05-29: chore(release): bump to v1.10.1 — patch fixes: warmup info() crash, hosts_registered missing ~/.claude.json and opencode XDG path, mixed mcpServers/mcp key handling

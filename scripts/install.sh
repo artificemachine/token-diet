@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # token-diet installer — RTK + tilth + Serena + ICM on macOS/Linux
-# Supports: Claude Code, Codex CLI, OpenCode, Copilot CLI, VS Code
+# Supports: Claude Code, Codex CLI, OpenCode, Copilot CLI, VS Code, Gemini CLI
 # Modes: --online (default, installs from fork repos) or --local (builds from forks/ submodules, no internet)
 #
 # Usage:
@@ -244,7 +244,7 @@ ensure_docker() {
 }
 
 # --- Host detection -----------------------------------------------------------
-HAS_CLAUDE=false; HAS_CODEX=false; HAS_OPENCODE=false; HAS_COPILOT=false; HAS_VSCODE=false; HAS_COWORK=false
+HAS_CLAUDE=false; HAS_CODEX=false; HAS_OPENCODE=false; HAS_COPILOT=false; HAS_VSCODE=false; HAS_COWORK=false; HAS_GEMINI=false
 HOSTS_FILTER=""   # set by --hosts flag; empty = prompt when multiple detected
 
 resolve_cowork_cfg() {
@@ -278,6 +278,7 @@ detect_hosts() {
   check_command code       && HAS_VSCODE=true
   # Cowork (Claude Desktop): check for config file or desktop app
   { [ -f "$COWORK_CFG" ] || check_command claude-desktop; } && HAS_COWORK=true
+  check_command gemini && HAS_GEMINI=true
 
   if $HAS_CLAUDE;   then ok "Claude Code ..... found"; else warn "Claude Code ..... not found"; fi
   if $HAS_CODEX;    then ok "Codex CLI ....... found"; else warn "Codex CLI ....... not found"; fi
@@ -285,8 +286,9 @@ detect_hosts() {
   if $HAS_COPILOT;  then ok "Copilot CLI ..... found"; else warn "Copilot CLI ..... not found"; fi
   if $HAS_VSCODE;   then ok "VS Code ......... found"; else warn "VS Code ......... not found"; fi
   if $HAS_COWORK;   then ok "Cowork (Desktop)  found"; else warn "Cowork (Desktop)  not found"; fi
+  if $HAS_GEMINI;   then ok "Gemini CLI ...... found"; else warn "Gemini CLI ...... not found"; fi
 
-  if ! $HAS_CLAUDE && ! $HAS_CODEX && ! $HAS_OPENCODE && ! $HAS_COPILOT && ! $HAS_VSCODE && ! $HAS_COWORK; then
+  if ! $HAS_CLAUDE && ! $HAS_CODEX && ! $HAS_OPENCODE && ! $HAS_COPILOT && ! $HAS_VSCODE && ! $HAS_COWORK && ! $HAS_GEMINI; then
     warn "No AI host detected. Tools installed but integrations skipped."
   fi
 }
@@ -301,6 +303,7 @@ _host_is_set() {
     copilot)  echo "$HAS_COPILOT" ;;
     vscode)   echo "$HAS_VSCODE" ;;
     cowork)   echo "$HAS_COWORK" ;;
+    gemini)   echo "$HAS_GEMINI" ;;
     *)        echo "false" ;;
   esac
 }
@@ -314,14 +317,15 @@ _host_disable() {
     copilot)  HAS_COPILOT=false ;;
     vscode)   HAS_VSCODE=false ;;
     cowork)   HAS_COWORK=false ;;
+    gemini)   HAS_GEMINI=false ;;
   esac
 }
 
 # Applies --hosts filter or prompts when multiple hosts are found.
 # Zeros out HAS_* flags for any host not selected.
 confirm_hosts() {
-  local slugs=("claude" "codex" "opencode" "copilot" "vscode" "cowork")
-  local labels=("Claude Code" "Codex CLI" "OpenCode" "Copilot CLI" "VS Code" "Cowork (Desktop)")
+  local slugs=("claude" "codex" "opencode" "copilot" "vscode" "cowork" "gemini")
+  local labels=("Claude Code" "Codex CLI" "OpenCode" "Copilot CLI" "VS Code" "Cowork (Desktop)" "Gemini CLI")
   local detected_slugs=()
   local detected_labels=()
 
@@ -532,6 +536,17 @@ RTKDOC
       info "  Cowork has no hook support — LLM instructed to prefix commands with 'rtk'"
     fi
   fi
+
+  # Gemini CLI — rtk init --gemini registers the shell hook natively
+  if $HAS_GEMINI; then
+    if [ "${DRY_RUN:-false}" = "true" ]; then
+      dryrun "rtk init --gemini"
+    else
+      rtk init --gemini 2>/dev/null \
+        && ok "RTK: Gemini CLI" \
+        || warn "RTK: Gemini CLI init failed (may already be configured)"
+    fi
+  fi
 }
 
 # --- tilth --------------------------------------------------------------------
@@ -590,7 +605,20 @@ install_tilth() {
     fi
   done
 
-  if [ ${#hosts[@]} -eq 0 ]; then
+  # Gemini CLI — gemini mcp add --scope user
+  if $HAS_GEMINI; then
+    if [ "${DRY_RUN:-false}" = "true" ]; then
+      dryrun "gemini mcp add --scope user tilth tilth mcp"
+    elif gemini mcp list 2>/dev/null | grep -q '"tilth"'; then
+      ok "tilth MCP: Gemini CLI (already configured)"
+    else
+      gemini mcp add --scope user tilth tilth mcp 2>/dev/null \
+        && ok "tilth MCP: Gemini CLI" \
+        || warn "tilth MCP: Gemini CLI setup failed"
+    fi
+  fi
+
+  if [ ${#hosts[@]} -eq 0 ] && ! $HAS_GEMINI; then
     warn "tilth: no AI host detected, skipping MCP registration"
   fi
 }
@@ -868,6 +896,30 @@ PYEOF
     fi
   fi
 
+  # Gemini CLI — gemini mcp add --scope user
+  if $HAS_GEMINI; then
+    if [ "${DRY_RUN:-false}" = "true" ]; then
+      $LOCAL_MODE \
+        && dryrun "gemini mcp add --scope user serena docker run ... token-diet/serena:latest" \
+        || dryrun "gemini mcp add --scope user serena uvx --from git+${SERENA_REPO} serena start-mcp-server"
+    elif gemini mcp list 2>/dev/null | grep -q '"serena"'; then
+      ok "Serena MCP: Gemini CLI (already configured)"
+    elif $LOCAL_MODE; then
+      gemini mcp add --scope user serena docker run --rm -i -v "\$(pwd):/workspace:ro" --network none \
+        token-diet/serena:latest --context=gemini-cli --open-web-dashboard false --project /workspace \
+        2>/dev/null \
+        && ok "Serena MCP: Gemini CLI (Docker)" \
+        || warn "Serena MCP: Gemini CLI setup failed"
+    else
+      gemini mcp add --scope user serena \
+        uvx --from "git+${SERENA_REPO}" serena start-mcp-server \
+        --context=gemini-cli --open-web-dashboard false --project-from-cwd \
+        2>/dev/null \
+        && ok "Serena MCP: Gemini CLI" \
+        || warn "Serena MCP: Gemini CLI setup failed"
+    fi
+  fi
+
   # Disable Serena's built-in web dashboard entirely.
   # On macOS, web_dashboard:true spawns a native pywebview app process per host.
   # With Serena registered in multiple hosts (claude-code, opencode, codex),
@@ -1101,6 +1153,19 @@ PYEOF
   if $HAS_COPILOT; then
     ok "ICM: Copilot CLI uses VS Code MCP config (shared)"
   fi
+
+  # Gemini CLI — gemini mcp add --scope user writes to ~/.gemini/config/mcp_config.json
+  if $HAS_GEMINI; then
+    if [ "${DRY_RUN:-false}" = "true" ]; then
+      dryrun "gemini mcp add --scope user icm icm serve --compact"
+    elif gemini mcp list 2>/dev/null | grep -q '"icm"'; then
+      ok "ICM MCP: Gemini CLI (already configured)"
+    else
+      gemini mcp add --scope user icm icm serve --compact 2>/dev/null \
+        && ok "ICM MCP: Gemini CLI" \
+        || warn "ICM MCP: Gemini CLI setup failed"
+    fi
+  fi
 }
 
 # --- Overlap fix --------------------------------------------------------------
@@ -1211,6 +1276,7 @@ verify_stack() {
   if $HAS_COPILOT;  then ok "Copilot CLI ..... available"; else warn "Copilot CLI ..... not found"; fi
   if $HAS_VSCODE;   then ok "VS Code ......... available"; else warn "VS Code ......... not found"; fi
   if $HAS_COWORK;   then ok "Cowork (Desktop)  available"; else warn "Cowork (Desktop)  not found"; fi
+  if $HAS_GEMINI;   then ok "Gemini CLI ...... available"; else warn "Gemini CLI ...... not found"; fi
 
   echo ""
   if $all_ok; then
@@ -1225,7 +1291,7 @@ verify_stack() {
 
   +-------------------------------------------------------------------+
   |  Claude Code / Codex / OpenCode / Copilot CLI / VS Code          |
-  |                     + Cowork (Claude Desktop)                     |
+  |            + Cowork (Claude Desktop) + Gemini CLI                 |
   +-------------------------------------------------------------------+
          |              |              |               |
     Code reading   Refactoring   Command output   Persistent memory
@@ -1372,6 +1438,11 @@ TKDDOC
     cowork_dir="$(dirname "$COWORK_CFG")"
     write_token-diet_md "$cowork_dir" ""
   fi
+
+  # Gemini CLI — write token-diet.md into ~/.gemini and reference from GEMINI.md
+  if $HAS_GEMINI; then
+    write_token-diet_md "$HOME/.gemini" "$HOME/.gemini/GEMINI.md"
+  fi
 }
 
 # --- Main ---------------------------------------------------------------------
@@ -1388,7 +1459,7 @@ Tools:
   ICM      Persistent cross-tool memory (MCP server)
 
 Hosts (auto-detected):
-  Claude Code, Codex CLI, OpenCode, Copilot CLI, VS Code, Cowork (Claude Desktop)
+  Claude Code, Codex CLI, OpenCode, Copilot CLI, VS Code, Cowork (Claude Desktop), Gemini CLI
 
 Options:
   --all          Install all three tools (default)
@@ -1401,7 +1472,7 @@ Options:
   --no-dedup     Skip overlap fix configuration
   --skip-tests   Skip clippy + tests in --local mode (faster install)
   --hosts LIST   Comma-separated list of AI hosts to wire integrations for.
-                 Valid: claude, codex, opencode, copilot, vscode, cowork
+                 Valid: claude, codex, opencode, copilot, vscode, cowork, gemini
                  Default: prompt when multiple hosts detected.
                  Example: --hosts "claude,vscode"
   --dry-run      Simulate install — detect hosts and show what would run, no changes made
@@ -1431,7 +1502,7 @@ run_wizard() {
   echo    "          Why:  precise refactors without re-reading files."
   echo    "          Gain: fewer wrong edits and fewer prompt turns on multi-file work."
   echo -e "  ${BOLD}ICM${NC}     persistent cross-tool memory"
-  echo    "          What: a memory MCP server shared across Claude, Codex, Gemini, OpenCode."
+  echo    "          What: a memory MCP server shared across Claude, Codex, Gemini, OpenCode"
   echo    "          Why:  recall past decisions and facts instead of re-explaining each session."
   echo    "          Gain: cross-session, cross-tool continuity — recall replaces re-reading."
   echo ""

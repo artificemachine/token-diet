@@ -140,6 +140,7 @@ hosts_registered() {
   local tool="$1"
   local found=()
   local configs=(
+    "$HOME/.claude.json"
     "$HOME/.claude/settings.json"
     "$HOME/Library/Application Support/Claude/claude_desktop_config.json"
     "$HOME/.config/Claude/claude_desktop_config.json"
@@ -150,6 +151,7 @@ hosts_registered() {
     if python3 -c "import json,sys; d=json.load(open('$cfg')); exit(0 if any('$tool' in k.lower() for k in d.get('mcpServers',{}).keys()) else 1)" 2>/dev/null; then
       case "$cfg" in
         *"Application Support"*) found+=("claude-desktop") ;;
+        *".claude.json"*)        found+=("claude-code") ;;
         *settings.json*)         found+=("claude-code") ;;
         *opencode*)              found+=("opencode") ;;
       esac

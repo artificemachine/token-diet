@@ -2299,15 +2299,15 @@ else:
     text = prefix + "[embeddings]\nenabled = true\n"
 p.write_text(text)
 PY
-      info "Embeddings enabled in $icm_cfg"
-      info "Fetching model (first run may take a few minutes)..."
+      echo "  Embeddings enabled in $icm_cfg"
+      echo "  Fetching model (first run may take a few minutes)..."
       # A recall query embeds its text, forcing the model fetch without writing memory.
       if icm recall "token-diet warmup probe" >/dev/null 2>&1; then
         ok "ICM model ready — semantic recall is active (offline from here on)"
       else
         warn "Warmup query returned nothing (normal if memory is empty)."
-        warn "If the download failed: check access to huggingface.co, and confirm ICM"
-        warn "was built with embeddings (online install — the --local build is keyword-only)."
+        echo "  If the download failed: check access to huggingface.co, and confirm ICM"
+        echo "  was built with embeddings (online install — the --local build is keyword-only)."
       fi
       ;;
     status)

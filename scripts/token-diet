@@ -160,6 +160,8 @@ hosts_registered() {
   # VS Code
   local vscode_cfg="$HOME/.config/Code/User/settings.json"
   [ -f "$vscode_cfg" ] && grep -q "$tool" "$vscode_cfg" 2>/dev/null && found+=("vscode")
+  # Gemini CLI
+  command -v gemini >/dev/null 2>&1 && gemini mcp list 2>/dev/null | grep -q "\"${tool}\"" && found+=("gemini")
 
   if [ ${#found[@]} -gt 0 ]; then
     echo "${found[*]}" | tr ' ' ','
@@ -2120,6 +2122,18 @@ PY
     fi
   }
 
+  _doctor_check_mcp_gemini() {
+    local tool="$1" hosts_var="$2"
+    command -v gemini >/dev/null 2>&1 || return 0
+    if gemini mcp list 2>/dev/null | grep -q "\"${tool}\""; then
+      eval "${hosts_var}+=(\"gemini\")"
+      $json_mode || ok "  gemini      registered"
+    else
+      $json_mode || miss "  gemini      not registered  →  run: bash install.sh"
+      _issue "${tool} gemini: not registered"
+    fi
+  }
+
   # tilth: delegate to `tilth doctor` which covers all 22 hosts
   local tilth_doctor_json=""
   if $tilth_ok; then
@@ -2169,6 +2183,7 @@ except Exception as e:
       _doctor_check_mcp_json "tilth" "claude-desktop" "$cd_linux"  "tilth_registered_hosts"
       _doctor_check_mcp_json "tilth" "opencode"       "$oc_cfg"    "tilth_registered_hosts"
       _doctor_check_mcp_codex "tilth" "tilth_registered_hosts"
+      _doctor_check_mcp_gemini "tilth" "tilth_registered_hosts"
       $json_mode || echo ""
     fi
   else
@@ -2183,6 +2198,7 @@ except Exception as e:
   _doctor_check_mcp_json "serena" "claude-desktop" "$cd_linux"  "serena_registered_hosts"
   _doctor_check_mcp_json "serena" "opencode"       "$oc_cfg"    "serena_registered_hosts"
   _doctor_check_mcp_codex "serena" "serena_registered_hosts"
+  _doctor_check_mcp_gemini "serena" "serena_registered_hosts"
   $json_mode || echo ""
 
   # icm: same per-host pattern as serena (self-written MCP entries, bare-PATH command)
@@ -2193,6 +2209,7 @@ except Exception as e:
   _doctor_check_mcp_json "icm" "claude-desktop" "$cd_linux"  "icm_registered_hosts"
   _doctor_check_mcp_json "icm" "opencode"       "$oc_cfg"    "icm_registered_hosts"
   _doctor_check_mcp_codex "icm" "icm_registered_hosts"
+  _doctor_check_mcp_gemini "icm" "icm_registered_hosts"
   $json_mode || echo ""
 
   # ── 4. Summary ──────────────────────────────────────────────────────────────

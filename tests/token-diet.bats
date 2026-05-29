@@ -1119,6 +1119,7 @@ HOOK
   mock_cmd tilth
   mock_cmd uvx
   mock_icm
+  mock_gemini tilth serena icm
   # Register MCP tools with commands that exist in $TMP_BIN
   mock_mcp_config claude-code tilth "tilth"
   mock_mcp_config claude-code serena "uvx"
@@ -1138,6 +1139,7 @@ HOOK
   mock_cmd tilth
   mock_cmd uvx
   mock_icm
+  mock_gemini tilth serena icm
   mock_mcp_config claude-code tilth "tilth"
   mock_mcp_config claude-code serena "uvx"
   mock_mcp_config claude-code icm "icm"
@@ -1152,6 +1154,7 @@ HOOK
   mock_cmd tilth
   mock_cmd uvx
   mock_icm
+  mock_gemini tilth serena icm
   mock_mcp_config claude-code tilth "tilth"
   mock_mcp_config claude-code serena "uvx"
   mock_mcp_config claude-code icm "icm"
@@ -1527,6 +1530,7 @@ MOCK
   mock_cmd tilth
   mock_cmd uvx
   mock_icm
+  mock_gemini tilth serena icm
   mock_mcp_config claude-code tilth "tilth"
   mock_mcp_config claude-code serena "uvx"
   mock_mcp_config claude-code icm "icm"
@@ -1552,6 +1556,7 @@ assert 'rtk' in c or 'tilth' in c, 'compat block has no tool entries: ' + str(c)
   mock_cmd tilth
   mock_cmd uvx
   mock_icm
+  mock_gemini tilth serena icm
   mock_mcp_config claude-code tilth "tilth"
   mock_mcp_config claude-code serena "uvx"
   mock_mcp_config claude-code icm "icm"

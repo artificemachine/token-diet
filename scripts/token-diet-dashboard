@@ -97,6 +97,12 @@ def serena_stats():
     mode      = "docker-running" if docker_running else ("uvx" if uvx_version else "docker-image")
     return {"mode": mode, "version": version if version and version != "<no value>" else None, "hosts": hosts, "memories": memories, "log_days": log_days}
 
+def icm_stats():
+    ver = run(["icm", "--version"], timeout=2)
+    if not ver: return None
+    hosts = _registered_hosts("icm")
+    return {"version": ver.split()[-1], "hosts": hosts}
+
 def _get_last_project():
     home = pathlib.Path.home()
     db = home / "Library/Application Support/rtk/history.db"
@@ -282,7 +288,7 @@ def _get_version():
                 if "TD_VERSION=" in line:
                     return line.split("=")[1].strip().strip("\"").strip("'")
     except: pass
-    return "1.7.5"
+    return "1.10.0"
 
 def collect():
     now = time.time()
@@ -347,11 +353,12 @@ def collect():
         },
         "tilth": tilth_stats(),
         "serena": serena_stats(),
+        "icm": icm_stats(),
         "breakdown": {"top_days": sorted(combined_daily, key=lambda x: x.get("saved_tokens", 0), reverse=True)[:5]},
         "budget": budget,
         "budgets": all_budget_files(total_input, active_file),
         "projection": projection_stats({"daily": combined_daily}),
-        "missing_hosts": {"tilth": _missing_hosts("tilth"), "serena": _missing_hosts("serena")},
+        "missing_hosts": {"tilth": _missing_hosts("tilth"), "serena": _missing_hosts("serena"), "icm": _missing_hosts("icm")},
         "alerts": alerts,
         "cached_at": datetime.datetime.now().strftime("%H:%M:%S")
     }

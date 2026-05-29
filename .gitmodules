@@ -11,3 +11,6 @@
 [submodule "forks/serena"]
 	path = forks/serena
 	url = https://github.com/celstnblacc/serena.git
+[submodule "forks/icm"]
+	path = forks/icm
+	url = https://github.com/celstnblacc/icm.git

@@ -1,7 +1,7 @@
 ---
 # =============================================================================
 # token-diet — AI Token Optimization Stack
-# RTK + tilth + Serena installer for Linux and macOS remote hosts
+# RTK + tilth + Serena + ICM installer for Linux and macOS remote hosts
 #
 # Usage:
 #   ansible-playbook -i inventory.ini scripts/playbook.yml
@@ -33,7 +33,7 @@
 #   - Internet access (online mode) or token-diet repo already cloned (local mode)
 # =============================================================================
 
-- name: token-diet — AI Token Optimization Stack
+- name: token-diet — AI Token Optimization Stack (RTK + tilth + Serena + ICM)
   hosts: all
   gather_facts: true
   become: false
@@ -58,6 +58,7 @@
     install_rtk: true
     install_tilth: true
     install_serena: true
+    install_icm: true
 
     # -------------------------------------------------------------------------
     # Claude Code integration — set false to skip hook/MCP registration
@@ -116,7 +117,7 @@
       ansible.builtin.stat:
         path: "{{ cargo_bin }}/rustc"
       register: rustc_stat
-      when: install_rtk or install_tilth
+      when: install_rtk or install_tilth or install_icm
       tags: [prereqs]
 
     - name: Prereqs | Install Rust via rustup (if not present)
@@ -126,7 +127,7 @@
       args:
         creates: "{{ cargo_bin }}/rustc"
       when:
-        - install_rtk or install_tilth
+        - install_rtk or install_tilth or install_icm
         - not rustc_stat.stat.exists
       notify: Reload PATH
       tags: [prereqs]
@@ -136,7 +137,7 @@
         {{ cargo_bin }}/rustup update stable --no-self-update
       changed_when: false
       failed_when: false
-      when: install_rtk or install_tilth
+      when: install_rtk or install_tilth or install_icm
       tags: [prereqs]
 
     # --- uv -------------------------------------------------------------------
@@ -295,6 +296,69 @@
       tags: [tilth, verify]
 
     # =========================================================================
+    # ICM
+    # =========================================================================
+
+    - name: ICM | Install from git (online mode)
+      ansible.builtin.command: >
+        {{ cargo_bin }}/cargo install
+        --git https://github.com/celstnblacc/icm
+        icm-cli
+        --force
+      register: icm_install_online
+      changed_when: >
+        'Installed' in icm_install_online.stderr or
+        'Compiling' in icm_install_online.stderr
+      when:
+        - install_icm
+        - install_mode == 'online'
+      tags: [icm]
+
+    - name: ICM | Install from local fork (offline mode)
+      ansible.builtin.command: >
+        {{ cargo_bin }}/cargo install
+        --path {{ token_diet_dest }}/forks/icm/crates/icm-cli
+        --no-default-features
+        --features tui
+        --force
+      register: icm_install_local
+      changed_when: >
+        'Installed' in icm_install_local.stderr or
+        'Compiling' in icm_install_local.stderr
+      when:
+        - install_icm
+        - install_mode == 'local'
+      tags: [icm]
+
+    - name: ICM | Register MCP server for Claude Code
+      ansible.builtin.command: >
+        claude mcp add --scope user icm --
+        icm serve --compact
+      register: icm_mcp
+      changed_when: >
+        'added' in icm_mcp.stdout | lower or
+        'registered' in icm_mcp.stdout | lower
+      failed_when: false
+      when:
+        - install_icm
+        - configure_claude
+      tags: [icm]
+
+    - name: ICM | Verify installation
+      ansible.builtin.command: "{{ cargo_bin }}/icm --version"
+      register: icm_version
+      changed_when: false
+      failed_when: icm_version.rc != 0
+      when: install_icm
+      tags: [icm, verify]
+
+    - name: ICM | Confirm version
+      ansible.builtin.debug:
+        msg: "ICM installed OK: {{ icm_version.stdout | default('(no output)') }}"
+      when: install_icm
+      tags: [icm, verify]
+
+    # =========================================================================
     # Serena
     # =========================================================================
 
@@ -364,6 +428,9 @@
         - name: tilth
           cmd: "{{ cargo_bin }}/tilth --version"
           enabled: "{{ install_tilth }}"
+        - name: ICM
+          cmd: "{{ cargo_bin }}/icm --version"
+          enabled: "{{ install_icm }}"
         - name: uv
           cmd: "{{ local_bin }}/uv --version"
           enabled: "{{ install_serena }}"
@@ -393,6 +460,7 @@
           install_rtk   : {{ install_rtk }}
           install_tilth : {{ install_tilth }}
           install_serena: {{ install_serena }}
+          install_icm   : {{ install_icm }}
           configure_claude: {{ configure_claude }}
           repo cloned to: {{ token_diet_dest }}
           ============================================================

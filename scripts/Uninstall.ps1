@@ -77,6 +77,30 @@ function Remove-JsonMcpKey {
     }
 }
 
+function Remove-VsCodeTemplateServer {
+    param([string]$ConfigPath, [string]$Key)
+    if (-not (Test-Path $ConfigPath)) {
+        Write-Miss "$ConfigPath (servers.$Key)"
+        return
+    }
+    if ($DryRun) {
+        Write-DryMsg "Remove servers.$Key from $ConfigPath"
+        return
+    }
+    try {
+        $json = Get-Content $ConfigPath -Raw | ConvertFrom-Json
+        if ($json.servers -and $json.servers.PSObject.Properties[$Key]) {
+            $json.servers.PSObject.Properties.Remove($Key)
+            $json | ConvertTo-Json -Depth 10 | Set-Content $ConfigPath -Encoding UTF8
+            Write-Ok "Removed servers.$Key from $ConfigPath"
+        } else {
+            Write-Miss "$ConfigPath (servers.$Key)"
+        }
+    } catch {
+        Write-Host "  [warn]    Failed to update $ConfigPath`: $_" -ForegroundColor Yellow
+    }
+}
+
 function Remove-LineFromFile {
     param([string]$FilePath, [string]$Pattern)
     if (-not (Test-Path $FilePath)) {
@@ -119,6 +143,10 @@ $ClaudeMd     = Join-Path $ClaudeDir "token-diet.md"
 $CodexMd      = Join-Path $CodexDir "token-diet.md"
 $SerenaDir    = Join-Path $UserProfile ".serena"
 $ConfigDir    = Join-Path $AppData "token-diet"
+# ICM honors ~/.config/icm/config.toml on all platforms (matches install.sh).
+$IcmConfig    = Join-Path $UserProfile ".config\icm\config.toml"
+# Shared VS Code MCP template (top-level "servers" key), written by the installer.
+$VsCodeTemplate = Join-Path $ConfigDir "vscode-mcp.template.json"
 
 # --- Main ---------------------------------------------------------------------
 Write-Host "`ntoken-diet uninstall (Windows)`n" -ForegroundColor Cyan
@@ -140,7 +168,7 @@ Remove-TokenDietFile (Join-Path $BinDir "token-diet-mcp")
 # Rust binaries
 Write-Header "Rust binaries (cargo uninstall)"
 if (Get-Command cargo -ErrorAction SilentlyContinue) {
-    foreach ($crate in @("rtk", "tilth")) {
+    foreach ($crate in @("rtk", "tilth", "icm")) {
         if ($DryRun) {
             Write-DryMsg "cargo uninstall $crate"
         } else {
@@ -160,22 +188,28 @@ if (Get-Command cargo -ErrorAction SilentlyContinue) {
 Write-Header "MCP registrations — Claude Desktop"
 Remove-JsonMcpKey $ClaudeConfig "tilth"
 Remove-JsonMcpKey $ClaudeConfig "serena"
+Remove-JsonMcpKey $ClaudeConfig "icm"
 
 # MCP registrations — OpenCode
 Write-Header "MCP registrations — OpenCode"
 Remove-JsonMcpKey $OpenCode "tilth"
 Remove-JsonMcpKey $OpenCode "serena"
+Remove-JsonMcpKey $OpenCode "icm"
+
+# MCP registrations — VS Code template (uses top-level "servers", not "mcpServers")
+Write-Header "MCP registrations — VS Code template"
+Remove-VsCodeTemplateServer $VsCodeTemplate "icm"
 
 # MCP registrations — Codex TOML
 Write-Header "MCP registrations — Codex TOML"
 if (Test-Path $CodexToml) {
     if ($DryRun) {
-        Write-DryMsg "Remove [mcp_servers.tilth] and [mcp_servers.serena] from $CodexToml"
+        Write-DryMsg "Remove [mcp_servers.{tilth,serena,icm}] from $CodexToml"
     } else {
         $content = Get-Content $CodexToml -Raw
-        $content = $content -replace '(?ms)\[mcp_servers\.(tilth|serena)\][^\[]*', ''
+        $content = $content -replace '(?ms)\[mcp_servers\.(tilth|serena|icm)\][^\[]*', ''
         Set-Content $CodexToml -Value $content -Encoding UTF8
-        Write-Ok "Removed mcp_servers.{tilth,serena} from $CodexToml"
+        Write-Ok "Removed mcp_servers.{tilth,serena,icm} from $CodexToml"
     }
 } else {
     Write-Miss $CodexToml
@@ -196,10 +230,13 @@ Remove-LineFromFile (Join-Path $CodexDir  "AGENTS.md")   "@token-diet.md"
 Write-Header "Config directories"
 Remove-TokenDietFile $ConfigDir
 
-# Serena memories (opt-in)
+# Serena memories + ICM config (opt-in)
 if ($IncludeData) {
-    Write-Header "Serena memories (--IncludeData)"
+    Write-Header "Serena memories (-IncludeData)"
     Remove-TokenDietFile (Join-Path $SerenaDir "memories")
+
+    Write-Header "ICM config (-IncludeData)"
+    Remove-TokenDietFile $IcmConfig
 }
 
 # Docker image (opt-in)

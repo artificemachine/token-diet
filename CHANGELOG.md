@@ -594,3 +594,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - 2026-05-07: feat(install): add keylogger-mcp-wrapper injection — transparent MCP proxy logging for all registered servers (KEYLOGGER_MCP env var controls, default on)
 - 2026-05-08: feat!(install): drop KEYLOGGER_MCP coupling. Remove `_keylogger_wrap_json_cmd`, `_keylogger_wrap_claude_cmd` (dead-code helpers — never called) and `_apply_keylogger_wrapper` (config rewrite that wrapped every registered MCP). token-diet no longer touches keylogger. Migration: install keylogger-mcp v0.2.0+ and run `keylogger-mcp wrap <host> <server>` per server you want logged. Reversible via `keylogger-mcp unwrap`. See `keylogger-mcp status`. Aligns with tilth v0.7.0 (same coupling removal).
 - 2026-05-08: chore(release): bump TD_VERSION literal in scripts/token-diet from 1.7.11 to 1.9.0. The bash script's hardcoded version had drifted through v1.7.x → v1.8.0 → v1.9.0 tags without ever being bumped — `token-diet --version` reported 1.7.11 even after tag v1.9.0 shipped.
+
+## [1.10.0] - 2026-05-29
+
+### Added
+- **ICM (Infinite Context Memory) as the 4th token-diet tool** alongside RTK, tilth, and Serena. ICM is a cross-tool persistent-memory MCP server (`icm serve --compact`), built from the audited fork `celstnblacc/icm` pinned to tag `icm-v0.10.50` (Apache-2.0; Rust virtual workspace, bin crate `crates/icm-cli`). Registered into the same hosts as Serena/tilth (Claude Code, Codex, OpenCode, VS Code, Cowork/Claude Desktop) using bare-path `icm serve --compact` invocations — never an embedded `forks/` path, and never via `icm init` (which would bake absolute `current_exe()` paths into host configs, an install-decoupling violation).
+- **One-time-warmup embeddings policy (honest air-gap)**: `--local` builds use `--no-default-features --features tui`, so `fastembed` is never compiled and the binary physically cannot fetch a model (keyword-only). Online installs compile embeddings but ship them disabled via `~/.config/icm/config.toml` `[embeddings] enabled=false`; `token-diet icm warmup` flips that flag, runs `icm recall` once to fetch the ~270 MB model (intfloat/multilingual-e5-base), after which ICM runs offline.
+- `doctor` JSON now emits `icm_mcp.registered_hosts` (mirrors `serena_mcp`).
+- Compliance: ICM added to `compliance/SBOM.template.json` (upstream scheme) and `compliance/SBOM.json` (fork scheme, in `dependencies[0].dependsOn`); `compliance/LICENSE-THIRD-PARTY.md` updated for MIT + ICM Apache-2.0 with attribution checklist item; `compliance/security-audit.md` gained an `### ICM` section, network-isolation/supply-chain rows, and a 2026-05-29 audit-history entry.
+
+### Changed
+- Reconciled version drift across the three independently-owned version literals to **1.10.0**: `scripts/token-diet` `TD_VERSION` (was 1.9.0), `scripts/token-diet.ps1` `$script:TD_VERSION` (was 1.7.11), and `scripts/token-diet-dashboard` fallback literal (was 1.7.5).
+
+### Fixed
+- Windows `mcp list` contract fix so the PowerShell CLI reports the same registered-host set as the bash CLI.
+- 2026-05-29: feat(uninstall): add ICM teardown to uninstall.sh + Uninstall.ps1 — `cargo uninstall icm`, remove ~/.local/bin/icm (plus orphaned rtk/tilth symlinks), strip icm MCP key from Claude Code/Desktop (mac+linux)/OpenCode/Cowork configs and the VS Code servers.* template, extend the Codex stale-table regex to (tilth|serena|icm), and remove ~/.config/icm/config.toml only under --include-data/-IncludeData.
+- 2026-05-29: fix(forks/icm): re-pin forks/icm from tag icm-v0.10.50 to fork commit e6c1da3, which carries a NoEmbedder shim so the keyword-only build (`--no-default-features --features tui`) compiles. Upstream icm-v0.10.50 cfg-gated only some embedder sites, so the air-gapped `--local` ICM build failed (E0277/E0599); verified via `cargo tree` that fastembed is absent from the keyword-only dependency graph. SBOM submodule-commit updated to the patched SHA.

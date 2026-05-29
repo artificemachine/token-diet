@@ -84,9 +84,10 @@ load test_helper
 # Cycle 3.3 — uninstall.sh: MCP JSON removal
 # ---------------------------------------------------------------------------
 
-@test "uninstall.sh removes tilth and serena from claude-code settings.json" {
+@test "uninstall.sh removes tilth, serena and icm from claude-code settings.json" {
   mock_mcp_config claude-code tilth
   mock_mcp_config claude-code serena
+  mock_mcp_config claude-code icm
 
   run bash "$SCRIPTS_DIR/uninstall.sh" --force
 
@@ -98,6 +99,7 @@ d = json.load(open(sys.argv[1]))
 servers = d.get("mcpServers", {})
 assert "tilth"  not in servers, "tilth still present"
 assert "serena" not in servers, "serena still present"
+assert "icm"    not in servers, "icm still present"
 PY
 }
 
@@ -202,6 +204,19 @@ PY
   run bash "$SCRIPTS_DIR/install.sh" --verify
   [ "$status" -eq 0 ]
   [[ "$output" == *"Codex serena MCP command missing: /missing/serena"* ]]
+}
+
+@test "install.sh --verify warns when Codex icm MCP path is stale" {
+  mock_cmd_with_gain
+  mock_cmd tilth
+  mock_cmd uv
+  mock_cmd codex
+  mock_icm
+  mock_mcp_config codex icm "/missing/icm"
+
+  run bash "$SCRIPTS_DIR/install.sh" --verify
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Codex icm MCP command missing: /missing/icm"* ]]
 }
 
 # ---------------------------------------------------------------------------
@@ -489,4 +504,120 @@ TOML
   local header_count
   header_count=$(grep -cE '^\[mcp_servers\.serena\]' "$TMP_HOME/.codex/config.toml")
   [ "$header_count" -eq 1 ]
+}
+
+# ---------------------------------------------------------------------------
+# install.sh: ICM codex idempotency uses the same anchored TOML table header.
+# The idempotency guard MUST be the exact line-anchored header ^\[mcp_servers\.icm\]
+# — never a loose substring match on "icm" (which would false-match a stray
+# args line and silently skip the real registration).
+# ---------------------------------------------------------------------------
+
+@test "install.sh registers ICM in codex config when only a stray 'icm' substring exists" {
+  mock_install_prereqs
+  mock_icm
+  mock_cmd codex
+  # Config has NO real [mcp_servers.icm] block but a stray args line
+  # containing the substring "icm". A bare-grep guard would treat this as
+  # "already configured" and skip the real registration.
+  cat > "$TMP_HOME/.codex/config.toml" << 'TOML'
+[mcp_servers.tilth]
+command = "tilth"
+args = ["--mcp"]
+
+# Vestigial orphan from a bad paste — contains the substring "icm"
+["--some-icm-flag", "serve"]
+TOML
+
+  run bash "$SCRIPTS_DIR/install.sh" --icm-only --hosts codex
+  [ "$status" -eq 0 ]
+
+  # A real [mcp_servers.icm] table header must now be present on its own line
+  grep -Eq '^\[mcp_servers\.icm\]' "$TMP_HOME/.codex/config.toml"
+  # And the bare-PATH command is written — never a forks/ path
+  grep -Eq '^command = "icm"' "$TMP_HOME/.codex/config.toml"
+}
+
+@test "install.sh does not duplicate ICM block when a real [mcp_servers.icm] header already exists" {
+  mock_install_prereqs
+  mock_icm
+  mock_cmd codex
+  cat > "$TMP_HOME/.codex/config.toml" << 'TOML'
+[mcp_servers.icm]
+command = "icm"
+args = ["serve", "--compact"]
+TOML
+
+  run bash "$SCRIPTS_DIR/install.sh" --icm-only --hosts codex
+  [ "$status" -eq 0 ]
+
+  local header_count
+  header_count=$(grep -cE '^\[mcp_servers\.icm\]' "$TMP_HOME/.codex/config.toml")
+  [ "$header_count" -eq 1 ]
+}
+
+# ---------------------------------------------------------------------------
+# install.sh: OpenCode mcp.icm injection — bare-PATH command, idempotent.
+# ---------------------------------------------------------------------------
+
+@test "install.sh injects mcp.icm into opencode config with bare-PATH command" {
+  mock_install_prereqs
+  mock_icm
+  mock_cmd opencode
+  echo '{}' > "$TMP_HOME/.opencode.json"
+
+  run bash "$SCRIPTS_DIR/install.sh" --icm-only --hosts opencode
+  [ "$status" -eq 0 ]
+
+  python3 - "$TMP_HOME/.opencode.json" << 'PY'
+import json, sys
+d = json.load(open(sys.argv[1]))
+mcp = d.get("mcp", {})
+assert "icm" in mcp, f"icm not registered in opencode: {list(mcp.keys())}"
+entry = mcp["icm"]
+assert entry.get("type") == "local", entry
+assert entry.get("command") == ["icm", "serve", "--compact"], entry
+assert entry.get("enabled") is True, entry
+PY
+}
+
+@test "install.sh opencode mcp.icm injection is idempotent (no duplication on second run)" {
+  mock_install_prereqs
+  mock_icm
+  mock_cmd opencode
+  echo '{}' > "$TMP_HOME/.opencode.json"
+
+  bash "$SCRIPTS_DIR/install.sh" --icm-only --hosts opencode
+  bash "$SCRIPTS_DIR/install.sh" --icm-only --hosts opencode
+
+  python3 - "$TMP_HOME/.opencode.json" << 'PY'
+import json, sys
+d = json.load(open(sys.argv[1]))
+mcp = d.get("mcp", {})
+count = sum(1 for k in mcp if "icm" in k.lower())
+assert count == 1, f"Expected 1 icm entry, got {count}: {list(mcp.keys())}"
+PY
+}
+
+@test "install.sh --icm-only preserves unrelated mcp entries in opencode config" {
+  mock_install_prereqs
+  mock_icm
+  mock_cmd opencode
+  python3 -c "
+import json
+with open('$TMP_HOME/.opencode.json', 'w') as f:
+    json.dump({'mcp': {'other-tool': {'type': 'local', 'command': ['other'], 'enabled': True}}}, f)
+    f.write('\n')
+"
+
+  run bash "$SCRIPTS_DIR/install.sh" --icm-only --hosts opencode
+  [ "$status" -eq 0 ]
+
+  python3 - "$TMP_HOME/.opencode.json" << 'PY'
+import json, sys
+d = json.load(open(sys.argv[1]))
+mcp = d.get("mcp", {})
+assert "other-tool" in mcp, f"Unrelated entry was removed: {list(mcp.keys())}"
+assert "icm" in mcp, f"icm entry missing: {list(mcp.keys())}"
+PY
 }

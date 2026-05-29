@@ -142,6 +142,24 @@ MOCK
   chmod +x "$TMP_BIN/rtk"
 }
 
+# mock_icm
+# Creates an icm mock mirroring the rtk/tilth stubs: handles --version, --help,
+# serve (the MCP entry point), and recall (used by `token-diet icm warmup`).
+# Always exits 0 so health/route/doctor see icm as a working binary on PATH.
+mock_icm() {
+  cat > "$TMP_BIN/icm" << 'MOCK'
+#!/usr/bin/env bash
+case "$1" in
+  --version) echo "icm 0.10.50-mock"; exit 0 ;;
+  --help)    echo "Usage: icm [OPTIONS] <COMMAND>"; exit 0 ;;
+  serve)     exit 0 ;;
+  recall)    exit 0 ;;
+  *)         exit 0 ;;
+esac
+MOCK
+  chmod +x "$TMP_BIN/icm"
+}
+
 # mock_mcp_config "host" "tool" ["command"]
 # Writes a fake MCP config file for the given host with the tool registered.
 # Safe to call multiple times — merges into existing JSON.

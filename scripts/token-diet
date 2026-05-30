@@ -12,7 +12,7 @@
 
 set -euo pipefail
 
-readonly TD_VERSION="1.10.3"
+readonly TD_VERSION="1.10.4"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # --- Colors -------------------------------------------------------------------
@@ -186,8 +186,17 @@ PY
   # VS Code
   local vscode_cfg="$HOME/.config/Code/User/settings.json"
   [ -f "$vscode_cfg" ] && grep -q "$tool" "$vscode_cfg" 2>/dev/null && found+=("vscode")
-  # Gemini CLI
-  command -v gemini >/dev/null 2>&1 && gemini mcp list 2>/dev/null | grep -q "\"${tool}\"" && found+=("gemini")
+  # Gemini CLI — read config file directly (gemini mcp list probes connections and blocks)
+  local _gem_cfg="$HOME/.gemini/settings.json"
+  if [ -f "$_gem_cfg" ]; then
+    python3 - "$_gem_cfg" "$tool" << 'PY' 2>/dev/null
+import json,sys
+d=json.load(open(sys.argv[1]))
+servers={**d.get('mcpServers',{}),**d.get('mcp',{})}
+sys.exit(0 if any(sys.argv[2] in k.lower() for k in servers.keys()) else 1)
+PY
+    [ $? -eq 0 ] && found+=("gemini")
+  fi
 
   if [ ${#found[@]} -gt 0 ]; then
     echo "${found[*]}" | tr ' ' ','
@@ -2096,7 +2105,7 @@ cmd_doctor() {
   local -a tilth_registered_hosts=() serena_registered_hosts=() icm_registered_hosts=()
 
   _doctor_check_mcp_json() {
-    local tool="$1" host_label="$2" cfg="$3" hosts_var="$4"
+    local tool="$1" host_label="$2" cfg="$3" hosts_var="$4" silent_miss="${5:-}"
     [ -f "$cfg" ] || return 0  # host not installed — skip silently
 
     local registered
@@ -2130,8 +2139,10 @@ PY
         _issue "${tool} ${host_label}: registered but '${first_word}' not in PATH"
       fi
     else
-      $json_mode || miss "  ${host_label}   not registered  →  run: bash install.sh"
-      _issue "${tool} ${host_label}: not registered"
+      if [ -z "$silent_miss" ]; then
+        $json_mode || miss "  ${host_label}   not registered  →  run: bash install.sh"
+        _issue "${tool} ${host_label}: not registered"
+      fi
     fi
   }
 
@@ -2156,7 +2167,20 @@ PY
   _doctor_check_mcp_gemini() {
     local tool="$1" hosts_var="$2"
     command -v gemini >/dev/null 2>&1 || return 0
-    if gemini mcp list 2>/dev/null | grep -q "\"${tool}\""; then
+    # Read ~/.gemini/settings.json directly — `gemini mcp list` probes live
+    # connections and blocks for seconds per server. The config file is instant.
+    local gemini_settings="$HOME/.gemini/settings.json"
+    local gemini_registered=false
+    if [ -f "$gemini_settings" ]; then
+      python3 - "$gemini_settings" "$tool" << 'PY' 2>/dev/null
+import json,sys
+d=json.load(open(sys.argv[1]))
+servers={**d.get('mcpServers',{}),**d.get('mcp',{})}
+sys.exit(0 if any(sys.argv[2] in k.lower() for k in servers.keys()) else 1)
+PY
+      [ $? -eq 0 ] && gemini_registered=true
+    fi
+    if $gemini_registered; then
       eval "${hosts_var}+=(\"gemini\")"
       $json_mode || ok "  gemini      registered"
     else
@@ -2178,27 +2202,50 @@ PY
 import json, sys
 try:
     d = json.load(sys.stdin)
+    # tilth doctor --json has two formats:
+    # Old: {hosts: {name: {registered, command, command_ok}}}
+    # New: {overall, checks: [{name, status, detail}], mcp_hosts: ...}
     hosts = d.get('hosts', {})
-    found_any = False
-    for host, info in sorted(hosts.items()):
-        found_any = True
-        if info.get('registered'):
-            cmd = info.get('command', '')
-            ok_flag = info.get('command_ok', True)
-            mark = '\033[32m\u2713\033[0m' if ok_flag else '\033[33m!\033[0m'
-            label = 'registered' if ok_flag else 'registered but command missing:'
-            print(f'    {mark}  {host:<20} {label}   {cmd}')
-        else:
-            print(f'    \033[2m\u2013\033[0m  {host:<20} config exists \u2014 not registered')
-    if not found_any:
-        print('    (no host configs found)')
+    found_any = bool(hosts)
+    if not found_any and 'checks' in d:
+        # New format: extract mcp_hosts from the checks array
+        for check in d.get('checks', []):
+            if check.get('name') == 'mcp_hosts':
+                detail = check.get('detail', '')
+                if 'registered in:' in detail:
+                    host_list = detail.split('registered in:')[-1].strip()
+                    for h in host_list.split(','):
+                        h = h.strip()
+                        if h:
+                            found_any = True
+                            print(f'    \033[32m\u2713\033[0m  {h:<20} registered')
+                break
+        if not found_any:
+            print('    (no host configs found)')
+    else:
+        for host, info in sorted(hosts.items()):
+            found_any = True
+            if info.get('registered'):
+                cmd = info.get('command', '')
+                ok_flag = info.get('command_ok', True)
+                mark = '\033[32m\u2713\033[0m' if ok_flag else '\033[33m!\033[0m'
+                label = 'registered' if ok_flag else 'registered but command missing:'
+                print(f'    {mark}  {host:<20} {label}   {cmd}')
+            else:
+                print(f'    \033[2m\u2013\033[0m  {host:<20} config exists \u2014 not registered')
+        if not found_any:
+            print('    (no host configs found)')
 except Exception as e:
     print(f'    (could not parse tilth doctor output: {e})')
 "
         echo ""
       fi
       # Feed issues from tilth doctor into our findings only when explicitly unhealthy
-      local _tilth_healthy; _tilth_healthy=$(echo "$tilth_doctor_json" | python3 -c "import json,sys; d=json.load(sys.stdin); print('true' if d.get('healthy') else 'false')" 2>/dev/null || echo "unknown")
+      # Handle both formats: old uses "healthy", new uses "overall":"pass"
+      local _tilth_healthy; _tilth_healthy=$(echo "$tilth_doctor_json" | python3 -c "
+import json,sys; d=json.load(sys.stdin)
+healthy = d.get('healthy') or d.get('overall') == 'pass'
+print('true' if healthy else 'false')" 2>/dev/null || echo "unknown")
       if [ "$_tilth_healthy" = "false" ]; then
         _issue "tilth: not registered in any MCP host (run: tilth install <host>)"
       fi
@@ -2221,10 +2268,20 @@ except Exception as e:
     $json_mode || dim "  tilth   (skipped — binary not installed)"
   fi
 
-  # serena: manual check for the four common hosts
+  # _doctor_check_mcp_json_either: check two files for the same host — only
+  # report miss if BOTH miss. Claude Code writes to ~/.claude.json (via
+  # 'claude mcp add --scope user') but some older entries live in
   $json_mode || echo -e "  ${BOLD}serena${NC}"
-  _doctor_check_mcp_json "serena" "claude-code"    "$cc_cfg"    "serena_registered_hosts"
-  _doctor_check_mcp_json "serena" "claude-code"    "$cc_global" "serena_registered_hosts"
+  # Claude Code: check both ~/.claude/settings.json and ~/.claude.json.
+  # Run settings.json first; only run .claude.json if settings.json missed (to avoid
+  # double-printing). The issues counter is reset before each attempt so a miss on
+  # settings.json doesn't count if .claude.json succeeds.
+  _doctor_check_mcp_json "serena" "claude-code" "$cc_cfg"    "serena_registered_hosts" "silent"
+  if ! printf '%s\n' "${serena_registered_hosts[@]+"${serena_registered_hosts[@]}"}" | grep -q "^claude-code$"; then
+    _doctor_check_mcp_json "serena" "claude-code" "$cc_global" "serena_registered_hosts"
+  else
+    $json_mode || ok "  claude-code   registered"
+  fi
   _doctor_check_mcp_json "serena" "claude-desktop" "$cd_mac"    "serena_registered_hosts"
   _doctor_check_mcp_json "serena" "claude-desktop" "$cd_linux"  "serena_registered_hosts"
   _doctor_check_mcp_json "serena" "opencode"       "$oc_cfg"    "serena_registered_hosts"
@@ -2232,10 +2289,14 @@ except Exception as e:
   _doctor_check_mcp_gemini "serena" "serena_registered_hosts"
   $json_mode || echo ""
 
-  # icm: same per-host pattern as serena (self-written MCP entries, bare-PATH command)
+  # icm: same per-host pattern as serena
   $json_mode || echo -e "  ${BOLD}icm${NC}"
-  _doctor_check_mcp_json "icm" "claude-code"    "$cc_cfg"    "icm_registered_hosts"
-  _doctor_check_mcp_json "icm" "claude-code"    "$cc_global" "icm_registered_hosts"
+  _doctor_check_mcp_json "icm" "claude-code" "$cc_cfg"    "icm_registered_hosts" "silent"
+  if ! printf '%s\n' "${icm_registered_hosts[@]+"${icm_registered_hosts[@]}"}" | grep -q "^claude-code$"; then
+    _doctor_check_mcp_json "icm" "claude-code" "$cc_global" "icm_registered_hosts"
+  else
+    $json_mode || ok "  claude-code   registered"
+  fi
   _doctor_check_mcp_json "icm" "claude-desktop" "$cd_mac"    "icm_registered_hosts"
   _doctor_check_mcp_json "icm" "claude-desktop" "$cd_linux"  "icm_registered_hosts"
   _doctor_check_mcp_json "icm" "opencode"       "$oc_cfg"    "icm_registered_hosts"

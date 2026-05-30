@@ -161,20 +161,24 @@ MOCK
 }
 
 # mock_gemini [tool1 tool2 ...]
-# Creates a gemini mock. `gemini mcp list` outputs one line per registered tool
-# containing the tool name in quotes so _doctor_check_mcp_gemini's grep works.
-# With no args, returns empty output (no tools registered).
+# Writes the Gemini settings.json (HOME/.gemini/settings.json) with mcpServers
+# entries for each named tool. _doctor_check_mcp_gemini reads this file directly
+# (no CLI call), so the mock creates the config file rather than a CLI stub.
+# With no args, creates an empty settings.json (no tools registered).
 mock_gemini() {
-  # Build the output as a shell array of echo statements — avoids sed/newline
-  # quoting issues that occur when embedding multi-line strings in sed -i.
+  mkdir -p "$TMP_HOME/.gemini"
+  local json='{"mcpServers":{'
+  local first=true
+  for t in "$@"; do
+    $first || json="${json},"
+    json="${json}\"${t}\":{\"command\":\"${t}\",\"args\":[]}"
+    first=false
+  done
+  json="${json}}}"
+  echo "$json" > "$TMP_HOME/.gemini/settings.json"
+  # Also write a gemini stub CLI (for any test that calls gemini mcp list directly)
   {
     echo '#!/usr/bin/env bash'
-    echo 'if [ "$1" = "mcp" ] && [ "$2" = "list" ]; then'
-    for t in "$@"; do
-      echo "  printf '%s\\n' '\"${t}\"'"
-    done
-    echo '  exit 0'
-    echo 'fi'
     echo 'exit 0'
   } > "$TMP_BIN/gemini"
   chmod +x "$TMP_BIN/gemini"

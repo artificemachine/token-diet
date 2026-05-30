@@ -144,6 +144,8 @@ hosts_registered() {
     "$HOME/.claude/settings.json"
     "$HOME/Library/Application Support/Claude/claude_desktop_config.json"
     "$HOME/.config/Claude/claude_desktop_config.json"
+    "$HOME/.opencode.json"
+    "$HOME/.config/opencode/opencode.json"
   )
   _tool_in_cfg() {
     python3 - "$1" "$2" << 'PY' 2>/dev/null

@@ -1352,7 +1352,9 @@ if cfg.exists():
 PYEOF
     fi
 
-    for cfg in "$HOME/.claude/settings.json" "$HOME/Library/Application Support/Claude/claude_desktop_config.json" "$HOME/.config/Claude/claude_desktop_config.json" "$HOME/.config/opencode/opencode.json" "$HOME/.opencode.json" "$COWORK_CFG"; do
+    # Claude/Cowork configs use "mcpServers"; OpenCode 1.x uses "mcp" only —
+    # injecting "mcpServers" into an OpenCode config triggers ConfigInvalidError.
+    for cfg in "$HOME/.claude/settings.json" "$HOME/Library/Application Support/Claude/claude_desktop_config.json" "$HOME/.config/Claude/claude_desktop_config.json" "$COWORK_CFG"; do
       if [ -f "$cfg" ]; then
         python3 - "$cfg" << 'PYEOF'
 import json, sys
@@ -1361,6 +1363,21 @@ try:
     with open(cfg) as f: data = json.load(f)
     data.setdefault("mcpServers", {})
     data["mcpServers"]["token-diet"] = {"command": "token-diet-mcp", "args": []}
+    with open(cfg, "w") as f: json.dump(data, f, indent=2)
+except Exception: pass
+PYEOF
+      fi
+    done
+    # OpenCode uses "mcp" key — write there, not "mcpServers"
+    for cfg in "$HOME/.config/opencode/opencode.json" "$HOME/.opencode.json"; do
+      if [ -f "$cfg" ]; then
+        python3 - "$cfg" << 'PYEOF'
+import json, sys
+cfg = sys.argv[1]
+try:
+    with open(cfg) as f: data = json.load(f)
+    data.setdefault("mcp", {})
+    data["mcp"]["token-diet"] = {"type": "local", "command": ["token-diet-mcp"], "enabled": True}
     with open(cfg, "w") as f: json.dump(data, f, indent=2)
 except Exception: pass
 PYEOF

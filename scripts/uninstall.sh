@@ -59,6 +59,41 @@ remove_file() {
   fi
 }
 
+# remove_opencode_mcp_key <cfg_path> <key>
+# Removes key from the "mcp" object in an OpenCode JSON config file.
+# OpenCode 1.x uses "mcp", not "mcpServers" — using remove_json_key on
+# OpenCode configs leaves stale "mcpServers" blocks that trigger ConfigInvalidError.
+remove_opencode_mcp_key() {
+  local cfg="$1"
+  local key="$2"
+  [ -f "$cfg" ] || { miss "$cfg (mcp.$key)"; return 0; }
+  if $DRY_RUN; then
+    dry "remove mcp.$key from $cfg"
+    return 0
+  fi
+  python3 - "$cfg" "$key" << 'PY'
+import json, sys
+cfg_path, key = sys.argv[1], sys.argv[2]
+with open(cfg_path) as f:
+    d = json.load(f)
+changed = False
+if "mcp" in d and key in d["mcp"]:
+    del d["mcp"][key]
+    changed = True
+# Also remove from "mcpServers" if a stale entry exists there (legacy installs)
+if "mcpServers" in d and key in d["mcpServers"]:
+    del d["mcpServers"][key]
+    if not d["mcpServers"]:
+        del d["mcpServers"]
+    changed = True
+if changed:
+    with open(cfg_path, "w") as f:
+        json.dump(d, f, indent=2)
+        f.write("\n")
+PY
+  ok "Removed mcp.$key from $cfg"
+}
+
 # remove_json_key <cfg_path> <key>
 # Removes key from mcpServers object in a JSON config file.
 remove_json_key() {
@@ -225,9 +260,12 @@ main() {
 
   echo ""
   echo -e "${BOLD}MCP registrations — OpenCode${NC}"
-  remove_json_key "$HOME/.opencode.json" "tilth"
-  remove_json_key "$HOME/.opencode.json" "serena"
-  remove_json_key "$HOME/.opencode.json" "icm"
+  remove_opencode_mcp_key "$HOME/.opencode.json" "tilth"
+  remove_opencode_mcp_key "$HOME/.opencode.json" "serena"
+  remove_opencode_mcp_key "$HOME/.opencode.json" "icm"
+  remove_opencode_mcp_key "$HOME/.config/opencode/opencode.json" "tilth"
+  remove_opencode_mcp_key "$HOME/.config/opencode/opencode.json" "serena"
+  remove_opencode_mcp_key "$HOME/.config/opencode/opencode.json" "icm"
   strip_opencode_rules "$HOME/.config/opencode/opencode.json"
 
   echo ""

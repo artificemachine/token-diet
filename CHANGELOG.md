@@ -617,3 +617,4 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - 2026-05-29: chore(release): bump to v1.10.1 — patch fixes: warmup info() crash, hosts_registered missing ~/.claude.json and opencode XDG path, mixed mcpServers/mcp key handling
 - 2026-05-30: fix(token-diet): restore opencode config paths in hosts_registered array — ~/.opencode.json and ~/.config/opencode/opencode.json were accidentally dropped during dedup refactor, causing opencode to not appear in icm status display
 - 2026-05-30: chore(release): bump to v1.10.2 — fix hosts_registered missing opencode configs
+- 2026-05-30: fix(install): write token-diet-mcp to mcp key (not mcpServers) in OpenCode configs — mcpServers is Claude/Cowork format; OpenCode 1.x only recognizes mcp, and a foreign mcpServers key triggers ConfigInvalidError on startup. Also added remove_opencode_mcp_key helper to uninstall.sh and bumped to v1.10.3.

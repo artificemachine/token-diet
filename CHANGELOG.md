@@ -619,3 +619,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - 2026-05-30: chore(release): bump to v1.10.2 — fix hosts_registered missing opencode configs
 - 2026-05-30: fix(install): write token-diet-mcp to mcp key (not mcpServers) in OpenCode configs — mcpServers is Claude/Cowork format; OpenCode 1.x only recognizes mcp, and a foreign mcpServers key triggers ConfigInvalidError on startup. Also added remove_opencode_mcp_key helper to uninstall.sh and bumped to v1.10.3.
 - 2026-05-30: fix(token-diet): doctor validation improvements — tilth new-format JSON parsing, serena/icm claude-code double-check false positive, gemini config-file detection (replaces gemini mcp list blocking call), _doctor_check_mcp_json silent_miss flag; bump v1.10.4
+- 2026-06-05: docs: name ICM across all doctrine (CLAUDE.md, AGENTS.md, GEMINI.md, README.md, SBOM description) — the stack shipped four tools (RTK + tilth + Serena + ICM) but docs still described three; closes bulletproof doc-roster drift. Also commits the previously-uncommitted CLAUDE.md/AGENTS.md doctrine expansion that was sitting in the working tree
+- 2026-06-05: fix(token-diet): cmd_upstream guards against running outside a source checkout (clear error instead of confusing per-tool git failures once installed to ~/.local/bin) and configures ICM's upstream remote; diff usage lists icm
+- 2026-06-05: chore(compliance): bump SBOM application component version 1.0.0 → 1.10.4 to track the project (component list already carried icm@0.10.50)
+- 2026-06-05: chore(release): bump to v1.10.5

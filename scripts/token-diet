@@ -12,7 +12,7 @@
 
 set -euo pipefail
 
-readonly TD_VERSION="1.10.4"
+readonly TD_VERSION="1.10.5"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # --- Colors -------------------------------------------------------------------
@@ -749,13 +749,30 @@ cmd_upstream() {
   local rtk_url="https://github.com/rtk-ai/rtk.git"
   local tilth_url="https://github.com/jahala/tilth.git"
   local serena_url="https://github.com/oraios/serena.git"
+  local icm_url="https://github.com/celstnblacc/icm.git"
+
+  # Fork maintenance only makes sense from a source checkout. Once token-diet is
+  # installed to ~/.local/bin there is no ../forks, so refuse with a clear
+  # message instead of emitting confusing per-tool git errors.
+  local forks_dir="$SCRIPT_DIR/../forks"
+  case "$sub" in
+    setup|check|diff)
+      if [ ! -d "$forks_dir" ]; then
+        echo "Error: 'token-diet upstream' is a source-repo maintenance command."
+        echo "No forks/ directory found at: $forks_dir"
+        echo "Run it from a token-diet git checkout, not the installed binary."
+        exit 1
+      fi
+      ;;
+  esac
 
   case "$sub" in
     setup)
       echo "Configuring upstream remotes in forks/..."
-      (cd "$SCRIPT_DIR/../forks/rtk" && git remote add upstream "$rtk_url" 2>/dev/null || git remote set-url upstream "$rtk_url" && echo "  ✓ rtk")
-      (cd "$SCRIPT_DIR/../forks/tilth" && git remote add upstream "$tilth_url" 2>/dev/null || git remote set-url upstream "$tilth_url" && echo "  ✓ tilth")
-      (cd "$SCRIPT_DIR/../forks/serena" && git remote add upstream "$serena_url" 2>/dev/null || git remote set-url upstream "$serena_url" && echo "  ✓ serena")
+      (cd "$forks_dir/rtk" && git remote add upstream "$rtk_url" 2>/dev/null || git remote set-url upstream "$rtk_url" && echo "  ✓ rtk")
+      (cd "$forks_dir/tilth" && git remote add upstream "$tilth_url" 2>/dev/null || git remote set-url upstream "$tilth_url" && echo "  ✓ tilth")
+      (cd "$forks_dir/serena" && git remote add upstream "$serena_url" 2>/dev/null || git remote set-url upstream "$serena_url" && echo "  ✓ serena")
+      (cd "$forks_dir/icm" && git remote add upstream "$icm_url" 2>/dev/null || git remote set-url upstream "$icm_url" && echo "  ✓ icm")
       echo "Setup complete."
       ;;
     check)
@@ -778,10 +795,10 @@ cmd_upstream() {
       ;;
     diff)
       if [ -z "$tool" ]; then
-        echo "Error: specify tool (rtk|tilth|serena)"
+        echo "Error: specify tool (rtk|tilth|serena|icm)"
         exit 1
       fi
-      local dir="$SCRIPT_DIR/../forks/$tool"
+      local dir="$forks_dir/$tool"
       if [ ! -d "$dir" ]; then echo "Error: tool dir not found: $dir"; exit 1; fi
       echo "Showing diff: fork vs original author ($tool)"
       (cd "$dir" && git fetch upstream main --quiet 2>/dev/null || git fetch upstream master --quiet 2>/dev/null)

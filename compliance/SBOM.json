@@ -14,12 +14,12 @@
     ],
     "component": {
       "type": "application",
-      "bom-ref": "token-diet@1.0.0",
+      "bom-ref": "token-diet@1.10.4",
       "name": "token-diet",
-      "version": "1.0.0",
-      "description": "Installer, build system, and compliance kit for RTK + tilth + Serena token optimization stack",
+      "version": "1.10.4",
+      "description": "Installer, build system, and compliance kit for RTK + tilth + Serena + ICM token optimization stack",
       "licenses": [{ "license": { "id": "MIT" } }],
-      "purl": "pkg:github/token-diet/token-diet@1.0.0"
+      "purl": "pkg:github/token-diet/token-diet@1.10.4"
     }
   },
   "components": [

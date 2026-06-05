@@ -625,3 +625,4 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - 2026-06-05: chore(compliance): bump SBOM application component version 1.0.0 → 1.10.4 to track the project (component list already carried icm@0.10.50)
 - 2026-06-05: chore(release): bump to v1.10.5
 - 2026-06-05: chore(gitignore): ignore local tool artifacts (.gemini/, .hablatone, .ship-check-passed, .shipguard/) so per-machine tool output never gets committed
+- 2026-06-05: chore(submodule): bump forks/serena pin e5c8fd5 → da07972 to include the vendored MCP stdio EOF patch (server survives transient client disconnects; modelcontextprotocol/python-sdk#2549)

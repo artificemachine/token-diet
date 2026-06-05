@@ -624,3 +624,4 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - 2026-06-05: fix(token-diet): cmd_upstream guards against running outside a source checkout (clear error instead of confusing per-tool git failures once installed to ~/.local/bin) and configures ICM's upstream remote; diff usage lists icm
 - 2026-06-05: chore(compliance): bump SBOM application component version 1.0.0 → 1.10.4 to track the project (component list already carried icm@0.10.50)
 - 2026-06-05: chore(release): bump to v1.10.5
+- 2026-06-05: chore(gitignore): ignore local tool artifacts (.gemini/, .hablatone, .ship-check-passed, .shipguard/) so per-machine tool output never gets committed

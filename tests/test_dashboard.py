@@ -1,6 +1,4 @@
 import json
-import pathlib
-import os
 from unittest.mock import patch
 import pytest
 
@@ -18,6 +16,7 @@ def test_collect_returns_required_keys(dashboard_mod):
         assert "rtk" in result
         assert "tilth" in result
         assert "serena" in result
+        assert "icm" in result
         assert "budget" in result
         assert "budgets" in result
         assert "version" in result
@@ -42,6 +41,19 @@ def test_rtk_stats_parses_json(dashboard_mod):
 def test_rtk_stats_returns_none_when_data_missing(dashboard_mod):
     """rtk_stats() returns None when data is None."""
     assert dashboard_mod.rtk_stats(None) is None
+
+def test_icm_stats_returns_none_when_binary_missing(dashboard_mod):
+    """icm_stats() returns None when the icm binary is absent (run() falsy)."""
+    with patch.object(dashboard_mod, "run", return_value=None):
+        assert dashboard_mod.icm_stats() is None
+
+def test_icm_stats_parses_version_and_hosts(dashboard_mod):
+    """icm_stats() returns version + registered hosts when icm is present."""
+    with patch.object(dashboard_mod, "run", return_value="icm 0.10.50"), \
+         patch.object(dashboard_mod, "_registered_hosts", return_value=["claude-code", "codex"]):
+        result = dashboard_mod.icm_stats()
+        assert result["version"] == "0.10.50"
+        assert result["hosts"] == ["claude-code", "codex"]
 
 def test_should_open_browser_defaults_true(dashboard_mod, monkeypatch):
     """should_open_browser() defaults to enabled when unset."""

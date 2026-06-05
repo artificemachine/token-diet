@@ -30,6 +30,15 @@ if ($Remaining -contains '--version') { Write-Output 'tilth 0.5.7'; exit 0 }
 exit 0
 '@
 
+    # Stub icm
+    Set-Content "$script:MockBin\icm.ps1" @'
+param([Parameter(ValueFromRemainingArguments=$true)][string[]]$Remaining)
+if ($Remaining -contains '--version') { Write-Output 'icm 0.10.50'; exit 0 }
+if ($Remaining -contains 'serve')  { exit 0 }
+if ($Remaining -contains 'recall') { exit 0 }
+exit 0
+'@
+
     $script:PathSep = [System.IO.Path]::PathSeparator
     $env:PATH = "$script:MockBin$script:PathSep$env:PATH"
 }
@@ -73,6 +82,7 @@ Describe 'token-diet.ps1 — dispatch' {
         $out | Should -Match 'hook'
         $out | Should -Match 'mcp'
         $out | Should -Match 'upstream'
+        $out | Should -Match 'icm'
     }
 }
 
@@ -281,6 +291,11 @@ Describe 'token-diet.ps1 — route' {
     It 'suggests RTK for run/build/test tasks' {
         $out = (& pwsh -NoProfile -File $script:PS1 'route' 'run the tests' 2>&1) -join ' '
         $out | Should -Match 'RTK'
+    }
+
+    It 'suggests ICM for recall/memory tasks' {
+        $out = (& pwsh -NoProfile -File $script:PS1 'route' 'remember the prior decision' 2>&1) -join ' '
+        $out | Should -Match 'ICM'
     }
 
     It 'help text includes route command' {

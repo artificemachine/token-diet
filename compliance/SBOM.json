@@ -14,12 +14,12 @@
     ],
     "component": {
       "type": "application",
-      "bom-ref": "token-diet@1.0.0",
+      "bom-ref": "token-diet@1.10.4",
       "name": "token-diet",
-      "version": "1.0.0",
-      "description": "Installer, build system, and compliance kit for RTK + tilth + Serena token optimization stack",
+      "version": "1.10.4",
+      "description": "Installer, build system, and compliance kit for RTK + tilth + Serena + ICM token optimization stack",
       "licenses": [{ "license": { "id": "MIT" } }],
-      "purl": "pkg:github/token-diet/token-diet@1.0.0"
+      "purl": "pkg:github/token-diet/token-diet@1.10.4"
     }
   },
   "components": [
@@ -91,12 +91,34 @@
         { "name": "pip-audit-result", "value": "0 known vulnerabilities" },
         { "name": "submodule-commit", "value": "1acd0118b253e99a3bfaecfdd464499509b3ceb0" }
       ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "icm@0.10.50",
+      "name": "icm",
+      "version": "0.10.50",
+      "description": "Infinite Context Memory — cross-tool persistent-memory MCP server (icm serve --compact); 4th token-diet tool, pinned to icm-v0.10.50 + fork patch e6c1da3 (no-default-features build fix)",
+      "licenses": [{ "license": { "id": "Apache-2.0" } }],
+      "purl": "pkg:github/celstnblacc/icm@0.10.50",
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/celstnblacc/icm.git",
+          "comment": "Audited fork — pinned commit e6c1da3 (icm-v0.10.50 + NoEmbedder no-default-features fix)"
+        }
+      ],
+      "properties": [
+        { "name": "language", "value": "Rust" },
+        { "name": "workspace", "value": "virtual; bin crate crates/icm-cli" },
+        { "name": "embeddings", "value": "keyword-only in --local build (--no-default-features --features tui); disabled-by-default online" },
+        { "name": "submodule-commit", "value": "e6c1da3adf340cf50c302255b26099c2ea56b83a" }
+      ]
     }
   ],
   "dependencies": [
     {
       "ref": "token-diet@1.0.0",
-      "dependsOn": ["rtk@0.34.3", "tilth@0.5.7", "serena@0.1.4"]
+      "dependsOn": ["rtk@0.34.3", "tilth@0.5.7", "serena@0.1.4", "icm@0.10.50"]
     }
   ]
 }

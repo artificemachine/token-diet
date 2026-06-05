@@ -1,8 +1,9 @@
-## token-diet stack (RTK + tilth + Serena)
+## token-diet stack (RTK + tilth + Serena + ICM)
 
 RTK = shell command proxy that compresses tool output (60-90% token savings).
 tilth = AST-aware code-intel MCP server (replaces grep/cat/find).
 Serena = semantic symbol MCP server (symbol-level edits, references).
+ICM = persistent cross-tool memory MCP server (recall past decisions, store facts).
 
 **Reading and searching code:**
 - Use `tilth_read` instead of `cat`/`head`/`tail` — smart outline for large files.
@@ -13,6 +14,10 @@ Serena = semantic symbol MCP server (symbol-level edits, references).
 **Editing code:**
 - For symbol-level changes (rename, find-references, replace-body), prefer Serena MCP tools over manual edits.
 - If unsure whether a symbol exists, call `tilth_search` first rather than reading whole files.
+
+**Persistent memory:**
+- Use ICM to recall past decisions, prior context, and stored facts across sessions and tools instead of re-deriving them.
+- Store durable facts (architecture decisions, conventions, gotchas) in ICM so future sessions can recall them rather than re-reading whole files.
 
 **Shell commands:**
 - RTK wraps shell commands transparently — run them normally, RTK intercepts and compresses output.

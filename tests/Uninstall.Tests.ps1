@@ -76,7 +76,7 @@ Describe "Uninstall.ps1 -Force" {
 
     It "removes MCP keys from claude_desktop_config.json" {
         $cfg = Join-Path $env:APPDATA "Claude\claude_desktop_config.json"
-        @{ mcpServers = @{ tilth = @{ command = "tilth" }; serena = @{ command = "serena" } } } |
+        @{ mcpServers = @{ tilth = @{ command = "tilth" }; serena = @{ command = "serena" }; icm = @{ command = "icm" } } } |
             ConvertTo-Json -Depth 5 | Set-Content $cfg -Encoding UTF8
 
         & $ScriptPath -Force 2>&1 | Out-Null
@@ -84,6 +84,7 @@ Describe "Uninstall.ps1 -Force" {
         $json = Get-Content $cfg -Raw | ConvertFrom-Json
         $json.mcpServers.PSObject.Properties.Name | Should -Not -Contain "tilth"
         $json.mcpServers.PSObject.Properties.Name | Should -Not -Contain "serena"
+        $json.mcpServers.PSObject.Properties.Name | Should -Not -Contain "icm"
     }
 
     It "preserves serena memories without -IncludeData" {

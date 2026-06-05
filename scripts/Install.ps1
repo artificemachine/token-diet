@@ -41,7 +41,7 @@
 
 [CmdletBinding()]
 param(
-    [ValidateSet("All", "RTK", "tilth", "Serena")]
+    [ValidateSet("All", "RTK", "tilth", "Serena", "icm")]
     [string]$Tool = "All",
     [switch]$SkipDedup,
     [switch]$VerifyOnly,
@@ -54,10 +54,16 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+# 'icm' is a built-in PowerShell alias for Invoke-Command and outranks external
+# commands — remove it so `icm` and Test-Cmd 'icm' resolve to the real ICM binary,
+# not Invoke-Command.
+Remove-Item Alias:icm -Force -ErrorAction SilentlyContinue
+
 # --- Configuration -----------------------------------------------------------
 $RTK_REPO    = "https://github.com/celstnblacc/rtk"
 $TILTH_REPO  = "https://github.com/celstnblacc/tilth"
 $SERENA_REPO = "https://github.com/celstnblacc/serena"
+$ICM_REPO    = "https://github.com/celstnblacc/icm"
 
 $script:ScriptDir   = Split-Path -Parent $MyInvocation.MyCommand.Path
 $script:ProjectRoot = Split-Path -Parent $script:ScriptDir
@@ -745,6 +751,223 @@ args = ["--from", "git+$SERENA_REPO", "serena", "start-mcp-server", "--context=c
     }
 }
 
+# --- ICM ----------------------------------------------------------------------
+# ICM (Infinite Context Memory) — cross-tool persistent memory MCP server.
+# Build/install mirrors RTK (cargo install). MCP registration mirrors Serena
+# (self-written config entries). We never call `icm init`: it bakes absolute
+# current_exe() paths into ~20 host configs and would violate install-decoupling.
+# We register the bare-PATH command `icm serve --compact` ourselves instead.
+#
+# Embeddings policy (the air-gap decision):
+#   -Local → keyword-only build (--no-default-features --features tui): fastembed
+#            is never compiled, so the binary physically cannot fetch a model.
+#   online → embeddings compiled but DISABLED in config (embeddings.enabled=false)
+#            so nothing is fetched silently. `token-diet icm warmup` performs the
+#            one-time ~270 MB model download with consent; ICM then runs offline.
+function Install-ICM {
+    Write-Header "ICM (Infinite Context Memory)"
+
+    if (Test-Cmd "icm") {
+        Write-Ok "ICM already installed: $(icm --version 2>$null)"
+        Write-Info "Upgrading..."
+    }
+
+    if ($Local) {
+        $manifest = Join-Path $script:ProjectRoot "forks\icm\crates\icm-cli\Cargo.toml"
+        if (-not (Test-Path $manifest)) { Write-Fail "forks\icm\crates\icm-cli\Cargo.toml not found — run: git submodule update --init --recursive" }
+        Verify-LocalBuild "ICM" $manifest
+        if ($DryRun) {
+            Write-DryRun "cargo install --path $($script:ProjectRoot)\forks\icm\crates\icm-cli --no-default-features --features tui --force"
+        } else {
+            Write-Info "Building ICM from fork (keyword-only, air-gapped)..."
+            cargo install --path (Join-Path $script:ProjectRoot "forks\icm\crates\icm-cli") --no-default-features --features tui --force 2>&1 | Show-Output
+            Write-Ok "ICM built and installed from fork (keyword-only memory)"
+        }
+    } else {
+        if ($DryRun) {
+            Write-DryRun "cargo install --git $ICM_REPO icm-cli --force"
+        } else {
+            cargo install --git $ICM_REPO icm-cli --force 2>&1 | Show-Output
+            Write-Ok "ICM installed: $(icm --version 2>$null)"
+        }
+    }
+
+    # Verify
+    if (-not $DryRun) {
+        icm --version 2>$null | Out-Null
+        if ($LASTEXITCODE -eq 0) {
+            Write-Ok "ICM verification passed"
+        } else {
+            Write-Warn "ICM verification failed"
+            return
+        }
+    }
+
+    # Embeddings policy: the online build ships embeddings compiled but OFF by
+    # default (config default is enabled=true upstream) so nothing is fetched
+    # behind the firewall. `token-diet icm warmup` turns it on. Air-gapped builds
+    # have no embedding code at all, so this is a harmless no-op there.
+    if (-not $Local) {
+        $icmCfg = Join-Path $env:USERPROFILE ".config\icm\config.toml"
+        if ($DryRun) {
+            Write-DryRun "Set [embeddings] enabled=false in $icmCfg (warmup enables it)"
+        } else {
+            $icmCfgDir = Split-Path -Parent $icmCfg
+            if (-not (Test-Path $icmCfgDir)) { New-Item -ItemType Directory -Path $icmCfgDir -Force | Out-Null }
+            $text = if (Test-Path $icmCfg) { Get-Content $icmCfg -Raw } else { "" }
+            if (-not $text) { $text = "" }
+            # Set enabled=false strictly inside the [embeddings] table — the config
+            # has many other `enabled` keys (extraction, recall, cloud, ...) we must
+            # not touch. Anchor to the table header, scope the edit to its body.
+            $m = [regex]::Match($text, "(?ms)^\[embeddings\][^\n]*\n(.*?)(?=^\[|\z)")
+            if ($m.Success) {
+                $body = $m.Groups[1].Value
+                if ($body -match "(?m)^\s*enabled\s*=") {
+                    $body = [regex]::Replace($body, "(?m)^(\s*enabled\s*=\s*).*$", '${1}false', 1)
+                } else {
+                    $body = "enabled = false`n" + $body
+                }
+                $text = $text.Substring(0, $m.Groups[1].Index) + $body + $text.Substring($m.Groups[1].Index + $m.Groups[1].Length)
+            } else {
+                $prefix = if ($text.Trim()) { $text.TrimEnd() + "`n`n" } else { "" }
+                $text = $prefix + "[embeddings]`nenabled = false`n"
+            }
+            Set-Content -Path $icmCfg -Value $text -Encoding UTF8 -NoNewline
+            Write-Ok "ICM semantic search is OFF until warmup ($icmCfg)"
+            Write-Info "  Enable cross-tool semantic recall (one-time ~270 MB model download):"
+            Write-Info "    token-diet icm warmup"
+        }
+    }
+
+    # --- MCP registration (self-written, NEVER 'icm init') ----------------------
+    # Always the bare-PATH command 'icm serve --compact' — no repo path, no docker,
+    # no uvx. Identical for local and online installs (icm is on PATH either way).
+    Write-Info "Registering ICM MCP server for detected hosts..."
+
+    # Claude Code
+    if ($script:HasClaude) {
+        if ($DryRun) {
+            Write-DryRun "claude mcp add --scope user icm -- icm serve --compact"
+        } else {
+            claude mcp get icm 2>$null | Out-Null
+            if ($LASTEXITCODE -eq 0) {
+                Write-Ok "ICM MCP: Claude Code (already configured)"
+            } else {
+                try {
+                    & claude mcp add --scope user icm -- icm serve --compact 2>$null
+                    Write-Ok "ICM MCP: Claude Code"
+                } catch { Write-Warn "ICM MCP: Claude Code setup failed" }
+            }
+        }
+    }
+
+    # Codex CLI — anchor to the actual TOML table header, never a loose substring.
+    if ($script:HasCodex) {
+        $codexConfig = Join-Path $env:USERPROFILE ".codex\config.toml"
+        $alreadyConfigured = $false
+        if (Test-Path $codexConfig) {
+            $codexText = Get-Content $codexConfig -Raw -ErrorAction SilentlyContinue
+            if ($codexText -and ($codexText -match '(?m)^\[mcp_servers\.icm\]')) { $alreadyConfigured = $true }
+        }
+        if ($alreadyConfigured) {
+            Write-Ok "ICM MCP: Codex CLI (already configured)"
+        } elseif ($DryRun) {
+            Write-DryRun "Append [mcp_servers.icm] block to $codexConfig"
+        } else {
+            $codexDir = Join-Path $env:USERPROFILE ".codex"
+            if (-not (Test-Path $codexDir)) { New-Item -ItemType Directory -Path $codexDir -Force | Out-Null }
+            $tomlBlock = @"
+
+# ICM MCP server (added by token-diet)
+[mcp_servers.icm]
+command = "icm"
+args = ["serve", "--compact"]
+"@
+            Add-Content -Path $codexConfig -Value $tomlBlock -Encoding UTF8
+            Write-Ok "ICM MCP: Codex CLI"
+        }
+    }
+
+    # VS Code — merge into the shared template (servers.icm). A merge (not a heredoc)
+    # so -Tool icm populates it even when Serena did not rewrite the template.
+    if ($script:HasVSCode) {
+        $vscodeTplDir = Join-Path $env:APPDATA "token-diet"
+        $vscodeTemplate = Join-Path $vscodeTplDir "vscode-mcp.template.json"
+        if ($DryRun) {
+            Write-DryRun "Merge servers.icm into $vscodeTemplate"
+        } else {
+            if (-not (Test-Path $vscodeTplDir)) { New-Item -ItemType Directory -Path $vscodeTplDir -Force | Out-Null }
+            try {
+                $data = if (Test-Path $vscodeTemplate) { Get-Content $vscodeTemplate -Raw | ConvertFrom-Json } else { [PSCustomObject]@{} }
+            } catch {
+                $data = [PSCustomObject]@{}
+            }
+            if (-not $data.PSObject.Properties["servers"]) {
+                $data | Add-Member -NotePropertyName "servers" -NotePropertyValue ([PSCustomObject]@{})
+            }
+            $icmEntry = [PSCustomObject]@{
+                command = "icm"
+                args    = @("serve", "--compact")
+            }
+            $data.servers | Add-Member -NotePropertyName "icm" -NotePropertyValue $icmEntry -Force
+            $data | ConvertTo-Json -Depth 10 | Set-Content -Path $vscodeTemplate -Encoding UTF8
+            Write-Ok "ICM MCP: VS Code template ($vscodeTemplate)"
+        }
+    }
+
+    # OpenCode — bare-PATH command (NOT a forks\ path; icm is always on PATH).
+    if ($script:HasOpenCode) {
+        $ocCfg = Join-Path $env:USERPROFILE ".opencode.json"
+        if ($DryRun) {
+            Write-DryRun "Write mcpServers.icm entry to $ocCfg"
+        } else {
+            try {
+                $data = if (Test-Path $ocCfg) { Get-Content $ocCfg -Raw | ConvertFrom-Json } else { [PSCustomObject]@{} }
+                if (-not $data.PSObject.Properties["mcpServers"]) {
+                    $data | Add-Member -NotePropertyName "mcpServers" -NotePropertyValue ([PSCustomObject]@{})
+                }
+                $icmEntry = [PSCustomObject]@{
+                    command = "icm"
+                    args    = @("serve", "--compact")
+                }
+                $data.mcpServers | Add-Member -NotePropertyName "icm" -NotePropertyValue $icmEntry -Force
+                $data | ConvertTo-Json -Depth 10 | Set-Content -Path $ocCfg -Encoding UTF8
+                Write-Ok "ICM MCP: OpenCode ($ocCfg)"
+            } catch {
+                Write-Warn "ICM MCP: OpenCode setup failed — $_"
+            }
+        }
+    }
+
+    # Cowork (Claude Desktop)
+    if ($script:HasCowork) {
+        $coworkCfg = Join-Path $env:APPDATA "Claude\claude_desktop_config.json"
+        if ($DryRun) {
+            Write-DryRun "Write mcpServers.icm to $coworkCfg"
+        } else {
+            try {
+                $data = if (Test-Path $coworkCfg) { Get-Content $coworkCfg -Raw | ConvertFrom-Json } else { [PSCustomObject]@{} }
+                if (-not $data.PSObject.Properties["mcpServers"]) {
+                    $data | Add-Member -NotePropertyName "mcpServers" -NotePropertyValue ([PSCustomObject]@{})
+                }
+                $icmEntry = [PSCustomObject]@{
+                    command = "icm"
+                    args    = @("serve", "--compact")
+                }
+                $data.mcpServers | Add-Member -NotePropertyName "icm" -NotePropertyValue $icmEntry -Force
+                $data | ConvertTo-Json -Depth 10 | Set-Content -Path $coworkCfg -Encoding UTF8
+                Write-Ok "ICM MCP: Cowork / Claude Desktop ($coworkCfg)"
+            } catch {
+                Write-Warn "ICM MCP: Cowork setup failed — $_"
+            }
+        }
+    }
+
+    if ($script:HasCopilot) {
+        Write-Ok "ICM: Copilot CLI uses VS Code MCP config (shared)"
+    }
+}
+
 # --- Overlap fix --------------------------------------------------------------
 function Configure-Dedup {
     Write-Header "Overlap fix (Serena dedup)"
@@ -964,6 +1187,12 @@ function Verify-Stack {
         if ($tilthIssue) { Write-Warn $tilthIssue; $allOk = $false }
     } else { Write-Warn "tilth ........... not installed"; $allOk = $false }
 
+    if (Test-Cmd "icm") {
+        Write-Ok "ICM ............. $(icm --version 2>$null)"
+        $icmIssue = Get-CodexMcpCommandIssue 'icm'
+        if ($icmIssue) { Write-Warn $icmIssue; $allOk = $false }
+    } else { Write-Warn "ICM ............. not installed"; $allOk = $false }
+
     if ($Local) {
         if ((Test-Cmd "docker") -and (docker image inspect token-diet/serena:latest 2>$null)) {
             Write-Ok "Serena .......... Docker image loaded"
@@ -1016,25 +1245,41 @@ function Verify-Stack {
 function Invoke-Wizard {
     Write-Host ""
     Write-Host "  token-diet interactive installer" -ForegroundColor White
-    Write-Host "  RTK + tilth + Serena — security-patched forks" -ForegroundColor Gray
+    Write-Host "  RTK + tilth + Serena + ICM — security-patched forks" -ForegroundColor Gray
     Write-Host ""
-    Write-Host "  Tools:" -ForegroundColor Gray
-    Write-Host "    RTK    — CLI output compression (60-90% token savings)" -ForegroundColor Gray
-    Write-Host "    tilth  — smart code reading via tree-sitter AST" -ForegroundColor Gray
-    Write-Host "    Serena — IDE-like symbol navigation via LSP" -ForegroundColor Gray
+    Write-Host "  The stack — each tool is independent; install any subset:" -ForegroundColor Gray
+    Write-Host ""
+    Write-Host "  RTK     command output compression" -ForegroundColor White
+    Write-Host "          What: a CLI proxy that filters verbose command output." -ForegroundColor Gray
+    Write-Host "          Why:  long build / test / git output floods the context window." -ForegroundColor Gray
+    Write-Host "          Gain: 60-90% fewer tokens on tracked commands (measured)." -ForegroundColor Gray
+    Write-Host "  tilth   AST-aware code reading" -ForegroundColor White
+    Write-Host "          What: tree-sitter reader returning symbols/structure, not whole files." -ForegroundColor Gray
+    Write-Host "          Why:  reading entire files to find one function wastes context." -ForegroundColor Gray
+    Write-Host "          Gain: ~38-44% smaller reads on average." -ForegroundColor Gray
+    Write-Host "  Serena  LSP symbol navigation" -ForegroundColor White
+    Write-Host "          What: language-server rename / find-references / diagnostics." -ForegroundColor Gray
+    Write-Host "          Why:  precise refactors without re-reading files." -ForegroundColor Gray
+    Write-Host "          Gain: fewer wrong edits and fewer prompt turns on multi-file work." -ForegroundColor Gray
+    Write-Host "  ICM     persistent cross-tool memory" -ForegroundColor White
+    Write-Host "          What: a memory MCP server shared across Claude, Codex, Gemini, OpenCode." -ForegroundColor Gray
+    Write-Host "          Why:  recall past decisions and facts instead of re-explaining each session." -ForegroundColor Gray
+    Write-Host "          Gain: cross-session, cross-tool continuity — recall replaces re-reading." -ForegroundColor Gray
     Write-Host ""
 
     # Which tools?
-    $answer = Read-Host "Install all three tools? [Y/n]"
+    $answer = Read-Host "Install the full stack (all 4)? [Y/n]  (n = choose individually)"
     if ($answer -match '^[Nn]') {
-        $r = Read-Host "  Install RTK?    [Y/n]"
-        $t = Read-Host "  Install tilth?  [Y/n]"
-        $s = Read-Host "  Install Serena? [Y/n]"
+        $r = Read-Host "  + RTK    — output compression, 60-90% fewer tokens?     [Y/n]"
+        $t = Read-Host "  + tilth  — AST code reading, ~40% smaller reads?         [Y/n]"
+        $s = Read-Host "  + Serena — rename / find-refs / diagnostics (LSP)?       [Y/n]"
+        $i = Read-Host "  + ICM    — cross-tool memory, recall not re-explain?     [Y/n]"
         $script:WizardRtk    = $r -notmatch '^[Nn]'
         $script:WizardTilth  = $t -notmatch '^[Nn]'
         $script:WizardSerena = $s -notmatch '^[Nn]'
+        $script:WizardIcm    = $i -notmatch '^[Nn]'
     } else {
-        $script:WizardRtk = $true; $script:WizardTilth = $true; $script:WizardSerena = $true
+        $script:WizardRtk = $true; $script:WizardTilth = $true; $script:WizardSerena = $true; $script:WizardIcm = $true
     }
 
     # Skip dedup?
@@ -1060,6 +1305,7 @@ function Invoke-Wizard {
     if ($script:WizardRtk)    { Write-Host "  + RTK"    -ForegroundColor Green }
     if ($script:WizardTilth)  { Write-Host "  + tilth"  -ForegroundColor Green }
     if ($script:WizardSerena) { Write-Host "  + Serena" -ForegroundColor Green }
+    if ($script:WizardIcm)    { Write-Host "  + ICM"    -ForegroundColor Green }
     if ($script:WizardDedup)  { Write-Host "  + Overlap fix" -ForegroundColor Green }
     if ($script:WizardLocal)  { Write-Host "    Mode: LOCAL (air-gapped)" -ForegroundColor Yellow }
     Write-Host ""
@@ -1088,6 +1334,7 @@ $interactive = ($PSBoundParameters.Count -eq 0 -and $Tool -eq "All" -and -not $S
 $script:WizardRtk    = $false
 $script:WizardTilth  = $false
 $script:WizardSerena = $false
+$script:WizardIcm    = $false
 $script:WizardDedup  = $true
 
 if ($interactive) {
@@ -1095,6 +1342,7 @@ if ($interactive) {
     $doRtk    = $script:WizardRtk
     $doTilth  = $script:WizardTilth
     $doSerena = $script:WizardSerena
+    $doIcm    = $script:WizardIcm
     $skipDedup = -not $script:WizardDedup
     if ($script:WizardLocal) { $Local = [switch]::new($true) }
     if ($script:WizardSkipTests) { $SkipTests = [switch]::new($true) }
@@ -1102,6 +1350,7 @@ if ($interactive) {
     $doRtk    = $Tool -eq "All" -or $Tool -eq "RTK"
     $doTilth  = $Tool -eq "All" -or $Tool -eq "tilth"
     $doSerena = $Tool -eq "All" -or $Tool -eq "Serena"
+    $doIcm    = $Tool -eq "All" -or $Tool -eq "icm"
     $skipDedup = $SkipDedup
 }
 
@@ -1109,7 +1358,7 @@ if ($Local) { Write-Host "    Mode: LOCAL (air-gapped)`n" -ForegroundColor Yello
 
 Write-Header "Prerequisites"
 Ensure-Git
-if ($doRtk -or $doTilth) { Ensure-Rust }
+if ($doRtk -or $doTilth -or $doIcm) { Ensure-Rust }
 if ($doSerena -and -not $Local) { Ensure-Uv }
 if ($doSerena -and $Local) { Ensure-Docker }
 
@@ -1119,6 +1368,7 @@ Confirm-Hosts
 if ($doRtk)    { Install-RTK }
 if ($doTilth)  { Install-Tilth }
 if ($doSerena) { Install-Serena }
+if ($doIcm)    { Install-ICM }
 
 if (-not $skipDedup -and $doTilth -and $doSerena) { Configure-Dedup }
 

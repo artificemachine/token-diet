@@ -44,6 +44,36 @@ load test_helper
 }
 
 # ---------------------------------------------------------------------------
+# Stack dashboard — the default `gain` view lists all four tools
+# (RTK + tilth + Serena + ICM). ICM has its own section.
+# ---------------------------------------------------------------------------
+
+@test "gain: dashboard lists all four stack tools including ICM" {
+  mock_cmd_with_gain
+  mock_cmd tilth
+  mock_cmd uvx
+
+  run "$SCRIPTS_DIR/token-diet" gain
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"RTK"* ]]
+  [[ "$output" == *"tilth"* ]]
+  [[ "$output" == *"Serena"* ]]
+  [[ "$output" == *"ICM"* ]]
+}
+
+@test "gain: shows ICM version and active when icm installed" {
+  mock_cmd_with_gain
+  mock_cmd tilth
+  mock_cmd uvx
+  mock_icm
+
+  run "$SCRIPTS_DIR/token-diet" gain
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"ICM"* ]]
+  [[ "$output" == *"active"* ]]
+}
+
+# ---------------------------------------------------------------------------
 # Cycle 2.2 — health: all tools present
 # ---------------------------------------------------------------------------
 
@@ -565,6 +595,12 @@ PY
   [[ "$output" == *"RTK"* ]]
 }
 
+@test "route: suggests ICM for recall/memory tasks" {
+  run "$SCRIPTS_DIR/token-diet" route "recall the prior decision about auth"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"ICM"* ]]
+}
+
 # ---------------------------------------------------------------------------
 # Cycle 14.4 — route: listed in --help
 # ---------------------------------------------------------------------------
@@ -712,6 +748,22 @@ MOCK
   run env HOME="$TMP_HOME" PATH="$clean_path" "$tmp_bin/token-diet" verify
   [ "$status" -eq 1 ]
   [[ "$output" == *"serena codex: registered but '/missing/serena' not in PATH"* ]]
+}
+
+@test "verify: stale icm Codex command is flagged in inline fallback" {
+  tmp_bin="$(mktemp -d)"
+  cp "$SCRIPTS_DIR/token-diet" "$tmp_bin/token-diet"
+  chmod +x "$tmp_bin/token-diet"
+  mock_cmd_with_gain
+  mock_cmd tilth
+  mock_cmd uv
+  mkdir -p "$TMP_HOME/.codex"
+  printf '\n[mcp_servers.icm]\ncommand = "/missing/icm"\n' >> "$TMP_HOME/.codex/config.toml"
+  clean_path="${PATH//:$PROJECT_ROOT\/scripts/}"
+
+  run env HOME="$TMP_HOME" PATH="$clean_path" "$tmp_bin/token-diet" verify
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"icm codex: registered but '/missing/icm' not in PATH"* ]]
 }
 
 # ---------------------------------------------------------------------------
@@ -1033,6 +1085,31 @@ HOOK
   [[ "$output" == *"/nonexistent/tilth"* ]] || [[ "$output" == *"missing"* ]]
 }
 
+@test "doctor: exits 1 when icm registered in claude-code but command missing" {
+  mock_rtk_with_init_show
+  mock_cmd tilth
+  mock_cmd uvx
+  mock_mcp_config claude-code tilth "tilth"
+  mock_mcp_config claude-code serena "uvx"
+  mock_mcp_config claude-code icm "/nonexistent/icm"
+
+  run "$SCRIPTS_DIR/token-diet" doctor
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"icm"* ]]
+  [[ "$output" == *"/nonexistent/icm"* ]] || [[ "$output" == *"missing"* ]]
+}
+
+@test "doctor: exits 1 when icm Codex MCP path is stale" {
+  mock_rtk_with_init_show
+  mock_cmd tilth
+  mock_cmd uvx
+  mock_mcp_config codex icm "/missing/icm"
+
+  run "$SCRIPTS_DIR/token-diet" doctor
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"icm codex: registered but '/missing/icm' not in PATH"* ]]
+}
+
 # ---------------------------------------------------------------------------
 # Cycle 14.5 — doctor: healthy full stack
 # ---------------------------------------------------------------------------
@@ -1041,9 +1118,12 @@ HOOK
   mock_rtk_with_init_show healthy
   mock_cmd tilth
   mock_cmd uvx
+  mock_icm
+  mock_gemini tilth serena icm
   # Register MCP tools with commands that exist in $TMP_BIN
   mock_mcp_config claude-code tilth "tilth"
   mock_mcp_config claude-code serena "uvx"
+  mock_mcp_config claude-code icm "icm"
 
   run "$SCRIPTS_DIR/token-diet" doctor
   [ "$status" -eq 0 ]
@@ -1058,12 +1138,37 @@ HOOK
   mock_rtk_with_init_show healthy
   mock_cmd tilth
   mock_cmd uvx
+  mock_icm
+  mock_gemini tilth serena icm
   mock_mcp_config claude-code tilth "tilth"
   mock_mcp_config claude-code serena "uvx"
+  mock_mcp_config claude-code icm "icm"
 
   run "$SCRIPTS_DIR/token-diet" doctor --json
   [ "$status" -eq 0 ]
   python3 -c "import json,sys; d=json.loads(sys.stdin.read()); assert d['healthy'] is True" <<< "$output"
+}
+
+@test "doctor --json: emits icm_mcp.registered_hosts mirroring serena_mcp" {
+  mock_rtk_with_init_show healthy
+  mock_cmd tilth
+  mock_cmd uvx
+  mock_icm
+  mock_gemini tilth serena icm
+  mock_mcp_config claude-code tilth "tilth"
+  mock_mcp_config claude-code serena "uvx"
+  mock_mcp_config claude-code icm "icm"
+
+  run "$SCRIPTS_DIR/token-diet" doctor --json
+  [ "$status" -eq 0 ]
+  python3 -c "
+import json, sys
+d = json.loads(sys.stdin.read())
+assert 'serena_mcp' in d, 'missing serena_mcp key: ' + str(list(d.keys()))
+assert 'icm_mcp' in d, 'missing icm_mcp key: ' + str(list(d.keys()))
+assert 'registered_hosts' in d['icm_mcp'], 'icm_mcp lacks registered_hosts: ' + str(d['icm_mcp'])
+assert 'claude-code' in d['icm_mcp']['registered_hosts'], d['icm_mcp']['registered_hosts']
+" <<< "$output"
 }
 
 @test "doctor --json: outputs valid JSON with healthy=false and findings when issues" {
@@ -1424,8 +1529,11 @@ MOCK
   mock_rtk_with_init_show healthy
   mock_cmd tilth
   mock_cmd uvx
+  mock_icm
+  mock_gemini tilth serena icm
   mock_mcp_config claude-code tilth "tilth"
   mock_mcp_config claude-code serena "uvx"
+  mock_mcp_config claude-code icm "icm"
 
   run "$SCRIPTS_DIR/token-diet" doctor --json
   [ "$status" -eq 0 ]
@@ -1447,8 +1555,11 @@ assert 'rtk' in c or 'tilth' in c, 'compat block has no tool entries: ' + str(c)
   mock_rtk_with_init_show healthy
   mock_cmd tilth
   mock_cmd uvx
+  mock_icm
+  mock_gemini tilth serena icm
   mock_mcp_config claude-code tilth "tilth"
   mock_mcp_config claude-code serena "uvx"
+  mock_mcp_config claude-code icm "icm"
 
   run "$SCRIPTS_DIR/token-diet" doctor
   [ "$status" -eq 0 ]

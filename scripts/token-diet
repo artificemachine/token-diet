@@ -12,7 +12,7 @@
 
 set -euo pipefail
 
-readonly TD_VERSION="1.7.11"
+readonly TD_VERSION="1.10.5"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # --- Colors -------------------------------------------------------------------
@@ -140,26 +140,63 @@ hosts_registered() {
   local tool="$1"
   local found=()
   local configs=(
+    "$HOME/.claude.json"
     "$HOME/.claude/settings.json"
     "$HOME/Library/Application Support/Claude/claude_desktop_config.json"
     "$HOME/.config/Claude/claude_desktop_config.json"
     "$HOME/.opencode.json"
+    "$HOME/.config/opencode/opencode.json"
   )
+  _tool_in_cfg() {
+    python3 - "$1" "$2" << 'PY' 2>/dev/null
+import json, sys
+d = json.load(open(sys.argv[1]))
+# A config may have both "mcpServers" and "mcp" keys (e.g. opencode). Merge both.
+servers = {**d.get('mcpServers', {}), **d.get('mcp', {})}
+sys.exit(0 if any(sys.argv[2] in k.lower() for k in servers.keys()) else 1)
+PY
+  }
   for cfg in "${configs[@]}"; do
     [ -f "$cfg" ] || continue
-    if python3 -c "import json,sys; d=json.load(open('$cfg')); exit(0 if any('$tool' in k.lower() for k in d.get('mcpServers',{}).keys()) else 1)" 2>/dev/null; then
-      case "$cfg" in
-        *"Application Support"*) found+=("claude-desktop") ;;
-        *settings.json*)         found+=("claude-code") ;;
-        *opencode*)              found+=("opencode") ;;
-      esac
-    fi
+    _tool_in_cfg "$cfg" "$tool" || continue
+    case "$cfg" in
+      *"Application Support"*) found+=("claude-desktop") ;;
+      *".claude.json"*)        found+=("claude-code") ;;
+      *settings.json*)         found+=("claude-code") ;;
+      *opencode*)              found+=("opencode") ;;
+    esac
   done
+
+  # OpenCode: check both legacy (~/.opencode.json) and XDG path together.
+  # Either file registering the tool counts as "opencode" registered.
+  # (Already handled above via the configs array; dedup if both matched.)
+  # Remove duplicate "opencode" entries from found.
+  local deduped=()
+  local seen_opencode=false
+  for h in "${found[@]}"; do
+    if [ "$h" = "opencode" ]; then
+      $seen_opencode && continue
+      seen_opencode=true
+    fi
+    deduped+=("$h")
+  done
+  found=("${deduped[@]}")
   # Codex
   codex_mcp_command "$tool" >/dev/null 2>&1 && found+=("codex")
   # VS Code
   local vscode_cfg="$HOME/.config/Code/User/settings.json"
   [ -f "$vscode_cfg" ] && grep -q "$tool" "$vscode_cfg" 2>/dev/null && found+=("vscode")
+  # Gemini CLI — read config file directly (gemini mcp list probes connections and blocks)
+  local _gem_cfg="$HOME/.gemini/settings.json"
+  if [ -f "$_gem_cfg" ]; then
+    python3 - "$_gem_cfg" "$tool" << 'PY' 2>/dev/null
+import json,sys
+d=json.load(open(sys.argv[1]))
+servers={**d.get('mcpServers',{}),**d.get('mcp',{})}
+sys.exit(0 if any(sys.argv[2] in k.lower() for k in servers.keys()) else 1)
+PY
+    [ $? -eq 0 ] && found+=("gemini")
+  fi
 
   if [ ${#found[@]} -gt 0 ]; then
     echo "${found[*]}" | tr ' ' ','
@@ -257,6 +294,24 @@ PY
     miss "Serena not installed  →  run: bash install.sh --serena-only"
   fi
 
+  echo ""
+
+  # --- ICM -------------------------------------------------------------------
+  echo -e "${BOLD}ICM${NC} ${DIM}— persistent cross-tool memory${NC}"
+  echo -e "${DIM}$(printf '%.0s─' {1..50})${NC}"
+  echo -e "  ${DIM}Note: ICM cuts re-explanation cost — recall replaces re-reading${NC}"
+
+  if check_cmd icm; then
+    tools_active=$((tools_active + 1))
+    local iv; iv=$(icm --version 2>/dev/null | awk '{print $2}')
+    local ih; ih=$(hosts_registered "icm")
+    printf "  %-22s %s\n" "Version:"   "$iv"
+    printf "  %-22s %s\n" "MCP hosts:" "$ih"
+    ok "ICM ${iv} — active"
+  else
+    miss "ICM not installed  →  run: bash install.sh --icm-only"
+  fi
+
   echo -e "${DIM}$(printf '%.0s─' {1..50})${NC}"
   if $rtk_ok; then
     # Use the aggregated values from above
@@ -267,7 +322,7 @@ PY
   fi
 
   echo ""
-  if [ "$tools_active" -eq 3 ]; then
+  if [ "$tools_active" -eq 4 ]; then
     echo -e "  ${GREEN}${BOLD}Full stack active. Maximum token savings.${NC}"
   elif [ "$tools_active" -gt 0 ]; then
     echo -e "  ${YELLOW}${BOLD}Partial stack — run 'bash install.sh' to complete setup.${NC}"
@@ -532,19 +587,21 @@ except Exception:
 t_hosts = d.get("tilth_mcp", {}).get("hosts", {}).keys() if "tilth_mcp" in d else []
 if not t_hosts: t_hosts = d.get("tilth_mcp", {}).get("registered_hosts", [])
 s_hosts = d.get("serena_mcp", {}).get("registered_hosts", [])
-all_hosts = sorted(list(set(list(t_hosts) + list(s_hosts))))
+i_hosts = d.get("icm_mcp", {}).get("registered_hosts", [])
+all_hosts = sorted(list(set(list(t_hosts) + list(s_hosts) + list(i_hosts))))
 print("Registered MCP Hosts:")
 if not all_hosts: print("  (none)")
 for h in all_hosts:
     st = []
     if h in t_hosts: st.append("tilth")
     if h in s_hosts: st.append("serena")
+    if h in i_hosts: st.append("icm")
     print("  ✓ %-16s (%s)" % (h, ", ".join(st)))'
       ;;
     *)
       echo "Usage: token-diet mcp [install|list]"
       echo ""
-      echo "  install   Register token-diet MCP servers (tilth/Serena) in detected AI hosts"
+      echo "  install   Register token-diet MCP servers (tilth/Serena/ICM) in detected AI hosts"
       echo "  list      Show hosts where token-diet MCP is currently registered"
       exit 1
       ;;
@@ -585,19 +642,21 @@ except Exception:
 t_hosts = d.get("tilth_mcp", {}).get("hosts", {}).keys() if "tilth_mcp" in d else []
 if not t_hosts: t_hosts = d.get("tilth_mcp", {}).get("registered_hosts", [])
 s_hosts = d.get("serena_mcp", {}).get("registered_hosts", [])
-all_hosts = sorted(list(set(list(t_hosts) + list(s_hosts))))
+i_hosts = d.get("icm_mcp", {}).get("registered_hosts", [])
+all_hosts = sorted(list(set(list(t_hosts) + list(s_hosts) + list(i_hosts))))
 print("Registered MCP Hosts:")
 if not all_hosts: print("  (none)")
 for h in all_hosts:
     st = []
     if h in t_hosts: st.append("tilth")
     if h in s_hosts: st.append("serena")
+    if h in i_hosts: st.append("icm")
     print("  ✓ %-16s (%s)" % (h, ", ".join(st)))'
       ;;
     *)
       echo "Usage: token-diet mcp [install|list]"
       echo ""
-      echo "  install   Register token-diet MCP servers (tilth/Serena) in detected AI hosts"
+      echo "  install   Register token-diet MCP servers (tilth/Serena/ICM) in detected AI hosts"
       echo "  list      Show hosts where token-diet MCP is currently registered"
       exit 1
       ;;
@@ -690,13 +749,30 @@ cmd_upstream() {
   local rtk_url="https://github.com/rtk-ai/rtk.git"
   local tilth_url="https://github.com/jahala/tilth.git"
   local serena_url="https://github.com/oraios/serena.git"
+  local icm_url="https://github.com/celstnblacc/icm.git"
+
+  # Fork maintenance only makes sense from a source checkout. Once token-diet is
+  # installed to ~/.local/bin there is no ../forks, so refuse with a clear
+  # message instead of emitting confusing per-tool git errors.
+  local forks_dir="$SCRIPT_DIR/../forks"
+  case "$sub" in
+    setup|check|diff)
+      if [ ! -d "$forks_dir" ]; then
+        echo "Error: 'token-diet upstream' is a source-repo maintenance command."
+        echo "No forks/ directory found at: $forks_dir"
+        echo "Run it from a token-diet git checkout, not the installed binary."
+        exit 1
+      fi
+      ;;
+  esac
 
   case "$sub" in
     setup)
       echo "Configuring upstream remotes in forks/..."
-      (cd "$SCRIPT_DIR/../forks/rtk" && git remote add upstream "$rtk_url" 2>/dev/null || git remote set-url upstream "$rtk_url" && echo "  ✓ rtk")
-      (cd "$SCRIPT_DIR/../forks/tilth" && git remote add upstream "$tilth_url" 2>/dev/null || git remote set-url upstream "$tilth_url" && echo "  ✓ tilth")
-      (cd "$SCRIPT_DIR/../forks/serena" && git remote add upstream "$serena_url" 2>/dev/null || git remote set-url upstream "$serena_url" && echo "  ✓ serena")
+      (cd "$forks_dir/rtk" && git remote add upstream "$rtk_url" 2>/dev/null || git remote set-url upstream "$rtk_url" && echo "  ✓ rtk")
+      (cd "$forks_dir/tilth" && git remote add upstream "$tilth_url" 2>/dev/null || git remote set-url upstream "$tilth_url" && echo "  ✓ tilth")
+      (cd "$forks_dir/serena" && git remote add upstream "$serena_url" 2>/dev/null || git remote set-url upstream "$serena_url" && echo "  ✓ serena")
+      (cd "$forks_dir/icm" && git remote add upstream "$icm_url" 2>/dev/null || git remote set-url upstream "$icm_url" && echo "  ✓ icm")
       echo "Setup complete."
       ;;
     check)
@@ -719,10 +795,10 @@ cmd_upstream() {
       ;;
     diff)
       if [ -z "$tool" ]; then
-        echo "Error: specify tool (rtk|tilth|serena)"
+        echo "Error: specify tool (rtk|tilth|serena|icm)"
         exit 1
       fi
-      local dir="$SCRIPT_DIR/../forks/$tool"
+      local dir="$forks_dir/$tool"
       if [ ! -d "$dir" ]; then echo "Error: tool dir not found: $dir"; exit 1; fi
       echo "Showing diff: fork vs original author ($tool)"
       (cd "$dir" && git fetch upstream main --quiet 2>/dev/null || git fetch upstream master --quiet 2>/dev/null)
@@ -1322,12 +1398,17 @@ cmd_route() {
     echo -e "${BOLD}→ tilth${NC} (AST-aware reading)"
     echo "  Best for: reading files, searching symbols, exploring structure"
     echo "  Command:  use tilth MCP tools (tilth_read, tilth_search, tilth_files)"
+  elif [[ "$lower" =~ (remember|recall|memory|memoir|forget|persist|what did|last (time|session)|prior (decision|session|work)) ]]; then
+    echo -e "${BOLD}→ ICM${NC} (persistent memory)"
+    echo "  Best for: recalling past decisions, storing facts, cross-session/cross-tool memory"
+    echo "  Command:  use icm MCP tools (recall, remember) — shared across Claude/Codex/Gemini/OpenCode"
   else
-    echo -e "${BOLD}No clear match${NC} — all three tools may apply:"
+    echo -e "${BOLD}No clear match${NC} — these tools may apply:"
     echo ""
     echo "  tilth   — reading/searching code (AST-aware, fast)"
     echo "  Serena  — renaming/navigating symbols (LSP-powered)"
     echo "  RTK     — running CLI commands (output compression)"
+    echo "  ICM     — recalling/storing memory across sessions and tools"
   fi
 }
 
@@ -1857,7 +1938,7 @@ PY
   local oc_cfg="$HOME/.opencode.json"
 
   local _mcp_tool
-  for _mcp_tool in tilth serena; do
+  for _mcp_tool in tilth serena icm; do
     _repair_mcp_json "$_mcp_tool" "claude-code"    "$cc_cfg"
     _repair_mcp_json "$_mcp_tool" "claude-desktop" "$cd_mac"
     _repair_mcp_json "$_mcp_tool" "claude-desktop" "$cd_linux"
@@ -1867,7 +1948,7 @@ PY
   # ── 3. Codex TOML — stale commands flagged as manual only ────────────────
   local codex_cfg="$HOME/.codex/config.toml"
   if [ -f "$codex_cfg" ]; then
-    for _mcp_tool in tilth serena; do
+    for _mcp_tool in tilth serena icm; do
       local codex_cmd; codex_cmd=$(codex_mcp_command "$_mcp_tool" 2>/dev/null || echo "")
       [ -n "$codex_cmd" ] || continue
       if ! mcp_command_exists "$codex_cmd"; then
@@ -2035,11 +2116,13 @@ cmd_doctor() {
   local cc_global="$HOME/.claude.json"
   local cd_mac="$HOME/Library/Application Support/Claude/claude_desktop_config.json"
   local cd_linux="$HOME/.config/Claude/claude_desktop_config.json"
+  # OpenCode: prefer XDG path if it exists, fall back to legacy.
   local oc_cfg="$HOME/.opencode.json"
-  local -a tilth_registered_hosts=() serena_registered_hosts=()
+  [ -f "$HOME/.config/opencode/opencode.json" ] && oc_cfg="$HOME/.config/opencode/opencode.json"
+  local -a tilth_registered_hosts=() serena_registered_hosts=() icm_registered_hosts=()
 
   _doctor_check_mcp_json() {
-    local tool="$1" host_label="$2" cfg="$3" hosts_var="$4"
+    local tool="$1" host_label="$2" cfg="$3" hosts_var="$4" silent_miss="${5:-}"
     [ -f "$cfg" ] || return 0  # host not installed — skip silently
 
     local registered
@@ -2047,12 +2130,15 @@ cmd_doctor() {
 import json, sys
 try:
     d = json.load(open(sys.argv[1]))
-    servers = d.get("mcpServers", {})
+    # Merge mcpServers and mcp keys (opencode uses "mcp"; others use "mcpServers")
+    servers = {**d.get("mcpServers", {}), **d.get("mcp", {})}
     key = next((k for k in servers if sys.argv[2].lower() in k.lower()), None)
     if key is None:
         sys.exit(1)
     v = servers[key]
     cmd = v.get("command", "")
+    # opencode "command" may be a list
+    if isinstance(cmd, list): cmd = " ".join(cmd)
     args = v.get("args", [])
     print(cmd + (" " + " ".join(str(a) for a in args) if args else ""))
 except Exception:
@@ -2070,8 +2156,10 @@ PY
         _issue "${tool} ${host_label}: registered but '${first_word}' not in PATH"
       fi
     else
-      $json_mode || miss "  ${host_label}   not registered  →  run: bash install.sh"
-      _issue "${tool} ${host_label}: not registered"
+      if [ -z "$silent_miss" ]; then
+        $json_mode || miss "  ${host_label}   not registered  →  run: bash install.sh"
+        _issue "${tool} ${host_label}: not registered"
+      fi
     fi
   }
 
@@ -2093,6 +2181,31 @@ PY
     fi
   }
 
+  _doctor_check_mcp_gemini() {
+    local tool="$1" hosts_var="$2"
+    command -v gemini >/dev/null 2>&1 || return 0
+    # Read ~/.gemini/settings.json directly — `gemini mcp list` probes live
+    # connections and blocks for seconds per server. The config file is instant.
+    local gemini_settings="$HOME/.gemini/settings.json"
+    local gemini_registered=false
+    if [ -f "$gemini_settings" ]; then
+      python3 - "$gemini_settings" "$tool" << 'PY' 2>/dev/null
+import json,sys
+d=json.load(open(sys.argv[1]))
+servers={**d.get('mcpServers',{}),**d.get('mcp',{})}
+sys.exit(0 if any(sys.argv[2] in k.lower() for k in servers.keys()) else 1)
+PY
+      [ $? -eq 0 ] && gemini_registered=true
+    fi
+    if $gemini_registered; then
+      eval "${hosts_var}+=(\"gemini\")"
+      $json_mode || ok "  gemini      registered"
+    else
+      $json_mode || miss "  gemini      not registered  →  run: bash install.sh"
+      _issue "${tool} gemini: not registered"
+    fi
+  }
+
   # tilth: delegate to `tilth doctor` which covers all 22 hosts
   local tilth_doctor_json=""
   if $tilth_ok; then
@@ -2106,27 +2219,50 @@ PY
 import json, sys
 try:
     d = json.load(sys.stdin)
+    # tilth doctor --json has two formats:
+    # Old: {hosts: {name: {registered, command, command_ok}}}
+    # New: {overall, checks: [{name, status, detail}], mcp_hosts: ...}
     hosts = d.get('hosts', {})
-    found_any = False
-    for host, info in sorted(hosts.items()):
-        found_any = True
-        if info.get('registered'):
-            cmd = info.get('command', '')
-            ok_flag = info.get('command_ok', True)
-            mark = '\033[32m\u2713\033[0m' if ok_flag else '\033[33m!\033[0m'
-            label = 'registered' if ok_flag else 'registered but command missing:'
-            print(f'    {mark}  {host:<20} {label}   {cmd}')
-        else:
-            print(f'    \033[2m\u2013\033[0m  {host:<20} config exists \u2014 not registered')
-    if not found_any:
-        print('    (no host configs found)')
+    found_any = bool(hosts)
+    if not found_any and 'checks' in d:
+        # New format: extract mcp_hosts from the checks array
+        for check in d.get('checks', []):
+            if check.get('name') == 'mcp_hosts':
+                detail = check.get('detail', '')
+                if 'registered in:' in detail:
+                    host_list = detail.split('registered in:')[-1].strip()
+                    for h in host_list.split(','):
+                        h = h.strip()
+                        if h:
+                            found_any = True
+                            print(f'    \033[32m\u2713\033[0m  {h:<20} registered')
+                break
+        if not found_any:
+            print('    (no host configs found)')
+    else:
+        for host, info in sorted(hosts.items()):
+            found_any = True
+            if info.get('registered'):
+                cmd = info.get('command', '')
+                ok_flag = info.get('command_ok', True)
+                mark = '\033[32m\u2713\033[0m' if ok_flag else '\033[33m!\033[0m'
+                label = 'registered' if ok_flag else 'registered but command missing:'
+                print(f'    {mark}  {host:<20} {label}   {cmd}')
+            else:
+                print(f'    \033[2m\u2013\033[0m  {host:<20} config exists \u2014 not registered')
+        if not found_any:
+            print('    (no host configs found)')
 except Exception as e:
     print(f'    (could not parse tilth doctor output: {e})')
 "
         echo ""
       fi
       # Feed issues from tilth doctor into our findings only when explicitly unhealthy
-      local _tilth_healthy; _tilth_healthy=$(echo "$tilth_doctor_json" | python3 -c "import json,sys; d=json.load(sys.stdin); print('true' if d.get('healthy') else 'false')" 2>/dev/null || echo "unknown")
+      # Handle both formats: old uses "healthy", new uses "overall":"pass"
+      local _tilth_healthy; _tilth_healthy=$(echo "$tilth_doctor_json" | python3 -c "
+import json,sys; d=json.load(sys.stdin)
+healthy = d.get('healthy') or d.get('overall') == 'pass'
+print('true' if healthy else 'false')" 2>/dev/null || echo "unknown")
       if [ "$_tilth_healthy" = "false" ]; then
         _issue "tilth: not registered in any MCP host (run: tilth install <host>)"
       fi
@@ -2142,20 +2278,47 @@ except Exception as e:
       _doctor_check_mcp_json "tilth" "claude-desktop" "$cd_linux"  "tilth_registered_hosts"
       _doctor_check_mcp_json "tilth" "opencode"       "$oc_cfg"    "tilth_registered_hosts"
       _doctor_check_mcp_codex "tilth" "tilth_registered_hosts"
+      _doctor_check_mcp_gemini "tilth" "tilth_registered_hosts"
       $json_mode || echo ""
     fi
   else
     $json_mode || dim "  tilth   (skipped — binary not installed)"
   fi
 
-  # serena: manual check for the four common hosts
+  # _doctor_check_mcp_json_either: check two files for the same host — only
+  # report miss if BOTH miss. Claude Code writes to ~/.claude.json (via
+  # 'claude mcp add --scope user') but some older entries live in
   $json_mode || echo -e "  ${BOLD}serena${NC}"
-  _doctor_check_mcp_json "serena" "claude-code"    "$cc_cfg"    "serena_registered_hosts"
-  _doctor_check_mcp_json "serena" "claude-code"    "$cc_global" "serena_registered_hosts"
+  # Claude Code: check both ~/.claude/settings.json and ~/.claude.json.
+  # Run settings.json first; only run .claude.json if settings.json missed (to avoid
+  # double-printing). The issues counter is reset before each attempt so a miss on
+  # settings.json doesn't count if .claude.json succeeds.
+  _doctor_check_mcp_json "serena" "claude-code" "$cc_cfg"    "serena_registered_hosts" "silent"
+  if ! printf '%s\n' "${serena_registered_hosts[@]+"${serena_registered_hosts[@]}"}" | grep -q "^claude-code$"; then
+    _doctor_check_mcp_json "serena" "claude-code" "$cc_global" "serena_registered_hosts"
+  else
+    $json_mode || ok "  claude-code   registered"
+  fi
   _doctor_check_mcp_json "serena" "claude-desktop" "$cd_mac"    "serena_registered_hosts"
   _doctor_check_mcp_json "serena" "claude-desktop" "$cd_linux"  "serena_registered_hosts"
   _doctor_check_mcp_json "serena" "opencode"       "$oc_cfg"    "serena_registered_hosts"
   _doctor_check_mcp_codex "serena" "serena_registered_hosts"
+  _doctor_check_mcp_gemini "serena" "serena_registered_hosts"
+  $json_mode || echo ""
+
+  # icm: same per-host pattern as serena
+  $json_mode || echo -e "  ${BOLD}icm${NC}"
+  _doctor_check_mcp_json "icm" "claude-code" "$cc_cfg"    "icm_registered_hosts" "silent"
+  if ! printf '%s\n' "${icm_registered_hosts[@]+"${icm_registered_hosts[@]}"}" | grep -q "^claude-code$"; then
+    _doctor_check_mcp_json "icm" "claude-code" "$cc_global" "icm_registered_hosts"
+  else
+    $json_mode || ok "  claude-code   registered"
+  fi
+  _doctor_check_mcp_json "icm" "claude-desktop" "$cd_mac"    "icm_registered_hosts"
+  _doctor_check_mcp_json "icm" "claude-desktop" "$cd_linux"  "icm_registered_hosts"
+  _doctor_check_mcp_json "icm" "opencode"       "$oc_cfg"    "icm_registered_hosts"
+  _doctor_check_mcp_codex "icm" "icm_registered_hosts"
+  _doctor_check_mcp_gemini "icm" "icm_registered_hosts"
   $json_mode || echo ""
 
   # ── 4. Summary ──────────────────────────────────────────────────────────────
@@ -2163,14 +2326,16 @@ except Exception as e:
         python3 - "$issues" "$tilth_doctor_json" \
       "FINDINGS_SEP" "${findings[@]+"${findings[@]}"}" \
       "COMPAT_SEP"   "${compat_results[@]+"${compat_results[@]}"}" \
-      "SERENA_HOSTS_SEP" "${serena_registered_hosts[@]+"${serena_registered_hosts[@]}"}" << 'PY'
+      "SERENA_HOSTS_SEP" "${serena_registered_hosts[@]+"${serena_registered_hosts[@]}"}" \
+      "ICM_HOSTS_SEP"    "${icm_registered_hosts[@]+"${icm_registered_hosts[@]}"}" << 'PY'
 import json, sys
 args = sys.argv[1:]; issues = int(args[0]); tilth_doctor_raw = args[1]
-findings, compat_raw, serena_hosts, current = [], [], [], None
+findings, compat_raw, serena_hosts, icm_hosts, current = [], [], [], [], None
 for a in args[2:]:
     if a == "FINDINGS_SEP": current = findings; continue
     if a == "COMPAT_SEP": current = compat_raw; continue
     if a == "SERENA_HOSTS_SEP": current = serena_hosts; continue
+    if a == "ICM_HOSTS_SEP": current = icm_hosts; continue
     if current is not None: current.append(a)
 compat = {}
 for entry in compat_raw:
@@ -2182,7 +2347,7 @@ tilth_mcp = None
 if tilth_doctor_raw:
     try: tilth_mcp = json.loads(tilth_doctor_raw)
     except: pass
-out = {"issues": issues, "healthy": issues == 0, "findings": findings, "compat": compat, "serena_mcp": { "registered_hosts": serena_hosts }}
+out = {"issues": issues, "healthy": issues == 0, "findings": findings, "compat": compat, "serena_mcp": { "registered_hosts": serena_hosts }, "icm_mcp": { "registered_hosts": icm_hosts }}
 if tilth_mcp is not None: out["tilth_mcp"] = tilth_mcp
 print(json.dumps(out, indent=2))
 PY
@@ -2203,6 +2368,88 @@ PY
   return "$(( issues > 0 ))"
 }
 
+# ICM memory management. `warmup` performs the one-time embedding-model download
+# (kept off by default so nothing is fetched silently behind a firewall); `status`
+# reports version, MCP hosts, and whether semantic search is enabled.
+cmd_icm() {
+  local sub="${1:-help}"
+  local icm_cfg="$HOME/.config/icm/config.toml"
+  case "$sub" in
+    warmup)
+      if ! check_cmd icm; then
+        miss "ICM not installed  →  run: bash install.sh --icm-only"
+        exit 1
+      fi
+      echo -e "\n${BOLD}ICM warmup${NC} ${DIM}— enable semantic memory${NC}\n"
+      echo "Downloads the embedding model (intfloat/multilingual-e5-base, ~270 MB)"
+      echo "from Hugging Face ONE time. ICM runs fully offline afterwards."
+      echo ""
+      if [ -t 0 ]; then
+        printf "  Proceed with the one-time download? [y/N] "
+        local ans; read -r ans || true
+        case "$ans" in [Yy]*) ;; *) echo "Aborted."; exit 0 ;; esac
+      fi
+      mkdir -p "$(dirname "$icm_cfg")"
+      python3 - "$icm_cfg" << 'PY'
+import sys, re, pathlib
+p = pathlib.Path(sys.argv[1])
+text = p.read_text() if p.exists() else ""
+# Flip enabled=true strictly inside the [embeddings] table.
+m = re.search(r'(?ms)^\[embeddings\][^\n]*\n(.*?)(?=^\[|\Z)', text)
+if m:
+    body = m.group(1)
+    if re.search(r'(?m)^\s*enabled\s*=', body):
+        body = re.sub(r'(?m)^(\s*enabled\s*=\s*).*$', r'\g<1>true', body, count=1)
+    else:
+        body = "enabled = true\n" + body
+    text = text[:m.start(1)] + body + text[m.end(1):]
+else:
+    prefix = text.rstrip() + "\n\n" if text.strip() else ""
+    text = prefix + "[embeddings]\nenabled = true\n"
+p.write_text(text)
+PY
+      echo "  Embeddings enabled in $icm_cfg"
+      echo "  Fetching model (first run may take a few minutes)..."
+      # A recall query embeds its text, forcing the model fetch without writing memory.
+      if icm recall "token-diet warmup probe" >/dev/null 2>&1; then
+        ok "ICM model ready — semantic recall is active (offline from here on)"
+      else
+        warn "Warmup query returned nothing (normal if memory is empty)."
+        echo "  If the download failed: check access to huggingface.co, and confirm ICM"
+        echo "  was built with embeddings (online install — the --local build is keyword-only)."
+      fi
+      ;;
+    status)
+      if ! check_cmd icm; then miss "ICM not installed"; exit 1; fi
+      local enabled="default(true)"
+      if [ -f "$icm_cfg" ]; then
+        enabled=$(python3 - "$icm_cfg" << 'PY'
+import sys, re, pathlib
+text = pathlib.Path(sys.argv[1]).read_text()
+m = re.search(r'(?ms)^\[embeddings\][^\n]*\n(.*?)(?=^\[|\Z)', text)
+val = "default(true)"
+if m:
+    em = re.search(r'(?m)^\s*enabled\s*=\s*(\w+)', m.group(1))
+    if em: val = em.group(1)
+print(val)
+PY
+)
+      fi
+      echo -e "\n${BOLD}ICM status${NC}\n"
+      printf "  %-22s %s\n" "Version:"    "$(icm --version 2>/dev/null | awk '{print $2}')"
+      printf "  %-22s %s\n" "MCP hosts:"  "$(hosts_registered icm)"
+      printf "  %-22s %s\n" "Embeddings:" "$enabled"
+      echo ""
+      ;;
+    *)
+      echo "Usage: token-diet icm [warmup|status]"
+      echo ""
+      echo "  warmup   One-time embedding-model download (~270 MB); enables semantic recall"
+      echo "  status   Show ICM version, MCP hosts, and embeddings on/off"
+      ;;
+  esac
+}
+
 cmd_help() {
   cat << helpEOF
 
@@ -2212,7 +2459,7 @@ USAGE
   token-diet [command]
 
 COMMANDS
-  gain              Show token savings dashboard across RTK + tilth + Serena  (default)
+  gain              Show token savings dashboard across RTK + tilth + Serena + ICM  (default)
   health            Quick health check: tools responding + MCP host registrations
   doctor            Deep configuration and hook diagnosis  [--json]
   repair            Fix what doctor finds: RTK hooks, stale MCP commands  [--dry-run] [--json]
@@ -2223,7 +2470,8 @@ COMMANDS
   explain <cmd>     Token cost breakdown for a specific command
   budget <init|status|hubs> Per-project token budget with hubs discovery
   loops             Detect agent loop patterns (commands run 3+ times)
-  route <task>      Suggest which tool (tilth/Serena/RTK) best fits the task
+  route <task>      Suggest which tool (tilth/Serena/RTK/ICM) best fits the task
+  icm <sub>         ICM memory: warmup (download model), status  [warmup|status]
   leaks             Detect files read multiple times in RTK history
   test-first <file> Suggest test file counterpart for an implementation file
   strip [--stats] <file>  Strip comments from source file to reduce tokens
@@ -2240,6 +2488,7 @@ TOOLS
   RTK    Command output compression       60-90% savings (tracked)
   tilth  AST-aware code reading           38-44% savings (structural)
   Serena LSP symbol navigation            fewer prompt turns (structural)
+  ICM    Persistent cross-tool memory     recall replaces re-reading (structural)
 
 INSTALL
   bash install.sh             Install all tools
@@ -2266,6 +2515,7 @@ case "${1:-gain}" in
   service)           shift; cmd_service "$@" ;;
   version|versions)  cmd_version ;;
   route)             shift; cmd_route "$@" ;;
+  icm)               shift; cmd_icm "$@" ;;
   leaks)             cmd_leaks ;;
   test-first)        shift; cmd_test_first "$@" ;;
   strip)             shift; cmd_strip "$@" ;;

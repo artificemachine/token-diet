@@ -59,6 +59,41 @@ remove_file() {
   fi
 }
 
+# remove_opencode_mcp_key <cfg_path> <key>
+# Removes key from the "mcp" object in an OpenCode JSON config file.
+# OpenCode 1.x uses "mcp", not "mcpServers" — using remove_json_key on
+# OpenCode configs leaves stale "mcpServers" blocks that trigger ConfigInvalidError.
+remove_opencode_mcp_key() {
+  local cfg="$1"
+  local key="$2"
+  [ -f "$cfg" ] || { miss "$cfg (mcp.$key)"; return 0; }
+  if $DRY_RUN; then
+    dry "remove mcp.$key from $cfg"
+    return 0
+  fi
+  python3 - "$cfg" "$key" << 'PY'
+import json, sys
+cfg_path, key = sys.argv[1], sys.argv[2]
+with open(cfg_path) as f:
+    d = json.load(f)
+changed = False
+if "mcp" in d and key in d["mcp"]:
+    del d["mcp"][key]
+    changed = True
+# Also remove from "mcpServers" if a stale entry exists there (legacy installs)
+if "mcpServers" in d and key in d["mcpServers"]:
+    del d["mcpServers"][key]
+    if not d["mcpServers"]:
+        del d["mcpServers"]
+    changed = True
+if changed:
+    with open(cfg_path, "w") as f:
+        json.dump(d, f, indent=2)
+        f.write("\n")
+PY
+  ok "Removed mcp.$key from $cfg"
+}
+
 # remove_json_key <cfg_path> <key>
 # Removes key from mcpServers object in a JSON config file.
 remove_json_key() {
@@ -81,6 +116,31 @@ if "mcpServers" in d and key in d["mcpServers"]:
         f.write("\n")
 PY
   ok "Removed mcpServers.$key from $cfg"
+}
+
+# remove_vscode_template_server <cfg_path> <key>
+# Removes key from the top-level "servers" object in the shared VS Code MCP
+# template. The template uses "servers" (VS Code schema), not "mcpServers".
+remove_vscode_template_server() {
+  local cfg="$1"
+  local key="$2"
+  [ -f "$cfg" ] || { miss "$cfg (servers.$key)"; return 0; }
+  if $DRY_RUN; then
+    dry "remove servers.$key from $cfg"
+    return 0
+  fi
+  python3 - "$cfg" "$key" << 'PY'
+import json, sys
+cfg_path, key = sys.argv[1], sys.argv[2]
+with open(cfg_path) as f:
+    d = json.load(f)
+if "servers" in d and key in d["servers"]:
+    del d["servers"][key]
+    with open(cfg_path, "w") as f:
+        json.dump(d, f, indent=2)
+        f.write("\n")
+PY
+  ok "Removed servers.$key from $cfg"
 }
 
 # strip_opencode_rules <cfg_path>
@@ -157,6 +217,12 @@ main() {
   remove_file "$HOME/.local/bin/token-diet"
   remove_file "$HOME/.local/bin/token-diet-dashboard"
   remove_file "$HOME/.local/bin/token-diet-mcp"
+  # Symlinks the installer leaves in ~/.local/bin (→ ~/.cargo/bin/<tool>).
+  # The install step creates these for rtk, tilth and icm but earlier uninstall
+  # versions only ran `cargo uninstall`, orphaning the symlinks. Remove them here.
+  remove_file "$HOME/.local/bin/rtk"
+  remove_file "$HOME/.local/bin/tilth"
+  remove_file "$HOME/.local/bin/icm"
 
   echo ""
   echo -e "${BOLD}Rust binaries (cargo uninstall)${NC}"
@@ -164,9 +230,11 @@ main() {
     if $DRY_RUN; then
       dry "cargo uninstall rtk"
       dry "cargo uninstall tilth"
+      dry "cargo uninstall icm"
     else
       cargo uninstall rtk  2>/dev/null && ok "cargo uninstall rtk"  || miss "rtk (not installed)"
       cargo uninstall tilth 2>/dev/null && ok "cargo uninstall tilth" || miss "tilth (not installed)"
+      cargo uninstall icm  2>/dev/null && ok "cargo uninstall icm"  || miss "icm (not installed)"
     fi
   else
     miss "cargo not found — skipping Rust binary removal"
@@ -176,46 +244,57 @@ main() {
   echo -e "${BOLD}MCP registrations — Claude Code${NC}"
   remove_json_key "$HOME/.claude/settings.json" "tilth"
   remove_json_key "$HOME/.claude/settings.json" "serena"
+  remove_json_key "$HOME/.claude/settings.json" "icm"
 
   echo ""
   echo -e "${BOLD}MCP registrations — Claude Desktop (macOS)${NC}"
   remove_json_key "$HOME/Library/Application Support/Claude/claude_desktop_config.json" "tilth"
   remove_json_key "$HOME/Library/Application Support/Claude/claude_desktop_config.json" "serena"
+  remove_json_key "$HOME/Library/Application Support/Claude/claude_desktop_config.json" "icm"
 
   echo ""
   echo -e "${BOLD}MCP registrations — Claude Desktop (Linux)${NC}"
   remove_json_key "$HOME/.config/Claude/claude_desktop_config.json" "tilth"
   remove_json_key "$HOME/.config/Claude/claude_desktop_config.json" "serena"
+  remove_json_key "$HOME/.config/Claude/claude_desktop_config.json" "icm"
 
   echo ""
   echo -e "${BOLD}MCP registrations — OpenCode${NC}"
-  remove_json_key "$HOME/.opencode.json" "tilth"
-  remove_json_key "$HOME/.opencode.json" "serena"
+  remove_opencode_mcp_key "$HOME/.opencode.json" "tilth"
+  remove_opencode_mcp_key "$HOME/.opencode.json" "serena"
+  remove_opencode_mcp_key "$HOME/.opencode.json" "icm"
+  remove_opencode_mcp_key "$HOME/.config/opencode/opencode.json" "tilth"
+  remove_opencode_mcp_key "$HOME/.config/opencode/opencode.json" "serena"
+  remove_opencode_mcp_key "$HOME/.config/opencode/opencode.json" "icm"
   strip_opencode_rules "$HOME/.config/opencode/opencode.json"
 
   echo ""
   echo -e "${BOLD}MCP registrations — VS Code${NC}"
   remove_json_key "$HOME/.config/Code/User/settings.json" "tilth"
   remove_json_key "$HOME/.config/Code/User/settings.json" "serena"
+  remove_json_key "$HOME/.config/Code/User/settings.json" "icm"
+  # ICM (and Serena/tilth) are written to the shared VS Code MCP template under
+  # the top-level "servers" key, not "mcpServers". Strip icm from it here.
+  remove_vscode_template_server "$HOME/.config/token-diet/vscode-mcp.template.json" "icm"
 
   echo ""
   echo -e "${BOLD}Codex TOML — MCP block removal${NC}"
   local codex_cfg="$HOME/.codex/config.toml"
   if [ -f "$codex_cfg" ]; then
     if $DRY_RUN; then
-      dry "remove [mcp_servers.serena] block from $codex_cfg"
+      dry "remove [mcp_servers.{tilth,serena,icm}] blocks from $codex_cfg"
     else
       python3 - "$codex_cfg" << 'PY'
 import sys, re
 path = sys.argv[1]
 with open(path) as f:
     content = f.read()
-# Remove [mcp_servers.tilth] and [mcp_servers.serena] blocks
-content = re.sub(r'\[mcp_servers\.(tilth|serena)\][^\[]*', '', content, flags=re.DOTALL)
+# Remove [mcp_servers.tilth], [mcp_servers.serena] and [mcp_servers.icm] blocks
+content = re.sub(r'\[mcp_servers\.(tilth|serena|icm)\][^\[]*', '', content, flags=re.DOTALL)
 with open(path, "w") as f:
     f.write(content)
 PY
-      ok "Removed mcp_servers.{tilth,serena} from $codex_cfg"
+      ok "Removed mcp_servers.{tilth,serena,icm} from $codex_cfg"
     fi
   else
     miss "$codex_cfg"
@@ -258,6 +337,10 @@ PY
     else
       miss "$HOME/.serena/memories"
     fi
+
+    echo ""
+    echo -e "${BOLD}ICM config (--include-data)${NC}"
+    remove_file "$HOME/.config/icm/config.toml"
   fi
 
   if $INCLUDE_DOCKER; then

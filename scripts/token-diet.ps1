@@ -22,7 +22,13 @@ if ($args -and $args.Count -gt 0) { $SubArgs += $args }
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-$script:TD_VERSION = '1.7.11'
+# 'icm' is a built-in PowerShell alias for Invoke-Command and outranks external
+# commands in resolution — remove it so `icm` and `Get-Command icm` resolve to the
+# real ICM binary, not Invoke-Command. Without this, `& icm ...` runs Invoke-Command
+# and Test-Tool 'icm' is always true (the alias always exists).
+Remove-Item Alias:icm -Force -ErrorAction SilentlyContinue
+
+$script:TD_VERSION = '1.10.5'
 if ($Version) { Write-Output "token-diet $script:TD_VERSION"; exit 0 }
 $ScriptDir = $PSScriptRoot
 
@@ -210,10 +216,22 @@ function Invoke-Gain {
         Write-Miss 'Serena not installed  ->  run: Install.ps1 -SerenaOnly'
     }
 
-    $active = ([int][bool]$s) + ([int](Test-Tool 'tilth')) + ([int]($serenaMode -ne 'none'))
     Write-Output ''
-    Write-Output "  Tools active: $active/3"
-    if ($active -eq 3)     { Write-Output "`n  Full stack active. Maximum token savings." }
+    Write-Output 'ICM — persistent cross-tool memory'
+    $icmActive = Test-Tool 'icm'
+    if ($icmActive) {
+        $iv = & icm --version 2>$null
+        Write-Output "  Version:   $iv"
+        Write-Output "  MCP hosts: $(Get-HostsRegistered 'icm')"
+        Write-Ok "ICM $iv — active"
+    } else {
+        Write-Miss 'ICM not installed  ->  run: Install.ps1 -IcmOnly'
+    }
+
+    $active = ([int][bool]$s) + ([int](Test-Tool 'tilth')) + ([int]($serenaMode -ne 'none')) + ([int]$icmActive)
+    Write-Output ''
+    Write-Output "  Tools active: $active/4"
+    if ($active -eq 4)     { Write-Output "`n  Full stack active. Maximum token savings." }
     elseif ($active -gt 0) { Write-Output "`n  Partial stack — run Install.ps1 to complete setup." }
     else                   { Write-Output "`n  No tools installed — run Install.ps1 to get started." }
     Write-Output ''
@@ -273,28 +291,36 @@ function Invoke-Doctor([string[]]$Remaining) {
         Write-Output "──────────────────────────────────────────────────"
     }
 
-    $tools = @('tilth', 'serena')
+    $tools = @('tilth', 'serena', 'icm')
     foreach ($tool in $tools) {
         if (-not $jsonMode) { Write-Output "  $tool" }
         $issue = Get-CodexMcpCommandIssue $tool
         if ($issue) {
             if (-not $jsonMode) { Write-Output "  !    codex       $issue" }
-            $issues++; $findings += "serena codex: $issue"
+            $issues++; $findings += "$tool codex: $issue"
         } elseif (-not $jsonMode) {
             Write-Output "  ✓    codex       registered"
         }
     }
 
     if ($jsonMode) {
+        # registered_hosts per tool — keep 'mcp list' consistent across all three.
+        # Get-HostsRegistered returns 'none' or a comma-joined host list.
+        $hostsFor = {
+            param($t)
+            $h = Get-HostsRegistered $t
+            if ($h -eq 'none') { return @() }
+            return @($h -split ',')
+        }
         $out = @{
             issues = $issues
             healthy = ($issues -eq 0)
             findings = $findings
-            tilth_mcp = @{
-                registered_hosts = @() 
-            }
+            tilth_mcp  = @{ registered_hosts = (& $hostsFor 'tilth') }
+            serena_mcp = @{ registered_hosts = (& $hostsFor 'serena') }
+            icm_mcp    = @{ registered_hosts = (& $hostsFor 'icm') }
         }
-        $out | ConvertTo-Json | Write-Output
+        $out | ConvertTo-Json -Depth 5 | Write-Output
     } else {
         Write-Output "──────────────────────────────────────────────────"
         if ($issues -eq 0) {
@@ -661,11 +687,16 @@ function Invoke-Route([string[]]$Remaining) {
         Write-Output '-> tilth (AST-aware reading)'
         Write-Output '  Best for: reading files, searching symbols, exploring structure'
         Write-Output '  Command:  use tilth MCP tools (tilth_read, tilth_search, tilth_files)'
+    } elseif ($lower -match 'remember|recall|memory|memoir|forget|persist|what did|last (time|session)|prior (decision|session|work)') {
+        Write-Output '-> ICM (persistent memory)'
+        Write-Output '  Best for: recalling past decisions, storing facts, cross-session/cross-tool memory'
+        Write-Output '  Command:  use icm MCP tools (recall, remember) — shared across Claude/Codex/Gemini/OpenCode'
     } else {
-        Write-Output 'No clear match — all three tools may apply:'
+        Write-Output 'No clear match — these tools may apply:'
         Write-Output ''; Write-Output '  tilth   — reading/searching code (AST-aware, fast)'
         Write-Output '  Serena  — renaming/navigating symbols (LSP-powered)'
         Write-Output '  RTK     — running CLI commands (output compression)'
+        Write-Output '  ICM     — recalling/storing memory across sessions and tools'
     }
 }
 
@@ -830,13 +861,29 @@ function Invoke-Mcp([string[]]$Remaining) {
             Invoke-Update $args
         }
         { $_ -in 'list','status' } {
-            Invoke-Doctor @('-Json') | python3 -c 'import json, sys; d=json.load(sys.stdin); print("\nRegistered MCP Hosts:"); 
-for h in d.get("tilth_mcp", {}).get("registered_hosts", []): print(f"  ✓ {h}")'
+            Invoke-Doctor @('-Json') | python3 -c 'import json, sys
+try:
+    d = json.load(sys.stdin)
+except Exception:
+    d = {}
+t_hosts = d.get("tilth_mcp", {}).get("registered_hosts", [])
+s_hosts = d.get("serena_mcp", {}).get("registered_hosts", [])
+i_hosts = d.get("icm_mcp", {}).get("registered_hosts", [])
+all_hosts = sorted(set(list(t_hosts) + list(s_hosts) + list(i_hosts)))
+print("\nRegistered MCP Hosts:")
+if not all_hosts:
+    print("  (none)")
+for h in all_hosts:
+    st = []
+    if h in t_hosts: st.append("tilth")
+    if h in s_hosts: st.append("serena")
+    if h in i_hosts: st.append("icm")
+    print("  ✓ %-16s (%s)" % (h, ", ".join(st)))'
         }
         default {
             Write-Output "Usage: token-diet mcp [install|list]"
             Write-Output ""
-            Write-Output "  install   Register token-diet MCP servers (tilth/Serena) in detected AI hosts"
+            Write-Output "  install   Register token-diet MCP servers (tilth/Serena/ICM) in detected AI hosts"
             Write-Output "  list      Show hosts where token-diet MCP is currently registered"
             exit 1
         }
@@ -981,6 +1028,91 @@ function Invoke-Clean {
     Write-Output ""
 }
 
+# ICM memory management. `warmup` performs the one-time embedding-model download
+# (kept off by default so nothing is fetched silently behind a firewall); `status`
+# reports version, MCP hosts, and whether semantic search is enabled.
+function Invoke-Icm([string[]]$Remaining) {
+    $sub = if ($Remaining.Count -gt 0) { $Remaining[0] } else { 'help' }
+    # ICM config precedence honors ~/.config/icm/config.toml on all platforms.
+    $icmCfg = Join-Path (Get-UserHome) '.config/icm/config.toml'
+
+    switch ($sub) {
+        'warmup' {
+            if (-not (Test-Tool 'icm')) {
+                Write-Miss 'ICM not installed  ->  run: Install.ps1 -IcmOnly'
+                exit 1
+            }
+            Write-Output "`n=== ICM warmup — enable semantic memory ===`n"
+            Write-Output 'Downloads the embedding model (intfloat/multilingual-e5-base, ~270 MB)'
+            Write-Output 'from Hugging Face ONE time. ICM runs fully offline afterwards.'
+            Write-Output ''
+
+            $cfgDir = Split-Path $icmCfg -Parent
+            if (-not (Test-Path $cfgDir)) { New-Item -ItemType Directory -Path $cfgDir -Force | Out-Null }
+
+            # Flip enabled=true strictly inside the [embeddings] table — leave every
+            # other `enabled` key (extraction/recall/cloud) untouched.
+            $warmupCode = @'
+import sys, re, pathlib
+p = pathlib.Path(sys.argv[1])
+text = p.read_text() if p.exists() else ""
+m = re.search(r'(?ms)^\[embeddings\][^\n]*\n(.*?)(?=^\[|\Z)', text)
+if m:
+    body = m.group(1)
+    if re.search(r'(?m)^\s*enabled\s*=', body):
+        body = re.sub(r'(?m)^(\s*enabled\s*=\s*).*$', r'\g<1>true', body, count=1)
+    else:
+        body = "enabled = true\n" + body
+    text = text[:m.start(1)] + body + text[m.end(1):]
+else:
+    prefix = text.rstrip() + "\n\n" if text.strip() else ""
+    text = prefix + "[embeddings]\nenabled = true\n"
+p.write_text(text)
+'@
+            Invoke-Python -Code $warmupCode -PyArgs @($icmCfg) | Out-Null
+            Write-Output "  Embeddings enabled in $icmCfg"
+            Write-Output '  Fetching model (first run may take a few minutes)...'
+            # A recall query embeds its text, forcing the model fetch without writing memory.
+            & icm recall "token-diet warmup probe" 2>$null | Out-Null
+            if ($LASTEXITCODE -eq 0) {
+                Write-Ok 'ICM model ready — semantic recall is active (offline from here on)'
+            } else {
+                Write-Warn 'Warmup query returned nothing (normal if memory is empty).'
+                Write-Warn 'If the download failed: check access to huggingface.co, and confirm ICM'
+                Write-Warn 'was built with embeddings (online install — the -Local build is keyword-only).'
+            }
+        }
+        'status' {
+            if (-not (Test-Tool 'icm')) { Write-Miss 'ICM not installed'; exit 1 }
+            $enabled = 'default(true)'
+            if (Test-Path $icmCfg) {
+                $statusCode = @'
+import sys, re, pathlib
+text = pathlib.Path(sys.argv[1]).read_text()
+m = re.search(r'(?ms)^\[embeddings\][^\n]*\n(.*?)(?=^\[|\Z)', text)
+val = "default(true)"
+if m:
+    em = re.search(r'(?m)^\s*enabled\s*=\s*(\w+)', m.group(1))
+    if em: val = em.group(1)
+print(val)
+'@
+                $enabled = (Invoke-Python -Code $statusCode -PyArgs @($icmCfg) | Select-Object -First 1)
+            }
+            Write-Output "`n=== ICM status ===`n"
+            Write-Output ('  {0,-22} {1}' -f 'Version:',    (& icm --version 2>$null))
+            Write-Output ('  {0,-22} {1}' -f 'MCP hosts:',  (Get-HostsRegistered 'icm'))
+            Write-Output ('  {0,-22} {1}' -f 'Embeddings:', $enabled)
+            Write-Output ''
+        }
+        default {
+            Write-Output 'Usage: token-diet icm [warmup|status]'
+            Write-Output ''
+            Write-Output '  warmup   One-time embedding-model download (~270 MB); enables semantic recall'
+            Write-Output '  status   Show ICM version, MCP hosts, and embeddings on/off'
+        }
+    }
+}
+
 function Invoke-Help {
     $helpText = @"
 
@@ -1001,7 +1133,8 @@ COMMANDS
   explain <cmd>           Token cost breakdown for a specific command
   budget <init|status>    Per-project token budget with warn/hard thresholds
   loops                   Detect agent loop patterns (commands run 3+ times)
-  route <task>            Suggest which tool (tilth/Serena/RTK) best fits the task
+  route <task>            Suggest which tool (tilth/Serena/RTK/ICM) best fits the task
+  icm <sub>               ICM memory: warmup (download model), status  [warmup|status]
   leaks                   Detect files read multiple times in RTK history
   test-first <file>       Suggest test file counterpart for an implementation file
   strip [--stats] <file>  Strip comments from source file to reduce tokens
@@ -1019,6 +1152,7 @@ TOOLS
   RTK    Command output compression       60-90% savings (tracked)
   tilth  AST-aware code reading           38-44% savings (structural)
   Serena LSP symbol navigation            fewer prompt turns (structural)
+  ICM    Persistent cross-tool memory     recall replaces re-reading (structural)
 
 INSTALL
   .\Install.ps1             Install all tools
@@ -1047,6 +1181,7 @@ switch ($Command) {
     'clean'                             { Invoke-Clean }
     { $_ -in 'version','versions' }     { Invoke-Version }
     'route'                             { Invoke-Route      $SubArgs }
+    'icm'                               { Invoke-Icm        $SubArgs }
     'leaks'                             { Invoke-Leaks }
     'test-first'                        { Invoke-TestFirst  $SubArgs }
     'strip'                             { Invoke-Strip      $SubArgs }

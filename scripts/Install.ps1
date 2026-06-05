@@ -968,6 +968,62 @@ args = ["serve", "--compact"]
     }
 }
 
+# --- OpenCode prompt rules injection ------------------------------------------
+function Inject-OpenCodeRules {
+    if (-not $script:HasOpenCode) { return }
+
+    $ocPromptCfg = Join-Path $env:USERPROFILE ".config\opencode\opencode.json"
+    $rulesFile = Join-Path $script:ScriptDir "lib\opencode-rules.md"
+
+    if (-not (Test-Path $rulesFile)) {
+        Write-Warn "OpenCode rules template missing: $rulesFile"
+        return
+    }
+    if (-not (Test-Path $ocPromptCfg)) {
+        Write-Info "OpenCode config not found at $ocPromptCfg — skipping prompt injection"
+        return
+    }
+
+    if ($DryRun) {
+        Write-DryRun "Inject token-diet rules into mode.build.prompt + mode.plan.prompt at $ocPromptCfg"
+        return
+    }
+
+    try {
+        $rulesBody = (Get-Content $rulesFile -Raw -Encoding UTF8).Trim()
+        $BEGIN = "<!-- token-diet:begin -->"
+        $END   = "<!-- token-diet:end -->"
+        $block = "$BEGIN`n$rulesBody`n$END"
+
+        $data = Get-Content $ocPromptCfg -Raw -Encoding UTF8 | ConvertFrom-Json
+        if (-not $data.PSObject.Properties["mode"]) {
+            $data | Add-Member -NotePropertyName "mode" -NotePropertyValue ([PSCustomObject]@{})
+        }
+
+        foreach ($modeName in @("build", "plan")) {
+            if (-not $data.mode.PSObject.Properties[$modeName]) {
+                $data.mode | Add-Member -NotePropertyName $modeName -NotePropertyValue ([PSCustomObject]@{})
+            }
+            $existing = if ($data.mode.$modeName.PSObject.Properties["prompt"]) { $data.mode.$modeName.prompt } else { "" }
+            if (-not $existing) { $existing = "" }
+
+            if ($existing -match [regex]::Escape($BEGIN)) {
+                $pattern = [regex]::Escape($BEGIN) + "[\s\S]*?" + [regex]::Escape($END)
+                $new = [regex]::Replace($existing, $pattern, $block, [System.Text.RegularExpressions.RegexOptions]::None)
+            } else {
+                $sep = if ($existing) { "`n`n" } else { "" }
+                $new = ($existing + $sep + $block).TrimStart("`n")
+            }
+            $data.mode.$modeName | Add-Member -NotePropertyName "prompt" -NotePropertyValue $new -Force
+        }
+
+        $data | ConvertTo-Json -Depth 10 | Set-Content -Path $ocPromptCfg -Encoding UTF8
+        Write-Ok "OpenCode prompt rules injected: $ocPromptCfg"
+    } catch {
+        Write-Warn "OpenCode prompt injection failed: $_"
+    }
+}
+
 # --- Overlap fix --------------------------------------------------------------
 function Configure-Dedup {
     Write-Header "Overlap fix (Serena dedup)"
@@ -1112,7 +1168,7 @@ if errorlevel 9009 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0tok
     $tkdDoc = @"
 # Token Diet — AI Context Optimization
 
-``token-diet`` is a unified optimization layer for AI agents. It orchestrates RTK, tilth, and Serena to maximize context efficiency.
+``token-diet`` is a unified optimization layer for AI agents. It orchestrates RTK, tilth, Serena, and ICM to maximize context efficiency.
 
 ## Core Commands
 
@@ -1131,6 +1187,7 @@ if errorlevel 9009 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0tok
    - Use **tilth** for code reading and symbol search.
    - Use **Serena** for complex refactoring and diagnostics.
    - Use **RTK** for running commands and builds.
+   - Use **ICM** for recalling past decisions and storing facts (``icm recall``, ``icm store``).
 3. **Be Precise**: Use ``tilth_read`` with line ranges (found via ``token-diet diff-reads``) to minimize context waste.
 4. **Optimization**: If you detect you are looping or wasting tokens, run ``token-diet loops`` or ``token-diet leaks`` to self-audit.
 "@
@@ -1371,6 +1428,9 @@ if ($doSerena) { Install-Serena }
 if ($doIcm)    { Install-ICM }
 
 if (-not $skipDedup -and $doTilth -and $doSerena) { Configure-Dedup }
+
+# Inject token-diet usage rules into OpenCode mode prompts (idempotent)
+Inject-OpenCodeRules
 
 # Install token-diet CLI, dashboard, and host doc hooks
 Install-TokenDiet

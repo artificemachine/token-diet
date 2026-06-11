@@ -10,7 +10,7 @@
         "--context=ide",
         "--project-from-cwd"
       ],
-      "command": "C:\\Users\\roym\\.local\\bin\\uvx.exe",
+      "command": "uvx",
       "env": {
         "SERENA_NO_TELEMETRY": "1"
       }
@@ -19,7 +19,7 @@
       "args": [
         "--mcp"
       ],
-      "command": "C:\\Users\\roym\\.local\\bin\\tilth.exe"
+      "command": "tilth"
     }
   }
 }

@@ -1,0 +1,31 @@
+name: Path Leak Guard
+
+# Catches hardcoded local-machine paths (/Users/<name>, C:\Users\<name>, ...)
+# in PR diffs — the server-side equivalent of pre-commit check 1d, which never
+# runs on external fork PRs or on API-side merges.
+#
+# Uses `pull_request` (not pull_request_target): fork code runs with a
+# read-only token and no secrets. The job only reads the diff, so that's all
+# it needs. To actually BLOCK merges, mark "Path Leak Guard" as a required
+# status check in branch protection for main.
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    name: Path Leak Guard
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # need base + head to diff the PR range
+      - name: Scan PR diff for hardcoded local paths
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: bash .github/scripts/path-leak-scan.sh

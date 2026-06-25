@@ -16,7 +16,7 @@ Token optimization stack installer and compliance kit for RTK + tilth + Serena +
 - Run the full test suite before any commit: `bats tests/*.bats && pytest tests/ -q`.
 - `CHANGELOG.md` is append-only — never edit or reorder existing entries.
 - Bump `TD_VERSION` in both `scripts/token-diet` AND `scripts/token-diet.ps1` before every release commit. The pre-commit hook warns when the version matches the latest git tag.
-- Never let installed binaries depend on the local repo path (`~/DevOpsSec`). All installed paths must use `~/.local/bin`, `~/.config`, or other standard system paths.
+- Never let installed binaries depend on the local repo path for execution. All installed paths must use `~/.local/bin`, `~/.config`, or other standard system paths.
 - Submodule forks in `forks/` are pinned — never update them automatically.
 - Regenerate `compliance/SBOM.template.json` on each release.
 
@@ -161,4 +161,4 @@ git submodule update --remote             # pull latest from forks
 
 ## Strict Installation Decoupling
 
-Once installed (e.g., to ~/.local/bin), the project binary must NEVER depend on the local repository path (~/DevOpsSec) for execution, configuration, or data. All paths must be relative to the installation root or use standard system config paths (~/.config).
+Once installed (e.g., to ~/.local/bin), the project binary must NEVER depend on the local repository path for execution, configuration, or data. All paths must be relative to the installation root or use standard system config paths (~/.config).

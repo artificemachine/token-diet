@@ -73,7 +73,6 @@ def serena_stats():
         candidates = [
             pathlib.Path(__file__).parent.parent / "forks" / "serena" / "pyproject.toml",
             pathlib.Path.cwd() / "forks" / "serena" / "pyproject.toml",
-            pathlib.Path.home() / "DevOpsSec" / "token-diet" / "forks" / "serena" / "pyproject.toml"
         ]
         for pyp in candidates:
             if pyp.exists():

@@ -4,6 +4,11 @@ All notable changes to token-diet will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [1.10.6] — 2026-07-06
+
+### Fixed
+- Installer: config writers no longer reset a malformed existing config to `{}` and overwrite it with a stub. On a JSON parse error the installer now backs the file up to a timestamped `.corrupt-<ts>` copy and aborts (exit 3) instead of destroying it. Combined `FileNotFoundError`/`JSONDecodeError` handlers were split so a genuinely missing config still starts fresh. Covers the OpenCode, Cowork/Claude Desktop, and VS Code MCP config writers. Updated install.bats cycles 5.2/5.3 to assert the abort-and-preserve contract.
+
 ## [1.7.9] — 2026-05-14
 
 ### Fixed

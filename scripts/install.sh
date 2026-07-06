@@ -162,10 +162,14 @@ block = f"{BEGIN}\n{rules_body}\n{END}"
 
 try:
     with open(cfg_path) as f: data = json.load(f)
-except (FileNotFoundError, json.JSONDecodeError, ValueError):
-    if sys.argv[1] and __import__('os').path.exists(cfg_path):
-        shutil.copy2(cfg_path, cfg_path + ".bak")
+except FileNotFoundError:
     data = {}
+except (json.JSONDecodeError, ValueError) as _e:
+    import time as _t
+    _bak = cfg_path + ".corrupt-" + _t.strftime("%Y%m%d-%H%M%S")
+    shutil.copy2(cfg_path, _bak)
+    print(f"[token-diet] ABORT: {cfg_path} is malformed JSON ({_e}); backed up to {_bak}. Refusing to overwrite existing config — fix it and re-run.", file=sys.stderr)
+    sys.exit(3)
 
 data.setdefault("mode", {})
 pattern = re.compile(re.escape(BEGIN) + r".*?" + re.escape(END), re.DOTALL)
@@ -764,11 +768,12 @@ try:
     with open(cfg) as f: data = json.load(f)
 except FileNotFoundError:
     data = {}
-except (json.JSONDecodeError, ValueError):
-    backup = cfg + ".bak"
-    shutil.copy2(cfg, backup)
-    print(f"[token-diet] WARNING: malformed JSON in {cfg} — backed up to {backup}, starting fresh", file=sys.stderr)
-    data = {}
+except (json.JSONDecodeError, ValueError) as _e:
+    import time as _t
+    _bak = cfg + ".corrupt-" + _t.strftime("%Y%m%d-%H%M%S")
+    shutil.copy2(cfg, _bak)
+    print(f"[token-diet] ABORT: {cfg} is malformed JSON ({_e}); backed up to {_bak}. Refusing to overwrite existing config — fix it and re-run.", file=sys.stderr)
+    sys.exit(3)
 data.setdefault("mcp", {})
 serena_exe = os.path.join(project_root, "forks", "serena", ".venv", "Scripts", "serena-mcp-server.exe")
 if not os.path.exists(serena_exe):
@@ -791,11 +796,12 @@ try:
     with open(cfg) as f: data = json.load(f)
 except FileNotFoundError:
     data = {}
-except (json.JSONDecodeError, ValueError):
-    backup = cfg + ".bak"
-    shutil.copy2(cfg, backup)
-    print(f"[token-diet] WARNING: malformed JSON in {cfg} — backed up to {backup}, starting fresh", file=sys.stderr)
-    data = {}
+except (json.JSONDecodeError, ValueError) as _e:
+    import time as _t
+    _bak = cfg + ".corrupt-" + _t.strftime("%Y%m%d-%H%M%S")
+    shutil.copy2(cfg, _bak)
+    print(f"[token-diet] ABORT: {cfg} is malformed JSON ({_e}); backed up to {_bak}. Refusing to overwrite existing config — fix it and re-run.", file=sys.stderr)
+    sys.exit(3)
 data.setdefault("mcp", {})
 data["mcp"]["serena"] = {
     "type": "local",
@@ -833,11 +839,12 @@ try:
     with open(cfg) as f: data = json.load(f)
 except FileNotFoundError:
     data = {}
-except (json.JSONDecodeError, ValueError):
-    backup = cfg + ".bak"
-    shutil.copy2(cfg, backup)
-    print(f"[token-diet] WARNING: malformed JSON in {cfg} — backed up to {backup}, starting fresh", file=sys.stderr)
-    data = {}
+except (json.JSONDecodeError, ValueError) as _e:
+    import time as _t
+    _bak = cfg + ".corrupt-" + _t.strftime("%Y%m%d-%H%M%S")
+    shutil.copy2(cfg, _bak)
+    print(f"[token-diet] ABORT: {cfg} is malformed JSON ({_e}); backed up to {_bak}. Refusing to overwrite existing config — fix it and re-run.", file=sys.stderr)
+    sys.exit(3)
 data.setdefault("mcpServers", {})
 data["mcpServers"]["serena"] = {
     "command": "docker",
@@ -857,11 +864,12 @@ try:
     with open(cfg) as f: data = json.load(f)
 except FileNotFoundError:
     data = {}
-except (json.JSONDecodeError, ValueError):
-    backup = cfg + ".bak"
-    shutil.copy2(cfg, backup)
-    print(f"[token-diet] WARNING: malformed JSON in {cfg} — backed up to {backup}, starting fresh", file=sys.stderr)
-    data = {}
+except (json.JSONDecodeError, ValueError) as _e:
+    import time as _t
+    _bak = cfg + ".corrupt-" + _t.strftime("%Y%m%d-%H%M%S")
+    shutil.copy2(cfg, _bak)
+    print(f"[token-diet] ABORT: {cfg} is malformed JSON ({_e}); backed up to {_bak}. Refusing to overwrite existing config — fix it and re-run.", file=sys.stderr)
+    sys.exit(3)
 data.setdefault("mcpServers", {})
 data["mcpServers"]["serena"] = {
     "command": "uvx",
@@ -881,8 +889,14 @@ import json, sys
 cfg = sys.argv[1]
 try:
     with open(cfg) as f: data = json.load(f)
-except (FileNotFoundError, json.JSONDecodeError):
+except FileNotFoundError:
     data = {}
+except (json.JSONDecodeError, ValueError) as _e:
+    import shutil, time
+    _bak = cfg + ".corrupt-" + time.strftime("%Y%m%d-%H%M%S")
+    shutil.copy2(cfg, _bak)
+    print(f"[token-diet] ABORT: {cfg} is malformed JSON ({_e}); backed up to {_bak}. Refusing to overwrite existing config — fix it and re-run.", file=sys.stderr)
+    sys.exit(3)
 data.setdefault("mcpServers", {})
 data["mcpServers"]["tilth"] = {"command": "tilth", "args": ["mcp"]}
 with open(cfg, "w") as f:
@@ -1082,8 +1096,14 @@ import json, sys, pathlib
 p = pathlib.Path(sys.argv[1])
 try:
     data = json.loads(p.read_text())
-except (FileNotFoundError, json.JSONDecodeError, ValueError):
+except FileNotFoundError:
     data = {}
+except (json.JSONDecodeError, ValueError) as _e:
+    import shutil, time
+    _bak = str(p) + ".corrupt-" + time.strftime("%Y%m%d-%H%M%S")
+    shutil.copy2(str(p), _bak)
+    print(f"[token-diet] ABORT: {p} is malformed JSON ({_e}); backed up to {_bak}. Refusing to overwrite existing config — fix it and re-run.", file=sys.stderr)
+    sys.exit(3)
 data.setdefault("servers", {})
 data["servers"]["icm"] = {"command": "icm", "args": ["serve", "--compact"]}
 p.write_text(json.dumps(data, indent=2) + "\n")
@@ -1113,10 +1133,12 @@ try:
     with open(cfg) as f: data = json.load(f)
 except FileNotFoundError:
     data = {}
-except (json.JSONDecodeError, ValueError):
-    shutil.copy2(cfg, cfg + ".bak")
-    print(f"[token-diet] WARNING: malformed JSON in {cfg} — backed up to {cfg}.bak, starting fresh", file=sys.stderr)
-    data = {}
+except (json.JSONDecodeError, ValueError) as _e:
+    import time as _t
+    _bak = cfg + ".corrupt-" + _t.strftime("%Y%m%d-%H%M%S")
+    shutil.copy2(cfg, _bak)
+    print(f"[token-diet] ABORT: {cfg} is malformed JSON ({_e}); backed up to {_bak}. Refusing to overwrite existing config — fix it and re-run.", file=sys.stderr)
+    sys.exit(3)
 data.setdefault("mcp", {})
 data["mcp"]["icm"] = {"type": "local", "command": ["icm", "serve", "--compact"], "enabled": True}
 with open(cfg, "w") as f:
@@ -1138,9 +1160,12 @@ try:
     with open(cfg) as f: data = json.load(f)
 except FileNotFoundError:
     data = {}
-except (json.JSONDecodeError, ValueError):
-    shutil.copy2(cfg, cfg + ".bak")
-    data = {}
+except (json.JSONDecodeError, ValueError) as _e:
+    import time as _t
+    _bak = cfg + ".corrupt-" + _t.strftime("%Y%m%d-%H%M%S")
+    shutil.copy2(cfg, _bak)
+    print(f"[token-diet] ABORT: {cfg} is malformed JSON ({_e}); backed up to {_bak}. Refusing to overwrite existing config — fix it and re-run.", file=sys.stderr)
+    sys.exit(3)
 data.setdefault("mcpServers", {})
 data["mcpServers"]["icm"] = {"command": "icm", "args": ["serve", "--compact"]}
 with open(cfg, "w") as f:

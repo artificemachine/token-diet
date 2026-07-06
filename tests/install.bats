@@ -263,32 +263,34 @@ PY
 }
 
 # ---------------------------------------------------------------------------
-# Cycle 5.2 — malformed JSON recovery: opencode
+# Cycle 5.2 — malformed JSON is preserved, not overwritten: opencode
 # ---------------------------------------------------------------------------
 
-@test "install: --serena-only recovers from malformed opencode config (backs up + fresh)" {
+@test "install: --serena-only aborts and preserves a malformed opencode config (backs up, no stub)" {
   mock_install_prereqs
   mock_cmd opencode
-  # Malformed JSON — json.load will raise JSONDecodeError without the fix
+  # Malformed JSON — the installer must refuse to overwrite it with a fresh stub.
   printf '{"broken json\n' > "$TMP_HOME/.opencode.json"
 
   run bash "$SCRIPTS_DIR/install.sh" --serena-only --hosts opencode
-  [ "$status" -eq 0 ]
+  # Safer contract: abort loudly instead of destroying existing (if broken) config.
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"malformed JSON"* ]]
 
-  # After recovery, the config must be valid JSON with serena registered
-  python3 - "$TMP_HOME/.opencode.json" << 'PY'
-import json, sys
-d = json.load(open(sys.argv[1]))
-servers = d.get("mcp", {})
-assert "serena" in servers, f"serena missing after malformed-JSON recovery: {list(servers.keys())}"
-PY
+  # Original file is left untouched (NOT replaced with a fresh {serena} stub)...
+  grep -q "broken json" "$TMP_HOME/.opencode.json"
+
+  # ...and a timestamped .corrupt-* backup was written capturing it.
+  local n
+  n=$(ls "$TMP_HOME"/.opencode.json.corrupt-* 2>/dev/null | wc -l | tr -d ' ')
+  [ "$n" -ge 1 ]
 }
 
 # ---------------------------------------------------------------------------
-# Cycle 5.3 — malformed JSON recovery: cowork (Claude Desktop)
+# Cycle 5.3 — malformed JSON is preserved, not overwritten: cowork (Claude Desktop)
 # ---------------------------------------------------------------------------
 
-@test "install: --serena-only recovers from malformed cowork config (backs up + fresh)" {
+@test "install: --serena-only aborts and preserves a malformed cowork config (backs up, no stub)" {
   mock_install_prereqs
   mock_cmd opencode  # also detect opencode so --hosts cowork filter has >1 choice to filter
 
@@ -303,14 +305,17 @@ PY
   printf '{"broken json\n' > "$cowork_dir/claude_desktop_config.json"
 
   run bash "$SCRIPTS_DIR/install.sh" --serena-only --hosts cowork
-  [ "$status" -eq 0 ]
+  # Safer contract: abort loudly instead of destroying existing (if broken) config.
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"malformed JSON"* ]]
 
-  python3 - "$cowork_dir/claude_desktop_config.json" << 'PY'
-import json, sys
-d = json.load(open(sys.argv[1]))
-servers = d.get("mcpServers", {})
-assert "serena" in servers, f"serena missing after malformed-JSON recovery: {list(servers.keys())}"
-PY
+  # Original file is left untouched (NOT replaced with a fresh {serena} stub)...
+  grep -q "broken json" "$cowork_dir/claude_desktop_config.json"
+
+  # ...and a timestamped .corrupt-* backup was written capturing it.
+  local n
+  n=$(ls "$cowork_dir"/claude_desktop_config.json.corrupt-* 2>/dev/null | wc -l | tr -d ' ')
+  [ "$n" -ge 1 ]
 }
 
 # ---------------------------------------------------------------------------

@@ -4,6 +4,11 @@ All notable changes to token-diet will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [1.10.7] — 2026-07-06
+
+### Fixed
+- Correction: the `[1.10.6]` entry below was tagged and merged under a version number that collided with a pre-existing `v1.10.6` git tag from 2026-06-05 (a leftover from earlier release drift where the tag was cut one version ahead of the code). No functional change from 1.10.6 — this release simply re-tags the same installer fix under the next actually-unused version number, 1.10.7.
+
 ## [1.10.6] — 2026-07-06
 
 ### Fixed

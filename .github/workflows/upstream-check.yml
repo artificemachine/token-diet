@@ -1,0 +1,69 @@
+name: Upstream Fork Check
+
+# Detection-only. Checks whether the pinned forks in forks/ (rtk, tilth,
+# serena, icm) have new commits upstream from their original authors. Never
+# merges anything — opens/updates a tracking issue so a human runs the
+# review-and-merge step (`token-diet upstream diff <tool>`) deliberately.
+#
+# See CLAUDE.md: "Submodule forks in forks/ are pinned — never update them
+# automatically."
+
+on:
+  schedule:
+    - cron: '0 13 * * 1'  # Mondays, 13:00 UTC
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  check:
+    name: Check upstream drift
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          submodules: true
+          fetch-depth: 0
+
+      - name: Run upstream drift check
+        id: drift
+        run: bash .github/scripts/upstream-check.sh
+
+      - name: Ensure AI-gen label exists
+        if: steps.drift.outputs.drift == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh label create "AI-gen" --color "0E8A16" \
+            --description "Agent-created issue" --repo "${{ github.repository }}" \
+            2>/dev/null || true
+
+      - name: Find existing tracking issue
+        if: steps.drift.outputs.drift == 'true'
+        id: existing
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          num=$(gh issue list --repo "${{ github.repository }}" \
+            --search 'in:title "Upstream fork drift" is:open' \
+            --json number --jq '.[0].number // empty')
+          echo "number=$num" >> "$GITHUB_OUTPUT"
+
+      - name: Open or update tracking issue
+        if: steps.drift.outputs.drift == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPORT: ${{ steps.drift.outputs.report }}
+        run: |
+          if [ -n "${{ steps.existing.outputs.number }}" ]; then
+            gh issue comment "${{ steps.existing.outputs.number }}" \
+              --repo "${{ github.repository }}" \
+              --body "$REPORT"
+          else
+            gh issue create --repo "${{ github.repository }}" \
+              --title "Upstream fork drift detected" \
+              --label "AI-gen" \
+              --body "$REPORT"
+          fi

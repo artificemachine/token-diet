@@ -7,7 +7,7 @@
     "component": {
       "type": "application",
       "name": "token-diet",
-      "version": "1.10.10",
+      "version": "1.11.0",
       "description": "AI token optimization stack: RTK + tilth + Serena"
     },
     "timestamp": "2026-07-10T00:00:00Z",
@@ -42,8 +42,8 @@
     {
       "type": "application",
       "name": "serena",
-      "version": "0.1.5",
-      "purl": "pkg:pypi/serena@0.1.5",
+      "version": "1.5.3",
+      "purl": "pkg:pypi/serena@1.5.3",
       "description": "IDE-like symbol navigation via LSP",
       "licenses": [{ "license": { "id": "MIT" } }],
       "externalReferences": [

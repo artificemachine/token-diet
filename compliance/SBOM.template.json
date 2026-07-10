@@ -7,10 +7,10 @@
     "component": {
       "type": "application",
       "name": "token-diet",
-      "version": "1.10.8",
+      "version": "1.10.9",
       "description": "AI token optimization stack: RTK + tilth + Serena"
     },
-    "timestamp": "2026-07-09T00:00:00Z",
+    "timestamp": "2026-07-10T00:00:00Z",
     "tools": [
       { "name": "cargo-cyclonedx", "version": "latest" },
       { "name": "pip-audit", "version": "latest" }
@@ -20,8 +20,8 @@
     {
       "type": "application",
       "name": "rtk",
-      "version": "0.34.5",
-      "purl": "pkg:cargo/rtk@0.34.5",
+      "version": "0.43.0",
+      "purl": "pkg:cargo/rtk@0.43.0",
       "description": "CLI output compression proxy",
       "licenses": [{ "license": { "id": "MIT" } }],
       "externalReferences": [

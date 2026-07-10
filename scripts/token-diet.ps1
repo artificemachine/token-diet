@@ -28,7 +28,7 @@ $ErrorActionPreference = 'Stop'
 # and Test-Tool 'icm' is always true (the alias always exists).
 Remove-Item Alias:icm -Force -ErrorAction SilentlyContinue
 
-$script:TD_VERSION = '1.10.8'
+$script:TD_VERSION = '1.11.0'
 if ($Version) { Write-Output "token-diet $script:TD_VERSION"; exit 0 }
 $ScriptDir = $PSScriptRoot
 

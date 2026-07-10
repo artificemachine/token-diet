@@ -45,9 +45,10 @@ COPY --from=builder /opt/serena-venv /opt/serena-venv
 
 # Copy pre-installed LSP servers
 COPY --from=builder /usr/local/lib/node_modules /usr/local/lib/node_modules
-COPY --from=builder /usr/local/bin/tsserver /usr/local/bin/tsserver
+COPY --from=builder /usr/local/bin/typescript-language-server /usr/local/bin/typescript-language-server
+COPY --from=builder /usr/local/bin/tsc /usr/local/bin/tsc
 
-LABEL org.opencontainers.image.version="0.1.5"
+LABEL org.opencontainers.image.version="1.5.3"
 
 ENV PATH="/opt/serena-venv/bin:$PATH"
 ENV SERENA_NO_TELEMETRY=1

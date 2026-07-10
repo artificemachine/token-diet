@@ -7,10 +7,10 @@
     "component": {
       "type": "application",
       "name": "token-diet",
-      "version": "1.10.8",
+      "version": "1.11.0",
       "description": "AI token optimization stack: RTK + tilth + Serena"
     },
-    "timestamp": "2026-07-09T00:00:00Z",
+    "timestamp": "2026-07-10T00:00:00Z",
     "tools": [
       { "name": "cargo-cyclonedx", "version": "latest" },
       { "name": "pip-audit", "version": "latest" }
@@ -20,8 +20,8 @@
     {
       "type": "application",
       "name": "rtk",
-      "version": "0.34.5",
-      "purl": "pkg:cargo/rtk@0.34.5",
+      "version": "0.43.0",
+      "purl": "pkg:cargo/rtk@0.43.0",
       "description": "CLI output compression proxy",
       "licenses": [{ "license": { "id": "MIT" } }],
       "externalReferences": [
@@ -31,8 +31,8 @@
     {
       "type": "application",
       "name": "tilth",
-      "version": "0.6.1",
-      "purl": "pkg:cargo/tilth@0.6.1",
+      "version": "0.9.0",
+      "purl": "pkg:cargo/tilth@0.9.0",
       "description": "Smart code reader with tree-sitter AST",
       "licenses": [{ "license": { "id": "MIT" } }],
       "externalReferences": [
@@ -42,8 +42,8 @@
     {
       "type": "application",
       "name": "serena",
-      "version": "0.1.5",
-      "purl": "pkg:pypi/serena@0.1.5",
+      "version": "1.5.3",
+      "purl": "pkg:pypi/serena@1.5.3",
       "description": "IDE-like symbol navigation via LSP",
       "licenses": [{ "license": { "id": "MIT" } }],
       "externalReferences": [

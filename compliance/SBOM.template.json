@@ -7,7 +7,7 @@
     "component": {
       "type": "application",
       "name": "token-diet",
-      "version": "1.10.9",
+      "version": "1.10.10",
       "description": "AI token optimization stack: RTK + tilth + Serena"
     },
     "timestamp": "2026-07-10T00:00:00Z",
@@ -31,8 +31,8 @@
     {
       "type": "application",
       "name": "tilth",
-      "version": "0.6.1",
-      "purl": "pkg:cargo/tilth@0.6.1",
+      "version": "0.9.0",
+      "purl": "pkg:cargo/tilth@0.9.0",
       "description": "Smart code reader with tree-sitter AST",
       "licenses": [{ "license": { "id": "MIT" } }],
       "externalReferences": [

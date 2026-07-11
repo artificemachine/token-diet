@@ -19,7 +19,7 @@ declare -A UPSTREAM_URLS=(
   [rtk]="https://github.com/rtk-ai/rtk.git"
   [tilth]="https://github.com/jahala/tilth.git"
   [serena]="https://github.com/oraios/serena.git"
-  [icm]="https://github.com/celstnblacc/icm.git"
+  [icm]="https://github.com/rtk-ai/icm.git"
 )
 
 REPORT=""

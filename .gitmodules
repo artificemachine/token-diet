@@ -2,15 +2,15 @@
 
 [submodule "forks/rtk"]
 	path = forks/rtk
-	url = https://github.com/celstnblacc/rtk.git
+	url = https://github.com/artificemachine/rtk.git
 
 [submodule "forks/tilth"]
 	path = forks/tilth
-	url = https://github.com/celstnblacc/tilth.git
+	url = https://github.com/artificemachine/tilth.git
 
 [submodule "forks/serena"]
 	path = forks/serena
-	url = https://github.com/celstnblacc/serena.git
+	url = https://github.com/artificemachine/serena.git
 [submodule "forks/icm"]
 	path = forks/icm
-	url = https://github.com/celstnblacc/icm.git
+	url = https://github.com/artificemachine/icm.git

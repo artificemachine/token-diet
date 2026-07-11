@@ -60,10 +60,10 @@ $ErrorActionPreference = "Stop"
 Remove-Item Alias:icm -Force -ErrorAction SilentlyContinue
 
 # --- Configuration -----------------------------------------------------------
-$RTK_REPO    = "https://github.com/celstnblacc/rtk"
-$TILTH_REPO  = "https://github.com/celstnblacc/tilth"
-$SERENA_REPO = "https://github.com/celstnblacc/serena"
-$ICM_REPO    = "https://github.com/celstnblacc/icm"
+$RTK_REPO    = "https://github.com/artificemachine/rtk"
+$TILTH_REPO  = "https://github.com/artificemachine/tilth"
+$SERENA_REPO = "https://github.com/artificemachine/serena"
+$ICM_REPO    = "https://github.com/artificemachine/icm"
 
 $script:ScriptDir   = Split-Path -Parent $MyInvocation.MyCommand.Path
 $script:ProjectRoot = Split-Path -Parent $script:ScriptDir

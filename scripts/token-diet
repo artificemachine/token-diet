@@ -506,7 +506,7 @@ cmd_uninstall() {
 #   1. $TD_INSTALLER override
 #   2. $SCRIPT_DIR/install.sh         (running from a repo checkout)
 #   3. $SCRIPT_DIR/token-diet-install.sh (installed copy next to this binary)
-#   4. Clone celstnblacc/token-diet to a tempdir and use scripts/install.sh
+#   4. Clone artificemachine/token-diet to a tempdir and use scripts/install.sh
 # Echoes the path. Clone-tempdir paths are auto-cleaned by the trap registered
 # inside cmd_update.
 _resolve_installer() {
@@ -554,7 +554,7 @@ cmd_update() {
   local tmpdir
   tmpdir="$(mktemp -d -t token-diet-update.XXXXXX)"
   trap 'rm -rf "$tmpdir"' EXIT
-  local repo="https://github.com/celstnblacc/token-diet"
+  local repo="https://github.com/artificemachine/token-diet"
   echo "[token-diet update] no local checkout found; cloning $repo (depth 1)..."
   if ! git clone --depth 1 "$repo" "$tmpdir/repo" >/dev/null 2>&1; then
     echo "Error: failed to clone $repo" >&2
@@ -749,7 +749,7 @@ cmd_upstream() {
   local rtk_url="https://github.com/rtk-ai/rtk.git"
   local tilth_url="https://github.com/jahala/tilth.git"
   local serena_url="https://github.com/oraios/serena.git"
-  local icm_url="https://github.com/celstnblacc/icm.git"
+  local icm_url="https://github.com/rtk-ai/icm.git"
 
   # Fork maintenance only makes sense from a source checkout. Once token-diet is
   # installed to ~/.local/bin there is no ../forks, so refuse with a clear
@@ -1739,7 +1739,7 @@ _serena_runtime_mode() {
   # Returns: docker-running, uvx, docker-image, or none
   if check_cmd docker && docker ps --filter ancestor=token-diet/serena:latest --format "{{.ID}}" 2>/dev/null | grep -q "."; then
     echo "docker-running"
-  elif check_cmd uvx && { uvx serena --version &>/dev/null || uvx --from "git+https://github.com/celstnblacc/serena" serena --help &>/dev/null; }; then
+  elif check_cmd uvx && { uvx serena --version &>/dev/null || uvx --from "git+https://github.com/artificemachine/serena" serena --help &>/dev/null; }; then
     echo "uvx"
   elif check_cmd docker && docker image inspect token-diet/serena:latest &>/dev/null; then
     echo "docker-image"

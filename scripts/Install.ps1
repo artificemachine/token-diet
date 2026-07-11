@@ -759,7 +759,7 @@ args = ["--from", "git+$SERENA_REPO", "serena", "start-mcp-server", "--context=c
 # We register the bare-PATH command `icm serve --compact` ourselves instead.
 #
 # Embeddings policy (the air-gap decision):
-#   -Local → keyword-only build (--no-default-features --features tui): fastembed
+#   -Local → lean build (--no-default-features --features tui,backend-sqlite): fastembed
 #            is never compiled, so the binary physically cannot fetch a model.
 #   online → embeddings compiled but DISABLED in config (embeddings.enabled=false)
 #            so nothing is fetched silently. `token-diet icm warmup` performs the
@@ -777,10 +777,10 @@ function Install-ICM {
         if (-not (Test-Path $manifest)) { Write-Fail "forks\icm\crates\icm-cli\Cargo.toml not found — run: git submodule update --init --recursive" }
         Verify-LocalBuild "ICM" $manifest
         if ($DryRun) {
-            Write-DryRun "cargo install --path $($script:ProjectRoot)\forks\icm\crates\icm-cli --no-default-features --features tui --force"
+            Write-DryRun "cargo install --path $($script:ProjectRoot)\forks\icm\crates\icm-cli --no-default-features --features tui,backend-sqlite --force"
         } else {
             Write-Info "Building ICM from fork (keyword-only, air-gapped)..."
-            cargo install --path (Join-Path $script:ProjectRoot "forks\icm\crates\icm-cli") --no-default-features --features tui --force 2>&1 | Show-Output
+            cargo install --path (Join-Path $script:ProjectRoot "forks\icm\crates\icm-cli") --no-default-features --features tui,backend-sqlite --force 2>&1 | Show-Output
             Write-Ok "ICM built and installed from fork (keyword-only memory)"
         }
     } else {

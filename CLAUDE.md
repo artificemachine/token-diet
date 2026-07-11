@@ -25,10 +25,10 @@ Token optimization stack installer and compliance kit for RTK + tilth + Serena +
 ```
 token-diet/
 ├── forks/                    # Git submodules — audited forks
-│   ├── rtk/                  # celstnblacc/rtk (Rust CLI proxy)
-│   ├── tilth/                # celstnblacc/tilth (Rust MCP server)
-│   ├── serena/               # celstnblacc/serena (Python MCP server)
-│   └── icm/                  # celstnblacc/icm (Rust MCP server — Infinite Context Memory)
+│   ├── rtk/                  # artificemachine/rtk (Rust CLI proxy)
+│   ├── tilth/                # artificemachine/tilth (Rust MCP server)
+│   ├── serena/               # artificemachine/serena (Python MCP server)
+│   └── icm/                  # artificemachine/icm (Rust MCP server — Infinite Context Memory)
 ├── scripts/
 │   ├── install.sh            # macOS/Linux installer (--local for air-gapped, --verbose for full output)
 │   ├── Install.ps1           # Windows installer (-Verbose for full output)

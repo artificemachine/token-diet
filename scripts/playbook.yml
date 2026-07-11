@@ -42,7 +42,7 @@
     # -------------------------------------------------------------------------
     # Repository configuration
     # -------------------------------------------------------------------------
-    token_diet_repo: "https://github.com/celstnblacc/token-diet"
+    token_diet_repo: "https://github.com/artificemachine/token-diet"
     token_diet_dest: "{{ ansible_env.HOME }}/token-diet"
 
     # -------------------------------------------------------------------------
@@ -184,7 +184,7 @@
     - name: RTK | Install from crates.io git (online mode)
       ansible.builtin.command: >
         {{ cargo_bin }}/cargo install
-        --git https://github.com/celstnblacc/rtk
+        --git https://github.com/artificemachine/rtk
         --force
       register: rtk_install_online
       changed_when: >
@@ -243,7 +243,7 @@
     - name: tilth | Install from crates.io git (online mode)
       ansible.builtin.command: >
         {{ cargo_bin }}/cargo install
-        --git https://github.com/celstnblacc/tilth
+        --git https://github.com/artificemachine/tilth
         --force
       register: tilth_install_online
       changed_when: >
@@ -302,7 +302,7 @@
     - name: ICM | Install from git (online mode)
       ansible.builtin.command: >
         {{ cargo_bin }}/cargo install
-        --git https://github.com/celstnblacc/icm
+        --git https://github.com/artificemachine/icm
         icm-cli
         --force
       register: icm_install_online
@@ -365,7 +365,7 @@
     - name: Serena | Verify uvx can fetch and launch Serena (online probe)
       ansible.builtin.command: >
         {{ local_bin }}/uvx
-        --from git+https://github.com/celstnblacc/serena
+        --from git+https://github.com/artificemachine/serena
         serena --help
       register: serena_probe
       changed_when: false
@@ -388,7 +388,7 @@
     - name: Serena | Register MCP server for Claude Code
       ansible.builtin.command: >
         claude mcp add --scope user serena --
-        uvx --from git+https://github.com/celstnblacc/serena
+        uvx --from git+https://github.com/artificemachine/serena
         serena start-mcp-server
         --context=claude-code --project-from-cwd
       register: serena_mcp

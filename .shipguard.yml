@@ -18,7 +18,7 @@ disable_rules:
   # Both rustup.rs and astral.sh/uv only publish this install method.
   # These are the official, documented installation patterns for both tools.
   - SHELL-002
-  # SC-004: submodule URLs point to intentional public fork repos (celstnblacc/*)
+  # SC-004: submodule URLs point to intentional public fork repos (artificemachine/*)
   - SC-004
   # SC-005: Docker image signing advisory — dev-tool installer, not a prod pipeline
   - SC-005

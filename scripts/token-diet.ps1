@@ -373,7 +373,7 @@ function Get-SerenaRuntimeMode {
     if (Test-Tool 'uvx') {
         & uvx serena --version 2>$null | Out-Null
         if ($LASTEXITCODE -eq 0) { return 'uvx' }
-        & uvx --from "git+https://github.com/celstnblacc/serena" serena --help 2>$null | Out-Null
+        & uvx --from "git+https://github.com/artificemachine/serena" serena --help 2>$null | Out-Null
         if ($LASTEXITCODE -eq 0) { return 'uvx' }
     }
     return 'none'
@@ -831,7 +831,7 @@ function Invoke-Update([string[]]$Remaining) {
     $tmp = Join-Path ([System.IO.Path]::GetTempPath()) ("token-diet-update-" + [System.Guid]::NewGuid().ToString('N').Substring(0,8))
     New-Item -ItemType Directory -Path $tmp -Force | Out-Null
     try {
-        $repo = 'https://github.com/celstnblacc/token-diet'
+        $repo = 'https://github.com/artificemachine/token-diet'
         Write-Output "[token-diet update] no local installer found; cloning $repo (depth 1)..."
         & git clone --depth 1 $repo (Join-Path $tmp 'repo') 2>$null
         if ($LASTEXITCODE -ne 0) { Write-Error "failed to clone $repo"; exit 1 }

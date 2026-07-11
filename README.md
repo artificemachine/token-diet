@@ -10,7 +10,7 @@
 1.  **[RTK](https://github.com/rtk-ai/rtk)**: Compresses huge CLI outputs (builds, tests, logs) before the agent sees them.
 2.  **[tilth](https://github.com/jahala/tilth)**: Uses AST (tree-sitter) to read only the code symbols the agent actually needs.
 3.  **[Serena](https://github.com/oraios/serena)**: Provides IDE-grade navigation (LSP) so agents stop reading whole files just to find a definition.
-4.  **[ICM](https://github.com/celstnblacc/icm)**: Infinite Context Memory — persistent cross-session, cross-tool recall so agents stop re-deriving decisions and facts they already learned.
+4.  **[ICM](https://github.com/artificemachine/icm)**: Infinite Context Memory — persistent cross-session, cross-tool recall so agents stop re-deriving decisions and facts they already learned.
 
 ### Why use it?
 - **Slash Costs**: Save up to 90% on command output and 40% on code reading.

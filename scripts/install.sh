@@ -15,10 +15,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 
 # --- Configuration -----------------------------------------------------------
-RTK_REPO="https://github.com/celstnblacc/rtk"
-TILTH_REPO="https://github.com/celstnblacc/tilth"
-SERENA_REPO="https://github.com/celstnblacc/serena"
-ICM_REPO="https://github.com/celstnblacc/icm"
+RTK_REPO="https://github.com/artificemachine/rtk"
+TILTH_REPO="https://github.com/artificemachine/tilth"
+SERENA_REPO="https://github.com/artificemachine/serena"
+ICM_REPO="https://github.com/artificemachine/icm"
 
 # Colors
 if [ -t 1 ]; then
@@ -730,7 +730,7 @@ TOML
   "servers": {
     "serena": {
       "command": "uvx",
-      "args": ["--from", "git+https://github.com/celstnblacc/serena", "serena", "start-mcp-server", "--context=ide", "--open-web-dashboard", "false", "--project-from-cwd"]
+      "args": ["--from", "git+https://github.com/artificemachine/serena", "serena", "start-mcp-server", "--context=ide", "--open-web-dashboard", "false", "--project-from-cwd"]
     },
     "tilth": {
       "command": "tilth",

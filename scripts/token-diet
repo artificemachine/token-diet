@@ -802,7 +802,14 @@ cmd_upstream() {
       if [ ! -d "$dir" ]; then echo "Error: tool dir not found: $dir"; exit 1; fi
       echo "Showing diff: fork vs original author ($tool)"
       (cd "$dir" && git fetch upstream main --quiet 2>/dev/null || git fetch upstream master --quiet 2>/dev/null)
-      (cd "$dir" && git diff HEAD..upstream/main 2>/dev/null || cd "$dir" && git diff HEAD..upstream/master)
+      (
+        cd "$dir" || exit 1
+        if git rev-parse --verify --quiet upstream/main >/dev/null; then
+          git diff HEAD..upstream/main
+        else
+          git diff HEAD..upstream/master
+        fi
+      )
       ;;
     *)
       echo "Usage: token-diet upstream [setup|check|diff]"

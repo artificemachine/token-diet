@@ -960,7 +960,7 @@ PYEOF
 # `icm serve --compact` ourselves instead.
 #
 # Embeddings policy (the air-gap decision):
-#   --local → keyword-only build (--no-default-features --features tui): fastembed
+#   --local → lean build (--no-default-features --features tui,backend-sqlite): fastembed
 #             is never compiled, so the binary physically cannot fetch a model.
 #   online  → embeddings compiled but DISABLED in config (embeddings.enabled=false)
 #             so nothing is fetched silently. `token-diet icm warmup` performs the
@@ -976,10 +976,10 @@ install_icm() {
   if $LOCAL_MODE; then
     verify_local_build "ICM" "$PROJECT_ROOT/forks/icm/crates/icm-cli/Cargo.toml"
     if [ "${DRY_RUN:-false}" = "true" ]; then
-      dryrun "cargo install --path $PROJECT_ROOT/forks/icm/crates/icm-cli --no-default-features --features tui --force"
+      dryrun "cargo install --path $PROJECT_ROOT/forks/icm/crates/icm-cli --no-default-features --features tui,backend-sqlite --force"
     else
       info "Building ICM from fork (keyword-only, air-gapped, no internet)..."
-      cargo install --path "$PROJECT_ROOT/forks/icm/crates/icm-cli" --no-default-features --features tui --force 2>&1 | show_output
+      cargo install --path "$PROJECT_ROOT/forks/icm/crates/icm-cli" --no-default-features --features tui,backend-sqlite --force 2>&1 | show_output
       ok "ICM built and installed from fork (keyword-only memory)"
     fi
   else

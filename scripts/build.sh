@@ -2,7 +2,7 @@
 # token-diet build — compile RTK + tilth + ICM from local forks, build Serena Docker image
 # No crates.io, no PyPI, no GitHub access needed.
 #
-# ICM builds air-gap-clean by default (--no-default-features --features tui): the
+# ICM builds air-gap-clean by default (--no-default-features --features tui,backend-sqlite): the
 # fastembed embedding model is NOT compiled in, so nothing is fetched from the network.
 # Pass --icm-embeddings to compile the optional semantic-search feature (the model
 # itself is then fetched once, explicitly, via `token-diet icm warmup`).
@@ -81,7 +81,7 @@ if $ICM_EMBEDDINGS; then
   ICM_FEATURE_FLAGS=""
   $BUILD_ICM && warn "ICM building WITH embeddings: the e5-base model (~270 MB) is fetched on first 'token-diet icm warmup', not during this build. This binary is not air-gap clean at first semantic use."
 else
-  ICM_FEATURE_FLAGS="--no-default-features --features tui"
+  ICM_FEATURE_FLAGS="--no-default-features --features tui,backend-sqlite"
 fi
 
 # --- Preflight ----------------------------------------------------------------

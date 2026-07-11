@@ -319,7 +319,7 @@
         {{ cargo_bin }}/cargo install
         --path {{ token_diet_dest }}/forks/icm/crates/icm-cli
         --no-default-features
-        --features tui
+        --features tui,backend-sqlite
         --force
       register: icm_install_local
       changed_when: >

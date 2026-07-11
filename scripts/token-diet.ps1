@@ -946,13 +946,19 @@ function Invoke-Upstream([string[]]$Remaining) {
             Write-Output "3. RE-VERIFY SECURITY PATCHES (e.g. tilth path guards) after any merge!"
         }
         'diff' {
-            if (-not $tool) { Write-Error "specify tool (rtk|tilth|serena)"; exit 1 }
+            if (-not $tool) { Write-Error "specify tool (rtk|tilth|serena|icm)"; exit 1 }
             $dir = Join-Path $script:ScriptDir "..\forks\$tool"
             if (-not (Test-Path $dir)) { Write-Error "tool dir not found: $dir"; exit 1 }
             Write-Output "Showing diff: fork vs original author ($tool)"
             Push-Location $dir
             & git fetch upstream main --quiet 2>$null
-            & git diff HEAD..upstream/main
+            if ($LASTEXITCODE -ne 0) { & git fetch upstream master --quiet 2>$null }
+            & git rev-parse --verify --quiet upstream/main *> $null
+            if ($LASTEXITCODE -eq 0) {
+                & git diff HEAD..upstream/main
+            } else {
+                & git diff HEAD..upstream/master
+            }
             Pop-Location
         }
         default {

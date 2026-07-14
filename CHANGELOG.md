@@ -4,6 +4,16 @@ All notable changes to token-diet will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [1.11.4] — 2026-07-14
+
+### Fixed
+- **Docker double-invocation bug**: `docker/Dockerfile.serena` had both `ENTRYPOINT ["serena", "start-mcp-server"]` AND the v1.11.3 launcher wrapper supplying `serena start-mcp-server`. Result: container ran `serena start-mcp-server serena start-mcp-server --context=...` and exited with `Error: Got unexpected extra argument (start-mcp-server)`. The bug would silently break any LOCAL-mode install using the v1.11.3 wrapper. Removed the Dockerfile's ENTRYPOINT/CMD so the wrapper at `~/.local/bin/serena` is the single source of truth for the serena CLI invocation. Direct docker users must now pass the full command (documented in Dockerfile comment).
+- **Rebuilt `token-diet/serena:latest` image** against current serena fork (`48d5b27d`, ahead of the previous `1.5.3` label — now `1.5.4.dev0`). MCP round-trip verified: Serena v1.27.0, project auto-detection works (`/workspace` mount resolves to host cwd), all 52 tools load. Local users can rebuild with `bash scripts/install.sh --serena-only --local` or directly via `docker build -f docker/Dockerfile.serena -t token-diet/serena:latest .`.
+
+### Notes
+- v1.11.3 users hitting `Error: Got unexpected extra argument (start-mcp-server)` from their Serena MCP after upgrading to v1.11.4 need to rebuild the Docker image as above.
+- Bumps `TD_VERSION` 1.11.3 → 1.11.4 in `scripts/token-diet` + `scripts/token-diet.ps1`.
+
 ## [1.11.3] — 2026-07-14
 
 ### Fixed

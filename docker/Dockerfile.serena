@@ -48,7 +48,7 @@ COPY --from=builder /usr/local/lib/node_modules /usr/local/lib/node_modules
 COPY --from=builder /usr/local/bin/typescript-language-server /usr/local/bin/typescript-language-server
 COPY --from=builder /usr/local/bin/tsc /usr/local/bin/tsc
 
-LABEL org.opencontainers.image.version="1.5.3"
+LABEL org.opencontainers.image.version="1.5.4.dev0"
 
 ENV PATH="/opt/serena-venv/bin:$PATH"
 ENV SERENA_NO_TELEMETRY=1
@@ -58,5 +58,12 @@ RUN useradd -m -s /bin/bash serena
 USER serena
 WORKDIR /workspace
 
-ENTRYPOINT ["serena", "start-mcp-server"]
-CMD ["--project-from-cwd"]
+# Intentionally no ENTRYPOINT/CMD. The token-diet Serena launcher script at
+# ~/.local/bin/serena is the single source of truth for the `serena start-mcp-server`
+# invocation — both Docker (this image) and uvx/venv runtimes go through the same
+# wrapper. Having ENTRYPOINT here too would cause a double-invocation
+# (`serena start-mcp-server serena start-mcp-server --context=...`) — see
+# PR (v1.11.4): fix(Dockerfile.serena): remove redundant ENTRYPOINT.
+# Direct docker users must now pass the full command:
+#   docker run --rm -i -v $(pwd):/workspace:ro --network none \
+#     token-diet/serena:latest serena start-mcp-server --context=...

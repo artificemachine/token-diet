@@ -3,7 +3,7 @@
     "serena": {
       "args": [
         "--from",
-        "git+https://github.com/celstnblacc/serena",
+        "git+https://github.com/artificemachine/serena",
         "serena",
         "start-mcp-server",
         "--headless",

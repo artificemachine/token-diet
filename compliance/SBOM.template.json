@@ -7,7 +7,7 @@
     "component": {
       "type": "application",
       "name": "token-diet",
-      "version": "1.11.2",
+      "version": "1.11.3",
       "description": "AI token optimization stack: RTK + tilth + Serena"
     },
     "timestamp": "2026-07-10T00:00:00Z",

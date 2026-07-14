@@ -4,6 +4,11 @@ All notable changes to token-diet will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [1.11.3] — 2026-07-14
+
+### Fixed
+- **Strict Installation Decoupling (CLAUDE.md):** the macOS/Linux installer's OpenCode MCP registration no longer writes absolute `$PROJECT_ROOT/forks/...` paths into `~/.config/opencode/opencode.json`. After this fix, MCP registrations for `serena` and `tilth` use bare commands resolvable through `~/.local/bin`, the same pattern ICM already uses. Concretely: replacing the broken local-mode fallback with a launcher-wrapped bare command. Also fixed a latent bug in the same registration where `serena-mcp-server` was used as a literal binary name — Serena's entry point is `serena start-mcp-server` (no separate MCP binary exists). And fixed the `tilth` MCP subcommand: it is `tilth --mcp`, not `tilth mcp`. Mirrored in `Install.ps1`. New `install.bats` regression: asserts no MCP config written by `install.sh` contains a `forks/` path, the `serena-mcp-server` string, or a bare `mcp` arg in the tilth entry. Manual repair on already-affected systems: `ln -sf "$REPO/forks/serena/.venv/bin/serena" ~/.local/bin/serena` and edit `~/.config/opencode/opencode.json` `mcp.serena.command` to `["serena","start-mcp-server","--context=ide","--open-web-dashboard","false","--project-from-cwd"]`, `mcp.tilth.command` to `["tilth","--mcp"]`. `install_serena()` now provisions `~/.local/bin/serena` as a Docker (LOCAL) or uvx (online) wrapper script so the bare-command registration works in both modes.
+
 ## [1.10.7] — 2026-07-06
 
 ### Fixed

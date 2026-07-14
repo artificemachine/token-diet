@@ -645,7 +645,7 @@ args = ["--from", "git+$SERENA_REPO", "serena", "start-mcp-server", "--context=c
     },
     "tilth": {
       "command": "tilth",
-      "args": ["mcp"]
+      "args": ["--mcp"]
     }
   }
 }
@@ -683,9 +683,10 @@ args = ["--from", "git+$SERENA_REPO", "serena", "start-mcp-server", "--context=c
 
                 # Also register tilth if installed
                 if (Test-Cmd "tilth") {
+                    # tilth MCP subcommand is --mcp; see forks/tilth/ARCHITECTURE.md §143
                     $tilthEntry = [PSCustomObject]@{
                         command = "tilth"
-                        args    = @("mcp")
+                        args    = @("--mcp")
                     }
                     $data.mcpServers | Add-Member -NotePropertyName "tilth" -NotePropertyValue $tilthEntry -Force
                 }

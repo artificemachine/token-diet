@@ -240,6 +240,92 @@ assert count == 1, f"Expected 1 serena entry, got {count}: {list(servers.keys())
 PY
 }
 
+# ---------------------------------------------------------------------------
+# Cycle 5.x — Strict Installation Decoupling: MCP configs must never reference
+# the cloned source repo. Regression for the forks/-path leak that broke
+# serena + tilth after moving/renaming the token-diet checkout.
+# ---------------------------------------------------------------------------
+
+@test "install: opencode MCP config never contains absolute forks/ paths" {
+  mock_install_prereqs
+  mock_cmd opencode
+  echo '{}' > "$TMP_HOME/.opencode.json"
+
+  bash "$SCRIPTS_DIR/install.sh" --serena-only --hosts opencode
+
+  python3 - "$TMP_HOME/.opencode.json" << 'PY'
+import json, sys, re
+d = json.load(open(sys.argv[1]))
+servers = d.get("mcp", {}) or d.get("mcpServers", {})
+bad = re.compile(r"(^|/)forks/")
+for name, entry in servers.items():
+    cmd = entry.get("command") or entry.get("args") or []
+    if isinstance(cmd, str):
+        cmd = [cmd]
+    flat = " ".join(str(x) for x in cmd)
+    assert not bad.search(flat), (
+        f"Install-decoupling leak: mcp.{name}.command contains a forks/ "
+        f"path: {flat!r}. MCP configs must use bare commands + XDG-stable "
+        f"launchers (see CLAUDE.md §Strict Installation Decoupling)."
+    )
+PY
+}
+
+@test "install: opencode tilth MCP entry uses --mcp subcommand (not bare mcp)" {
+  mock_install_prereqs
+  mock_cmd opencode
+  echo '{}' > "$TMP_HOME/.opencode.json"
+
+  bash "$SCRIPTS_DIR/install.sh" --serena-only --hosts opencode
+
+  python3 - "$TMP_HOME/.opencode.json" << 'PY'
+import json, sys
+d = json.load(open(sys.argv[1]))
+t = (d.get("mcp") or {}).get("tilth") or {}
+cmd = t.get("command") or []
+flat = cmd if isinstance(cmd, str) else " ".join(str(x) for x in cmd)
+assert "--mcp" in flat, f"tilth MCP command must include --mcp; got: {flat!r}"
+# Negative assertion: the old bug was the bare positional `mcp` arg.
+parts = cmd if isinstance(cmd, list) else cmd.split()
+assert "mcp" not in parts or "--mcp" in parts, (
+    f"tilth command has bare 'mcp' instead of '--mcp': {flat!r}"
+)
+PY
+}
+
+@test "install: opencode serena MCP entry uses 'serena start-mcp-server' (not nonexistent 'serena-mcp-server')" {
+  mock_install_prereqs
+  mock_cmd opencode
+  echo '{}' > "$TMP_HOME/.opencode.json"
+
+  bash "$SCRIPTS_DIR/install.sh" --serena-only --hosts opencode
+
+  python3 - "$TMP_HOME/.opencode.json" << 'PY'
+import json, sys
+d = json.load(open(sys.argv[1]))
+s = (d.get("mcp") or {}).get("serena") or {}
+cmd = s.get("command") or []
+flat = cmd if isinstance(cmd, str) else " ".join(str(x) for x in cmd)
+assert "serena-mcp-server" not in flat, (
+    f"Serena's MCP entry point is 'serena start-mcp-server' — there is no "
+    f"'serena-mcp-server' binary in the venv. Got: {flat!r}"
+)
+assert "start-mcp-server" in flat, f"Expected start-mcp-server in {flat!r}"
+PY
+}
+
+@test "install: install.sh source no longer contains the serena-mcp-server (nonexistent binary) name" {
+  # Static-source regression for the historical bug: install.sh used to write
+  # "$PROJECT_ROOT/forks/serena/.venv/bin/serena-mcp-server" into MCP configs.
+  # That binary never existed — Serena's entry point is `serena`, which
+  # dispatches `start-mcp-server`. Any reappearance of this string in the
+  # installer source is a regression and must fail CI.
+  ! grep -E "serena-mcp-server(\.exe)?(\"|')" "$SCRIPTS_DIR/install.sh" \
+    || { echo "LEAK: install.sh still references the nonexistent serena-mcp-server binary"; false; }
+  ! grep -E "serena-mcp-server(\.exe)?(\"|')" "$SCRIPTS_DIR/Install.ps1" \
+    || { echo "LEAK: Install.ps1 still references the nonexistent serena-mcp-server binary"; false; }
+}
+
 @test "install: --serena-only preserves unrelated mcp entries in opencode config" {
   mock_install_prereqs
   mock_cmd opencode

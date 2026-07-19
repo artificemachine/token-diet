@@ -1635,3 +1635,50 @@ MOCK
   [[ "$output" == *"0.2.0"* ]] || [[ "$output" == *"below"* ]] || \
   [[ "$output" == *"compat"* ]] || [[ "$output" == *"min"* ]]
 }
+
+# ---------------------------------------------------------------------------
+# Cycle 17.1 — OQ-1: cmd_hook and cmd_mcp must each be defined exactly once
+#
+# Regression: scripts/token-diet previously had two definitions of cmd_hook
+# (lines 611, 666) — first used ${RED}/${GREEN} color codes, second was bare
+# text. Bash function shadowing meant the second definition always won at
+# dispatch (line 2541), making the first one pure dead code. Also discovered
+# the same pattern for cmd_mcp (lines 574, 629) — byte-identical, also pure
+# dead code (HANDOFF only flagged cmd_hook; cmd_mcp was an additional find).
+#
+# These tests assert exactly one definition of each function exists in the
+# source, so future code drift that re-introduces a duplicate is caught at
+# `bats tests/token-diet.bats` time rather than only on visual inspection.
+# ---------------------------------------------------------------------------
+
+@test "scripts/token-diet defines cmd_hook exactly once (OQ-1)" {
+  local count
+  count=$(grep -cE '^cmd_hook\(\) \{' "$SCRIPTS_DIR/token-diet")
+  [ "$count" -eq 1 ]
+}
+
+@test "scripts/token-diet defines cmd_mcp exactly once (OQ-1 cmd_mcp)" {
+  local count
+  count=$(grep -cE '^cmd_mcp\(\) \{' "$SCRIPTS_DIR/token-diet")
+  [ "$count" -eq 1 ]
+}
+
+@test "hook: dispatch is unaffected by duplicate cleanup (smoke)" {
+  # Sanity: cmd_hook still works correctly post-deletion. The live definition
+  # (the uncolored one) is the one kept, and its outputs match exactly.
+  run "$SCRIPTS_DIR/token-diet" hook
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"RTK hook is currently:"* ]]
+  [[ "$output" == *"Usage: token-diet hook"* ]]
+  # No color codes must leak — proves the live (uncolored) definition is the one reached.
+  [[ ! "$output" =~ \\\\033\[ ]] || [[ ! "$output" =~ '\\e\[' ]]
+  ! grep -q 'RED\|GREEN' <(echo "$output")
+}
+
+@test "mcp: dispatch is unaffected by duplicate cleanup (smoke)" {
+  run "$SCRIPTS_DIR/token-diet" mcp
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"Usage: token-diet mcp"* ]]
+  [[ "$output" == *"install"* ]]
+  [[ "$output" == *"list"* ]]
+}

@@ -12,7 +12,7 @@
 
 set -euo pipefail
 
-readonly TD_VERSION="1.14.2"
+readonly TD_VERSION="1.14.3"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # --- Colors -------------------------------------------------------------------
@@ -571,60 +571,6 @@ cmd_reinstall() {
   echo "Warning: 'reinstall' is deprecated. Use 'token-diet update --fresh' instead."
   cmd_update --fresh "$@"
 }
-cmd_mcp() {
-  local sub="${1:-help}"
-  case "$sub" in
-    install|register)
-      shift
-      cmd_update --tilth-only --serena-only "$@"
-      ;;
-                list|status)
-      (cmd_doctor --json 2>/dev/null || true) | python3 -c 'import json, sys; 
-try:
-    d=json.load(sys.stdin)
-except Exception:
-    d={}
-t_hosts = d.get("tilth_mcp", {}).get("hosts", {}).keys() if "tilth_mcp" in d else []
-if not t_hosts: t_hosts = d.get("tilth_mcp", {}).get("registered_hosts", [])
-s_hosts = d.get("serena_mcp", {}).get("registered_hosts", [])
-i_hosts = d.get("icm_mcp", {}).get("registered_hosts", [])
-all_hosts = sorted(list(set(list(t_hosts) + list(s_hosts) + list(i_hosts))))
-print("Registered MCP Hosts:")
-if not all_hosts: print("  (none)")
-for h in all_hosts:
-    st = []
-    if h in t_hosts: st.append("tilth")
-    if h in s_hosts: st.append("serena")
-    if h in i_hosts: st.append("icm")
-    print("  ✓ %-16s (%s)" % (h, ", ".join(st)))'
-      ;;
-    *)
-      echo "Usage: token-diet mcp [install|list]"
-      echo ""
-      echo "  install   Register token-diet MCP servers (tilth/Serena/ICM) in detected AI hosts"
-      echo "  list      Show hosts where token-diet MCP is currently registered"
-      exit 1
-      ;;
-  esac
-}
-
-cmd_hook() {
-  local state="${1:-}"
-  case "$state" in
-    on|enable)  cmd_use_rtk ;;
-    off|disable) cmd_no_rtk ;;
-    *)
-      if [ -f "$HOME/.token-diet-no-rtk" ]; then
-        echo "RTK hook is currently: ${RED}DISABLED${NC}"
-      else
-        echo "RTK hook is currently: ${GREEN}ENABLED${NC}"
-      fi
-      echo "Usage: token-diet hook [on|off]"
-      ;;
-  esac
-}
-
-
 # --- Service (always-on dashboard daemon) -------------------------------------
 cmd_mcp() {
   local sub="${1:-help}"

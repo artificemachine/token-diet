@@ -1,3 +1,26 @@
+# Session Handoff — 2026-07-19 (handoff-update — Gemini CLI hooks research in-flight, OQ-2 started)
+Agent: Claude Code (MiniMax-M3) | Branch: main | Tests: 185 bats pass (59 install + 126 token-diet), 46 pytest pass / 18 skip | COMMITTED (v1.14.5 + detector fix, all PRs merged)
+
+## What happened since last HANDOFF entry
+- **v1.14.5 shipped + live-validated** (covered in the prior handoff entry below).
+- **OQ-2 research started: Gemini CLI hooks.** Discovered that Gemini CLI v0.49.0 (`~/.nvm/versions/node/v25.2.1/lib/node_modules/@google/gemini-cli/bundle/gemini.js`) has explicit hooks support via `gemini hooks migrate --from-claude` — meaning Gemini CLI's hook schema is at least partially compatible with Claude Code's JSON format. The `hooks` subcommand exists natively (not external):
+  ```
+  gemini hooks migrate  Migrate hooks from Claude Code to Gemini CLI
+  ```
+  This is a MUCH better starting point than writing a Gemini hook writer from scratch — the migration path implies Gemini CLI already reads a JSON hooks structure comparable to Claude Code's `~/.claude/settings.json`. The schema likely lives in one of the bundle JS files (found PreToolUse / hooks references in chunk-6SAPFKW2.js, chunk-DG2DMXNL.js, chunk-DUXXYDOU.js, chunk-MT2PHBHF.js, chunk-THSPF7UM.js).
+- **Session state when interrupted:** the user called `/handoff-update` while I was mid-research on Gemini. Gemfile bundles are heavy (bundled JS chunks); the schema's actual shape is still unknown — needs extraction from the chunk referencing PreToolUse/hooks.
+
+## Next session — first moves
+1. **Continue OQ-2 (Gemini CLI hooks) from exactly this checkpoint.** The key file is `~/.nvm/versions/node/v25.2.1/lib/node_modules/@google/gemini-cli/bundle/chunk-6SAPFKW2.js` (contains PreToolUse references). Extract the hooks schema from the bundle. The `gemini hooks migrate --from-claude` command is the clue — it should accept a JSON structure similar to Claude Code's settings.json hooks array, which we already produce in `install_context_hooks()`. If the schema matches, we can write directly to Gemini's config instead of falling back to awareness-doc. If it's a CLI command (not config-file-based), we can invoke `gemini hooks add` or similar.
+2. **Restore `/run-prose` (or write 3 ship-* bash wrappers)** — now 5 sessions flagged. Inline-running the 3 sub-phases works but is non-trivial for multi-PR sessions.
+3. **Pre-existing gaps still unaddressed**: no CI test workflow, 2 HIGH shipguard findings in path-leak.yml — now 5 sessions old.
+
+### Operational notes
+- **On this machine:** v1.14.5 OpenCode plugin installed + registered, Copilot awareness doc written, everything live-validated. Gemini CLI v0.49.0 installed, awareness-doc at `~/.gemini/awareness-docextract.md` already written (the install_context_hooks awareness-doc path works — Gemini just doesn't have the real hooks yet).
+- **Working tree clean on main** at handoff-update time.
+- **10 GitHub releases total** — at retention threshold, no pruning needed.
+
+---
 # Session Handoff — 2026-07-19 (OpenCode TS plugin + Copilot awareness shipped, v1.14.5, PR #28 merged; detector fix on main directly)
 Agent: Claude Code (MiniMax-M3) | Branch: main | Tests: 185 bats pass (59 install + 126 token-diet), 46 pytest pass / 18 skip | COMMITTED (v1.14.5 tagged + released, PR #28 merged; detector fix `ee4e009` pushed to main directly — see Process violations below)
 

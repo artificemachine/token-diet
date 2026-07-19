@@ -326,6 +326,30 @@ MOCK
   chmod +x "$TMP_BIN/rtk"
 }
 
+# mock_token_diet_extract
+# Creates a token-diet mock whose `extract <path>` always succeeds and prints
+# a deterministic .md cache path — matching the real docextract.py behavior,
+# where every extraction lands in ~/.cache/token-diet/extract/<hash>.md.
+# This is what surfaces the .md loop bug in the shim regression test: with a
+# successful extract returning a .md cache path, the shim's interception
+# policy is what decides whether the original Read gets blocked or not.
+mock_token_diet_extract() {
+  cat > "$TMP_BIN/token-diet" << 'MOCK'
+#!/usr/bin/env bash
+case "$1" in
+  --version) echo "token-diet 1.14.1-mock"; exit 0 ;;
+  --help)    echo "Usage: token-diet [OPTIONS] COMMAND"; exit 0 ;;
+  extract)
+    # Pretend any input file extracts successfully to a .md cache file.
+    # Hash is irrelevant — the shim only reads what token-diet prints.
+    echo "/mock/home/.cache/token-diet/extract/deadbeef.md"
+    exit 0 ;;
+  *) exit 0 ;;
+esac
+MOCK
+  chmod +x "$TMP_BIN/token-diet"
+}
+
 # mock_install_prereqs
 # Creates mock binaries for all install.sh prerequisites
 mock_install_prereqs() {

@@ -712,3 +712,159 @@ assert "other-tool" in mcp, f"Unrelated entry was removed: {list(mcp.keys())}"
 assert "icm" in mcp, f"icm entry missing: {list(mcp.keys())}"
 PY
 }
+
+# ---------------------------------------------------------------------------
+# Cycle 6 — docextract / ctxwarn context hooks (--with-context-hooks, opt-in)
+# ---------------------------------------------------------------------------
+
+@test "context hooks: not installed without --with-context-hooks" {
+  mock_install_prereqs
+  mock_icm
+  mock_cmd claude
+
+  run bash "$SCRIPTS_DIR/install.sh" --icm-only
+  [ "$status" -eq 0 ]
+
+  [ ! -d "$TMP_HOME/.local/bin/token-diet-hooks" ]
+  [ ! -f "$TMP_HOME/.claude/settings.json" ]
+}
+
+@test "context hooks: --with-context-hooks registers both hooks into claude settings, preserving existing hooks" {
+  mock_install_prereqs
+  mock_icm
+  mock_cmd claude
+  python3 -c "
+import json
+with open('$TMP_HOME/.claude/settings.json', 'w') as f:
+    json.dump({'hooks': {'SessionStart': [{'matcher': '*', 'hooks': [{'type': 'command', 'command': 'echo unrelated', 'timeout': 5}]}]}}, f)
+    f.write('\n')
+"
+
+  run bash "$SCRIPTS_DIR/install.sh" --icm-only --with-context-hooks
+  [ "$status" -eq 0 ]
+
+  python3 - "$TMP_HOME/.claude/settings.json" "$TMP_HOME" << 'PY'
+import json, sys
+d = json.load(open(sys.argv[1]))
+home = sys.argv[2]
+hooks = d.get("hooks", {})
+
+session_start = hooks.get("SessionStart", [])
+assert any(h.get("command") == "echo unrelated" for e in session_start for h in e.get("hooks", [])), \
+    "pre-existing SessionStart hook was lost"
+
+pre = hooks.get("PreToolUse", [])
+docextract_cmd = f"{home}/.local/bin/token-diet-hooks/docextract-pre-read.sh"
+matched = [e for e in pre if e.get("matcher") == "Read"
+           and any(h.get("command") == docextract_cmd for h in e.get("hooks", []))]
+assert matched, f"docextract PreToolUse/Read hook missing: {pre}"
+
+post = hooks.get("PostToolUse", [])
+ctxwarn_cmd = f"{home}/.local/bin/token-diet-hooks/ctxwarn-post.sh"
+matched = [e for e in post if e.get("matcher") == "*"
+           and any(h.get("command") == ctxwarn_cmd for h in e.get("hooks", []))]
+assert matched, f"ctxwarn PostToolUse/* hook missing: {post}"
+PY
+}
+
+@test "context hooks: shims installed under .local/bin/token-diet-hooks, executable, no dev-checkout path" {
+  mock_install_prereqs
+  mock_icm
+  mock_cmd claude
+
+  run bash "$SCRIPTS_DIR/install.sh" --icm-only --with-context-hooks
+  [ "$status" -eq 0 ]
+
+  [ -x "$TMP_HOME/.local/bin/token-diet-hooks/docextract-pre-read.sh" ]
+  [ -x "$TMP_HOME/.local/bin/token-diet-hooks/ctxwarn-post.sh" ]
+  ! grep -q "$SCRIPTS_DIR" "$TMP_HOME/.local/bin/token-diet-hooks/docextract-pre-read.sh"
+  ! grep -q "$SCRIPTS_DIR" "$TMP_HOME/.local/bin/token-diet-hooks/ctxwarn-post.sh"
+}
+
+@test "context hooks: idempotent — running install twice does not duplicate entries" {
+  mock_install_prereqs
+  mock_icm
+  mock_cmd claude
+
+  run bash "$SCRIPTS_DIR/install.sh" --icm-only --with-context-hooks
+  [ "$status" -eq 0 ]
+  run bash "$SCRIPTS_DIR/install.sh" --icm-only --with-context-hooks
+  [ "$status" -eq 0 ]
+
+  python3 - "$TMP_HOME/.claude/settings.json" "$TMP_HOME" << 'PY'
+import json, sys
+d = json.load(open(sys.argv[1]))
+home = sys.argv[2]
+hooks = d.get("hooks", {})
+
+docextract_cmd = f"{home}/.local/bin/token-diet-hooks/docextract-pre-read.sh"
+ctxwarn_cmd = f"{home}/.local/bin/token-diet-hooks/ctxwarn-post.sh"
+
+pre_count = sum(1 for e in hooks.get("PreToolUse", []) for h in e.get("hooks", []) if h.get("command") == docextract_cmd)
+post_count = sum(1 for e in hooks.get("PostToolUse", []) for h in e.get("hooks", []) if h.get("command") == ctxwarn_cmd)
+assert pre_count == 1, f"expected 1 docextract hook, found {pre_count}"
+assert post_count == 1, f"expected 1 ctxwarn hook, found {post_count}"
+PY
+}
+
+@test "context hooks: malformed settings.json aborts that host's registration without writing, install still exits 0" {
+  mock_install_prereqs
+  mock_icm
+  mock_cmd claude
+  printf '{"broken json\n' > "$TMP_HOME/.claude/settings.json"
+
+  run bash "$SCRIPTS_DIR/install.sh" --icm-only --with-context-hooks
+  [ "$status" -eq 0 ]
+
+  grep -q "broken json" "$TMP_HOME/.claude/settings.json"
+  ! grep -q "token-diet-hooks" "$TMP_HOME/.claude/settings.json"
+}
+
+@test "context hooks: non-claude harness gets awareness-docextract.md" {
+  mock_install_prereqs
+  mock_icm
+  mock_cmd codex
+
+  # Real `claude`/opencode/gemini binaries are on this dev machine's PATH, and
+  # TMP_BIN only prepends (does not isolate) — --hosts restricts host wiring
+  # to codex regardless of what else install.sh detects, matching the pattern
+  # every other multi-host test in this file already uses.
+  run bash "$SCRIPTS_DIR/install.sh" --icm-only --with-context-hooks --hosts codex
+  [ "$status" -eq 0 ]
+
+  [ -f "$TMP_HOME/.codex/awareness-docextract.md" ]
+  [ ! -f "$TMP_HOME/.claude/settings.json" ]
+}
+
+@test "context hooks: uninstall removes both hook entries and leaves unrelated hooks intact" {
+  mock_install_prereqs
+  mock_icm
+  mock_cmd claude
+  python3 -c "
+import json
+with open('$TMP_HOME/.claude/settings.json', 'w') as f:
+    json.dump({'hooks': {'SessionStart': [{'matcher': '*', 'hooks': [{'type': 'command', 'command': 'echo unrelated', 'timeout': 5}]}]}}, f)
+    f.write('\n')
+"
+  run bash "$SCRIPTS_DIR/install.sh" --icm-only --with-context-hooks
+  [ "$status" -eq 0 ]
+
+  run bash "$SCRIPTS_DIR/uninstall.sh" --force
+  [ "$status" -eq 0 ]
+
+  [ ! -d "$TMP_HOME/.local/bin/token-diet-hooks" ]
+  python3 - "$TMP_HOME/.claude/settings.json" << 'PY'
+import json, sys
+d = json.load(open(sys.argv[1]))
+hooks = d.get("hooks", {})
+
+session_start = hooks.get("SessionStart", [])
+assert any(h.get("command") == "echo unrelated" for e in session_start for h in e.get("hooks", [])), \
+    "unrelated SessionStart hook was removed"
+
+for event in ("PreToolUse", "PostToolUse"):
+    for e in hooks.get(event, []):
+        for h in e.get("hooks", []):
+            assert "token-diet-hooks" not in h.get("command", ""), f"hook entry not removed: {h}"
+PY
+}

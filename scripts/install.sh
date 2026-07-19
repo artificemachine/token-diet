@@ -1541,6 +1541,102 @@ TKDDOC
   fi
 }
 
+# --- docextract / ctxwarn context hooks (opt-in) -------------------------------
+# merge_hook_entry <config_json_path> <event> <matcher> <command> <timeout>
+#
+# Idempotent: adds hooks.<event> += [{matcher, hooks:[{type:command,command,timeout}]}]
+# unless a hook with this exact command string already exists anywhere under
+# that event. Preserves every other key and every other hook entry. Never
+# partial-writes — if the file doesn't parse as JSON, prints a warning to
+# stderr and exits 1 without touching the file; the caller decides whether
+# that's fatal (it isn't, for this opt-in feature — see install_context_hooks).
+merge_hook_entry() {
+  local cfg="$1" event="$2" matcher="$3" command="$4" timeout="${5:-15}"
+  [ -f "$cfg" ] || return 0
+  python3 - "$cfg" "$event" "$matcher" "$command" "$timeout" << 'PYEOF'
+import json, sys, pathlib
+
+cfg_path, event, matcher, command, timeout = sys.argv[1:6]
+p = pathlib.Path(cfg_path)
+try:
+    data = json.loads(p.read_text())
+except Exception as e:
+    print(f"  ! skipped {cfg_path}: cannot parse existing JSON ({e})", file=sys.stderr)
+    sys.exit(1)
+
+hooks = data.setdefault("hooks", {})
+entries = hooks.setdefault(event, [])
+
+for entry in entries:
+    for h in entry.get("hooks", []):
+        if h.get("command") == command:
+            sys.exit(0)  # already registered — no-op
+
+entries.append({
+    "matcher": matcher,
+    "hooks": [{"type": "command", "command": command, "timeout": int(timeout)}],
+})
+
+p.write_text(json.dumps(data, indent=2) + "\n")
+PYEOF
+}
+
+install_context_hooks() {
+  header "docextract / ctxwarn context hooks (--with-context-hooks)"
+
+  local hooks_src_dir="$SCRIPT_DIR/lib/hooks"
+  local hooks_bin_dir="$HOME/.local/bin/token-diet-hooks"
+  local docextract_shim="$hooks_bin_dir/docextract-pre-read.sh"
+  local ctxwarn_shim="$hooks_bin_dir/ctxwarn-post.sh"
+
+  if [ "${DRY_RUN:-false}" = "true" ]; then
+    dryrun "install -m755 $hooks_src_dir/*.sh $hooks_bin_dir/"
+    $HAS_CLAUDE && dryrun "merge PreToolUse/Read + PostToolUse/* hooks into $HOME/.claude/settings.json (backed up first)"
+    dryrun "write awareness-docextract.md to every other detected harness"
+    return 0
+  fi
+
+  mkdir -p "$hooks_bin_dir"
+  install -m755 "$hooks_src_dir/docextract-pre-read.sh" "$docextract_shim"
+  install -m755 "$hooks_src_dir/ctxwarn-post.sh" "$ctxwarn_shim"
+  ok "Hook shims installed: $hooks_bin_dir"
+
+  if $HAS_CLAUDE; then
+    local cc_settings="$HOME/.claude/settings.json"
+    if [ ! -f "$cc_settings" ]; then
+      mkdir -p "$(dirname "$cc_settings")"
+      echo '{}' > "$cc_settings"
+    else
+      cp "$cc_settings" "$cc_settings.bak-token-diet-hooks-$(date +%s)"
+    fi
+    if merge_hook_entry "$cc_settings" "PreToolUse" "Read" "$docextract_shim" 15 \
+      && merge_hook_entry "$cc_settings" "PostToolUse" "*" "$ctxwarn_shim" 15; then
+      ok "Claude Code: docextract + ctxwarn hooks registered in $cc_settings"
+    else
+      warn "Claude Code: $cc_settings could not be parsed as JSON — hook registration skipped, file left untouched"
+    fi
+  fi
+
+  # Every other detected harness — awareness-doc fallback, no hook schema verified yet.
+  local awareness_src="$SCRIPT_DIR/lib/awareness-docextract.md"
+  write_awareness_docextract() {
+    local config_dir="$1"
+    [ -d "$config_dir" ] || return 0
+    cp "$awareness_src" "$config_dir/awareness-docextract.md"
+    ok "awareness-docextract.md written: $config_dir/awareness-docextract.md"
+  }
+
+  $HAS_CODEX    && write_awareness_docextract "$HOME/.codex"
+  $HAS_GEMINI   && write_awareness_docextract "$HOME/.gemini"
+  # Copilot CLI: no verified config directory to write into (OQ-3) — skipped
+  # entirely rather than guessing a location. Neither hook nor awareness-doc
+  # this iteration.
+  if $HAS_COWORK; then
+    local cowork_dir; cowork_dir="$(dirname "$COWORK_CFG")"
+    write_awareness_docextract "$cowork_dir"
+  fi
+}
+
 # --- Main ---------------------------------------------------------------------
 usage() {
   cat << EOF
@@ -1573,6 +1669,12 @@ Options:
                  Example: --hosts "claude,vscode"
   --dry-run      Simulate install — detect hosts and show what would run, no changes made
   --verbose      Show full build output instead of last 5 lines; log to ~/.local/share/token-diet/install.log
+  --with-context-hooks
+                 Opt-in: register docextract (PreToolUse/Read) + ctxwarn (PostToolUse)
+                 hooks into Claude Code's settings.json. Off by default — this is the
+                 first token-diet feature that intercepts a live tool call. Every other
+                 detected harness gets the awareness-doc fallback instead (its hook
+                 schema is unverified — see PLAN-docextract-ctxwarn.md OQ-2/OQ-3).
   -h, --help     Show this help
 EOF
 }
@@ -1664,6 +1766,7 @@ main() {
   SKIP_TESTS=false
   DRY_RUN=false
   VERBOSE=false
+  WITH_CONTEXT_HOOKS=false
 
   # has_args tracks *intent* flags (--all, --rtk-only, --tilth-only, --serena-only,
   # --verify). Modifier-only flags (--skip-tests, --local, --verbose, --hosts, etc.)
@@ -1684,6 +1787,7 @@ main() {
       --skip-tests)   SKIP_TESTS=true ;;
       --dry-run)      DRY_RUN=true; SKIP_TESTS=true ;;
       --verbose)      VERBOSE=true ;;
+      --with-context-hooks) WITH_CONTEXT_HOOKS=true ;;
       --hosts)        shift; HOSTS_FILTER="$1" ;;
       -h|--help)      usage; exit 0 ;;
       *)              warn "Unknown option: $1"; usage; exit 1 ;;
@@ -1759,6 +1863,8 @@ main() {
 
   # Install token-diet dashboard command
   install_token_diet
+
+  $WITH_CONTEXT_HOOKS && install_context_hooks
 
   setup_project_hubs
 

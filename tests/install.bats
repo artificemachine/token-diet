@@ -919,6 +919,110 @@ PY
 }
 
 # ---------------------------------------------------------------------------
+# Cycle 6.2 — context hooks: OpenCode + Copilot wiring (verified 2026-07-19)
+#
+# Regression: prior to v1.14.5, OpenCode was silently excluded from context
+# hooks (treated like Copilot — "no verified schema, awareness doc only").
+# This was wrong: OpenCode HAS a documented TS plugin API with
+# "tool.execute.before" / "tool.execute.after" events. v1.14.5 adds a real
+# plugin under ~/.config/opencode/plugins/token-diet-hooks.ts and registers
+# it in opencode.json's plugin array (idempotent merge).
+#
+# Copilot CLI: confirmed (via https://github.com/github/copilot-cli README)
+# that v0.0.377 has NO hook surface — only custom agents / LSP / MCP. OQ-3
+# resolved as: best we can do is awareness doc at ~/.copilot/. Awareness
+# doc is now installed for Copilot too (previously skipped entirely).
+# ---------------------------------------------------------------------------
+
+@test "context hooks: --with-context-hooks installs OpenCode plugin + registers it in opencode.json (idempotent)" {
+  mock_install_prereqs
+  mock_icm
+  mock_cmd claude
+  mock_cmd opencode
+  mkdir -p "$TMP_HOME/.config/opencode/plugins"
+
+  # Pre-existing opencode.json with an unrelated plugin entry — exercise the
+  # "merge into existing array, don't drop other plugins" path.
+  cat > "$TMP_HOME/.config/opencode/opencode.json" << 'JSON'
+{
+  "mcp": {},
+  "plugin": ["./plugins/other.ts"]
+}
+JSON
+
+  run bash "$SCRIPTS_DIR/install.sh" --icm-only --with-context-hooks
+  [ "$status" -eq 0 ]
+
+  # Plugin file exists, mode 644
+  [ -f "$TMP_HOME/.config/opencode/plugins/token-diet-hooks.ts" ]
+  local mode
+  mode=$(stat -c '%a' "$TMP_HOME/.config/opencode/plugins/token-diet-hooks.ts" 2>/dev/null || stat -f '%Lp' "$TMP_HOME/.config/opencode/plugins/token-diet-hooks.ts")
+  [ "$mode" = "644" ]
+
+  # Plugin source matches what we ship
+  rtk diff "$TMP_HOME/.config/opencode/plugins/token-diet-hooks.ts" "$PROJECT_ROOT/scripts/lib/hooks-plugins/opencode.ts"
+  [ "$status" -eq 0 ]
+
+  # opencode.json: other plugin preserved, ours appended (relative path)
+  python3 - "$TMP_HOME/.config/opencode/opencode.json" << 'PY'
+import json, sys
+with open(sys.argv[1]) as f:
+    d = json.load(f)
+plugins = d.get("plugin", [])
+assert isinstance(plugins, list), f"plugin should be a list, got {type(plugins)}"
+assert "./plugins/other.ts" in plugins, f"pre-existing plugin dropped: {plugins}"
+assert "plugins/token-diet-hooks.ts" in plugins, f"new plugin not registered: {plugins}"
+PY
+
+  # Idempotent — second run does NOT add a duplicate entry
+  run bash "$SCRIPTS_DIR/install.sh" --icm-only --with-context-hooks
+  [ "$status" -eq 0 ]
+  python3 - "$TMP_HOME/.config/opencode/opencode.json" << 'PY'
+import json, sys
+with open(sys.argv[1]) as f:
+    d = json.load(f)
+plugins = d.get("plugin", [])
+n = plugins.count("plugins/token-diet-hooks.ts")
+assert n == 1, f"expected exactly 1 entry, found {n}: {plugins}"
+PY
+}
+
+@test "context hooks: --with-context-hooks writes awareness-docextract.md to ~/.copilot (OQ-3 resolved)" {
+  mock_install_prereqs
+  mock_icm
+  mock_cmd claude
+  # Copilot CLI binary name on PATH is `copilot` (npm @github/copilot), NOT
+  # `github-copilot-cli`. The detector checks both; mock whichever is real.
+  if check_command copilot; then
+    mock_cmd copilot
+  else
+    mock_cmd github-copilot-cli
+  fi
+  mkdir -p "$TMP_HOME/.copilot"
+
+  run bash "$SCRIPTS_DIR/install.sh" --icm-only --with-context-hooks --hosts copilot
+  [ "$status" -eq 0 ]
+
+  [ -f "$TMP_HOME/.copilot/awareness-docextract.md" ]
+}
+
+@test "context hooks: opencode plugin source contains both hook handlers (docextract + ctxwarn)" {
+  # Pure source-level check: the shipped plugin must wire both events.
+  # Catches regressions where one handler gets accidentally removed.
+  local src="$PROJECT_ROOT/scripts/lib/hooks-plugins/opencode.ts"
+  [ -f "$src" ]
+  rtk grep -q '"tool.execute.before"' "$src"
+  rtk grep -q '"tool.execute.after"'  "$src"
+  # Must extract via token-diet (not native parser)
+  rtk grep -q 'token-diet extract'      "$src"
+  # Must mirror ctxwarn band logic (estimate / threshold / band file)
+  rtk grep -q 'DEFAULT_CTX_THRESHOLD\|ctx_threshold' "$src"
+}
+
+# ---------------------------------------------------------------------------
+# Cycle 7 — installed token-diet's Python cores (extract / budget --check)
+
+# ---------------------------------------------------------------------------
 # Cycle 7 — installed token-diet's Python cores (extract / budget --check)
 #
 # Regression: cmd_extract / cmd_budget --check shell out to

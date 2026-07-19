@@ -1607,7 +1607,8 @@ install_context_hooks() {
   if [ "${DRY_RUN:-false}" = "true" ]; then
     dryrun "install -m755 $hooks_src_dir/*.sh $hooks_bin_dir/"
     $HAS_CLAUDE && dryrun "merge PreToolUse/Read + PostToolUse/* hooks into $HOME/.claude/settings.json (backed up first)"
-    dryrun "write awareness-docextract.md to every other detected harness"
+    dryrun "write awareness-docextract.md to codex, gemini, copilot, cowork configs (OpenCode handled below)"
+    $HAS_OPENCODE && dryrun "install opencode.ts plugin + register in opencode.json plugin array (backed up first)"
     return 0
   fi
 
@@ -1643,9 +1644,66 @@ install_context_hooks() {
 
   $HAS_CODEX    && write_awareness_docextract "$HOME/.codex"
   $HAS_GEMINI   && write_awareness_docextract "$HOME/.gemini"
-  # Copilot CLI: no verified config directory to write into (OQ-3) — skipped
-  # entirely rather than guessing a location. Neither hook nor awareness-doc
-  # this iteration.
+  # Copilot CLI: OQ-3 resolved (2026-07-19) — verified config dir is ~/.copilot/
+  # via README inspection (https://github.com/github/copilot-cli). No hook
+  # surface exists in copilot CLI v0.0.377 — awareness doc is the best we can
+  # do until/unless upstream adds one.
+  $HAS_COPILOT  && write_awareness_docextract "$HOME/.copilot"
+
+  # OpenCode: full hook surface EXISTS via the plugin API (verified by reading
+  # ~/.config/opencode/node_modules/@opencode-ai/plugin/dist/index.d.ts —
+  # "tool.execute.before" / "tool.execute.after" events, PluginInput.client
+  # gives access to the session SDK). Install our TS plugin to
+  # ~/.config/opencode/plugins/ and add it to opencode.json's plugin array
+  # (idempotent merge — never duplicates).
+  if $HAS_OPENCODE; then
+    local opencode_dir="$HOME/.config/opencode"
+    local opencode_cfg="$opencode_dir/opencode.json"
+    if [ -d "$opencode_dir" ]; then
+      local plugins_dir="$opencode_dir/plugins"
+      mkdir -p "$plugins_dir"
+      local plugin_src="$SCRIPT_DIR/lib/hooks-plugins/opencode.ts"
+      local plugin_dst="$plugins_dir/token-diet-hooks.ts"
+      if [ -f "$plugin_src" ]; then
+        install -m644 "$plugin_src" "$plugin_dst"
+        ok "OpenCode plugin installed: $plugin_dst"
+
+        # Register in opencode.json's plugin array (idempotent — match by
+        # the relative path we just installed). Always-backup before write.
+        if [ -f "$opencode_cfg" ]; then
+          cp "$opencode_cfg" "$opencode_cfg.bak-token-diet-opencode-$(date +%s)"
+          python3 - "$opencode_cfg" "$plugin_dst" << 'PY'
+import json, sys
+cfg_path, plugin_dst = sys.argv[1], sys.argv[2]
+# The plugin array stores paths relative to the opencode config file
+# directory (parent of opencode.json). plugins/token-diet-hooks.ts is the
+# canonical relative form.
+rel = "plugins/token-diet-hooks.ts"
+try:
+    with open(cfg_path) as f:
+        cfg = json.load(f)
+except Exception:
+    cfg = {}
+plugins = cfg.get("plugin", [])
+if not isinstance(plugins, list):
+    plugins = []
+if rel not in plugins and plugin_dst not in plugins:
+    plugins.append(rel)
+cfg["plugin"] = plugins
+with open(cfg_path, "w") as f:
+    json.dump(cfg, f, indent=2)
+    f.write("\n")
+PY
+          ok "OpenCode plugin registered in $opencode_cfg"
+        else
+          warn "OpenCode: $opencode_cfg not found — plugin installed to $plugin_dst but not registered"
+        fi
+      else
+        warn "OpenCode plugin source missing: $plugin_src"
+      fi
+    fi
+  fi
+
   if $HAS_COWORK; then
     local cowork_dir; cowork_dir="$(dirname "$COWORK_CFG")"
     write_awareness_docextract "$cowork_dir"

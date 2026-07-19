@@ -129,7 +129,15 @@ def main(argv):
 
     estimate = estimate_tokens(jsonl_path)
     threshold = read_threshold()
-    state_path = tdcache.cache_path(jsonl_path, subdir="ctxwarn", suffix=".band")
+    # key_by_mtime=False: the debounce state must persist across transcript
+    # appends. Every PostToolUse fires on an actively-growing transcript whose
+    # mtime_ns changes on each write — with the default mtime-based key, every
+    # call would hash to a fresh state file, band would reset to 0, and the
+    # once-per-band semantics would silently break (caught live: 133 stale
+    # .band files all containing "1" had accumulated from this very bug).
+    state_path = tdcache.cache_path(
+        jsonl_path, subdir="ctxwarn", suffix=".band", key_by_mtime=False
+    )
 
     if should_warn(estimate, threshold, state_path):
         k = estimate // 1000

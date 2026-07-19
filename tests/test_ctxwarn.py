@@ -161,3 +161,143 @@ def test_always_exits_0_contract(ctxwarn, tmp_path, monkeypatch, scenario):
     with pytest.raises(SystemExit) as exc:
         ctxwarn.main(["--transcript", str(transcript)])
     assert exc.value.code == 0
+
+
+def test_debounce_holds_across_transcript_appends(ctxwarn, tmp_path, monkeypatch, capsys):
+    """Regression: the debounce state file MUST NOT key on mtime.
+
+    Real Claude Code sessions append to the transcript JSONL on every tool use
+    (which updates mtime_ns). If the state-file cache key includes mtime, every
+    PostToolUse call hashes to a different state file → band resets to 0 → the
+    debounce never holds in practice. Caught live: 133 distinct `.band` files
+    all containing "1" had accumulated under ~/.cache/token-diet/ctxwarn/
+    across this and prior sessions, proving the warning re-fired on every
+    single tool use past the threshold instead of warning once per band.
+
+    Note on arithmetic: estimate_tokens() returns total_chars // 4. With
+    threshold=500 and content sized to put the estimate in band 1 (250-499
+    tokens = 1000-1999 chars), each call appends just enough to keep the
+    total estimate inside band 1 — that's the realistic per-tool-use delta
+    in a long session that hasn't yet crossed into band 2.
+    """
+    import time
+
+    monkeypatch.setattr(ctxwarn, "tiktoken", None)
+    monkeypatch.setattr(pathlib.Path, "home", staticmethod(lambda: tmp_path / "home"))
+    proj = tmp_path / "proj_appends"
+    proj.mkdir()
+    # threshold=500 → band 1 is [500, 999] tokens (i.e. 2000-3999 chars)
+    (proj / ".token-budget").write_text(json.dumps({"ctx_threshold": 500}))
+    monkeypatch.chdir(proj)
+
+    jsonl = proj / "t.jsonl"
+
+    # Call 1: ~3000 chars of content → ~750 tokens → band 1, warns
+    jsonl.write_text(json.dumps({"content": "x" * 3000}) + "\n")
+    with pytest.raises(SystemExit):
+        ctxwarn.main(["--transcript", str(jsonl)])
+    assert "Context" in capsys.readouterr().out  # first warning
+
+    # Call 2: append a small amount (stays in band 1). mtime_ns WILL change.
+    # Pre-fix this would re-hash and reset the band, firing the warning again.
+    time.sleep(0.05)  # ensure distinct mtime_ns (macOS APFS has ns precision)
+    with open(jsonl, "a") as f:
+        f.write(json.dumps({"content": "y" * 100}) + "\n")  # +100 chars
+    with pytest.raises(SystemExit):
+        ctxwarn.main(["--transcript", str(jsonl)])
+    assert capsys.readouterr().out == ""  # MUST be silent — debounce holds
+
+    # Call 3: another small append, mtime_ns changes again
+    time.sleep(0.05)
+    with open(jsonl, "a") as f:
+        f.write(json.dumps({"content": "z" * 100}) + "\n")  # +100 chars
+    with pytest.raises(SystemExit):
+        ctxwarn.main(["--transcript", str(jsonl)])
+    assert capsys.readouterr().out == ""  # still silent
+
+    # Sanity: only ONE state file should exist for this transcript (not 3)
+    cache_dir = pathlib.Path(tmp_path / "home") / ".cache" / "token-diet" / "ctxwarn"
+    band_files = list(cache_dir.glob("*.band"))
+    assert len(band_files) == 1, (
+        f"expected exactly 1 state file (debounce keyed by path, not mtime); "
+        f"found {len(band_files)}: {[f.name for f in band_files]}"
+    )
+
+
+def test_band_transitions_still_warn(ctxwarn, tmp_path, monkeypatch, capsys):
+    """Complement to the mtime regression: when the estimate crosses into a
+    NEW band (estimate // threshold increases), the warning MUST re-fire —
+    even if the mtime changed in between. This proves the fix preserves the
+    intended once-per-band semantics, not just once-ever."""
+    import time
+
+    monkeypatch.setattr(ctxwarn, "tiktoken", None)
+    monkeypatch.setattr(pathlib.Path, "home", staticmethod(lambda: tmp_path / "home"))
+    proj = tmp_path / "proj_bands"
+    proj.mkdir()
+    (proj / ".token-budget").write_text(json.dumps({"ctx_threshold": 500}))
+    monkeypatch.chdir(proj)
+
+    jsonl = proj / "t.jsonl"
+
+    # First call: 3000 chars → ~750 tokens → band 1, warns
+    jsonl.write_text(json.dumps({"content": "x" * 3000}) + "\n")
+    with pytest.raises(SystemExit):
+        ctxwarn.main(["--transcript", str(jsonl)])
+    assert "Context" in capsys.readouterr().out
+
+    # Second call: small append, stays in band 1 → silent
+    time.sleep(0.05)
+    with open(jsonl, "a") as f:
+        f.write(json.dumps({"content": "y" * 100}) + "\n")
+    with pytest.raises(SystemExit):
+        ctxwarn.main(["--transcript", str(jsonl)])
+    assert capsys.readouterr().out == ""  # silent, same band
+
+    # Third call: large append pushes total past band 1 (>= 4000 chars total
+    # would be band 2 of threshold 500). Append enough to cross.
+    time.sleep(0.05)
+    with open(jsonl, "a") as f:
+        f.write(json.dumps({"content": "z" * 1500}) + "\n")
+    with pytest.raises(SystemExit):
+        ctxwarn.main(["--transcript", str(jsonl)])
+    assert "Context" in capsys.readouterr().out  # MUST warn — new band
+
+
+def test_band_transitions_still_warn(ctxwarn, tmp_path, monkeypatch, capsys):
+    """Complement to the mtime regression: when the estimate crosses into a
+    NEW band (estimate // threshold increases), the warning MUST re-fire —
+    even if the mtime changed in between. This proves the fix preserves the
+    intended once-per-band semantics, not just once-ever."""
+    import time
+
+    monkeypatch.setattr(ctxwarn, "tiktoken", None)
+    monkeypatch.setattr(pathlib.Path, "home", staticmethod(lambda: tmp_path / "home"))
+    proj = tmp_path / "proj_bands"
+    proj.mkdir()
+    (proj / ".token-budget").write_text(json.dumps({"ctx_threshold": 100}))
+    monkeypatch.chdir(proj)
+
+    jsonl = proj / "t.jsonl"
+
+    # First call: band 1 (150 tokens, threshold 100)
+    jsonl.write_text(json.dumps({"content": "x" * 600}) + "\n")
+    with pytest.raises(SystemExit):
+        ctxwarn.main(["--transcript", str(jsonl)])
+    assert "Context" in capsys.readouterr().out
+
+    # Second call: same band (still 150 tokens, appended but no growth in band)
+    time.sleep(0.05)
+    with open(jsonl, "a") as f:
+        f.write(json.dumps({"content": "x" * 100}) + "\n")
+    with pytest.raises(SystemExit):
+        ctxwarn.main(["--transcript", str(jsonl)])
+    assert capsys.readouterr().out == ""  # silent, same band
+
+    # Third call: grow into band 2 (>= 200 tokens)
+    time.sleep(0.05)
+    with open(jsonl, "a") as f:
+        f.write(json.dumps({"content": "x" * 300}) + "\n")
+    with pytest.raises(SystemExit):
+        ctxwarn.main(["--transcript", str(jsonl)])
+    assert "Context" in capsys.readouterr().out  # MUST warn — new band

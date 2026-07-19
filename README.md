@@ -43,6 +43,17 @@ bash scripts/install.sh
 ```
 *(Windows users: run `.\scripts\Install.ps1`)*
 
+**Opt-in: document/context hooks.** `--with-context-hooks` additionally registers
+two Claude Code hooks: `docextract` intercepts `Read` on pdf/csv/html/txt files
+and swaps in a cached plain-text extraction, and `ctxwarn` warns once per
+session when the transcript crosses your `.token-budget` threshold. Off by
+default — it's the first token-diet feature that intercepts a live tool call.
+Every other detected harness gets an instruction doc (`awareness-docextract.md`)
+instead, since their hook schemas aren't verified yet.
+```bash
+bash scripts/install.sh --with-context-hooks
+```
+
 ### 2. Verify
 ```bash
 token-diet health

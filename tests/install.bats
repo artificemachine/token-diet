@@ -1033,6 +1033,92 @@ PY
 }
 
 # ---------------------------------------------------------------------------
+# Cycle 6.3 — context hooks: Gemini CLI real hooks (OQ-2 resolved, 2026-07-19)
+#
+# Gemini CLI v0.49.0 (`gemini hooks migrate --from-claude`) confirms that
+# its hook schema is identical to Claude Code's ~/.claude/settings.json
+# JSON format with one difference: tool names are mapped (Read→read_file,
+# Bash→run_shell_command, Edit→replace, etc.) via TOOL_NAME_MAPPING in the
+# bundle. The migrate implementation in gemini-APNDCIQH.js proves the JSON
+# structure is compatible — same hooks key, same matcher/hooks/type/command/
+# timeout fields, same event names (PreToolUse, PostToolUse, SessionEnd,
+# PreCompact, Notification).
+#
+# We register docextract with matcher "read_file" (not "Read" — Gemini
+# maps the tool name) and ctxwarn with matcher "*" (universal, no mapping).
+# Awareness doc is still written as a courtesy fallback.
+# ---------------------------------------------------------------------------
+
+@test "context hooks: --with-context-hooks registers both hooks into gemini settings (read_file matcher)" {
+  mock_install_prereqs
+  mock_icm
+  mock_cmd claude
+  mock_cmd opencode
+  mock_gemini  # writes ~/.gemini/settings.json with empty mcpServers
+
+  run bash "$SCRIPTS_DIR/install.sh" --icm-only --with-context-hooks --hosts gemini
+  [ "$status" -eq 0 ]
+
+  python3 - "$TMP_HOME/.gemini/settings.json" "$TMP_HOME" << 'PY'
+import json, sys
+with open(sys.argv[1]) as f:
+    d = json.load(f)
+home = sys.argv[2]
+hooks = d.get("hooks", {})
+
+pre = hooks.get("PreToolUse", [])
+docextract_cmd = f"{home}/.local/bin/token-diet-hooks/docextract-pre-read.sh"
+matched = [e for e in pre if e.get("matcher") == "read_file"
+           and any(h.get("command") == docextract_cmd for h in e.get("hooks", []))]
+assert matched, f"docextract PreToolUse/read_file hook missing: {pre}"
+
+post = hooks.get("PostToolUse", [])
+ctxwarn_cmd = f"{home}/.local/bin/token-diet-hooks/ctxwarn-post.sh"
+matched = [e for e in post if e.get("matcher") == "*"
+           and any(h.get("command") == ctxwarn_cmd for h in e.get("hooks", []))]
+assert matched, f"ctxwarn PostToolUse/* hook missing: {post}"
+PY
+}
+
+@test "context hooks: Gemini CLI uses read_file matcher, NOT Read (tool name mapping verified)" {
+  mock_install_prereqs
+  mock_icm
+  mock_cmd claude
+  mock_cmd opencode
+  mock_gemini
+
+  run bash "$SCRIPTS_DIR/install.sh" --icm-only --with-context-hooks --hosts gemini
+  [ "$status" -eq 0 ]
+
+  python3 - "$TMP_HOME/.gemini/settings.json" << 'PY'
+import json, sys
+with open(sys.argv[1]) as f:
+    d = json.load(f)
+pre = d.get("hooks", {}).get("PreToolUse", [])
+# Must use gemini-mapped "read_file", not Claude Code's "Read"
+for e in pre:
+    assert e.get("matcher") != "Read", (
+        f"wrong matcher: expected read_file, got {e.get('matcher')}. "
+        f"Gemini CLI maps tool names via TOOL_NAME_MAPPING (Read -> read_file)"
+    )
+PY
+}
+
+@test "context hooks: Gemini awareness-doc still written as courtesy fallback" {
+  mock_install_prereqs
+  mock_icm
+  mock_cmd claude
+  mock_cmd opencode
+  mock_gemini
+  mkdir -p "$TMP_HOME/.gemini"
+
+  run bash "$SCRIPTS_DIR/install.sh" --icm-only --with-context-hooks --hosts gemini
+  [ "$status" -eq 0 ]
+
+  [ -f "$TMP_HOME/.gemini/awareness-docextract.md" ]
+}
+
+# ---------------------------------------------------------------------------
 # Cycle 7 — installed token-diet's Python cores (extract / budget --check)
 
 # ---------------------------------------------------------------------------

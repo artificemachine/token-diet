@@ -43,6 +43,17 @@ bash scripts/install.sh
 ```
 *(Windows users: run `.\scripts\Install.ps1`)*
 
+**Opt-in: document/context hooks.** `--with-context-hooks` additionally registers
+two Claude Code hooks: `docextract` intercepts `Read` on pdf/csv/html/txt files
+and swaps in a cached plain-text extraction, and `ctxwarn` warns once per
+session when the transcript crosses your `.token-budget` threshold. Off by
+default — it's the first token-diet feature that intercepts a live tool call.
+Every other detected harness gets an instruction doc (`awareness-docextract.md`)
+instead, since their hook schemas aren't verified yet.
+```bash
+bash scripts/install.sh --with-context-hooks
+```
+
 ### 2. Verify
 ```bash
 token-diet health
@@ -68,6 +79,7 @@ token-diet dashboard # Open the live browser stats
 | `token-diet mcp list` | **Hosts**: See which AI hosts (Gemini, Claude, etc.) are currently optimized. |
 | `token-diet budget hubs` | **Discovery**: Register "Project Hubs" (e.g. `~/Projects`) for automatic discovery. |
 | `token-diet budget status` | **Governance**: Check usage against your project budget. |
+| `token-diet budget --check` | **Warn**: Estimate a session transcript's token size and warn once per `.token-budget` `ctx_threshold` band. |
 | `token-diet doctor` | **Debug**: Run deep diagnostics on your setup. |
 | `token-diet repair` | **Fix**: Automatically fix hook and registration issues. |
 | `token-diet clean` | **Archive**: Reset RTK history while preserving daily totals. |
@@ -80,6 +92,7 @@ token-diet dashboard # Open the live browser stats
 | `token-diet leaks` | **Audit**: Detect redundant file reads in history. |
 | `token-diet test-first` | **Strategy**: Suggest test files to read before implementation. |
 | `token-diet diff-reads` | **Context**: Suggest minimal line ranges to read based on git diff. |
+| `token-diet extract <file>` | **Extract**: Convert a PDF/csv/html/txt document to a hash-cached plain-text file, so agents read cheap text instead of raw bytes. |
 | `token-diet uninstall` | **Remove**: Cleanly remove all binaries and registrations. |
 
 ---

@@ -192,6 +192,39 @@ remove_line_from_file() {
   ok "Removed '$pattern' from $file"
 }
 
+# remove_hook_entry <config_json_path> <event> <command>
+# Removes any hooks.<event>[] entry whose hooks[] contains a hook with this
+# exact command string. Leaves all other entries (and all other events)
+# untouched. Mirrors install.sh's merge_hook_entry() idempotency key.
+remove_hook_entry() {
+  local cfg="$1"
+  local event="$2"
+  local command="$3"
+  [ -f "$cfg" ] || { miss "$cfg (hooks.$event)"; return 0; }
+  if $DRY_RUN; then
+    dry "remove hooks.$event entries matching $command from $cfg"
+    return 0
+  fi
+  python3 - "$cfg" "$event" "$command" << 'PY'
+import json, sys
+cfg_path, event, command = sys.argv[1], sys.argv[2], sys.argv[3]
+try:
+    with open(cfg_path) as f:
+        d = json.load(f)
+except Exception:
+    sys.exit(0)
+hooks = d.get("hooks", {})
+entries = hooks.get(event, [])
+kept = [e for e in entries if not any(h.get("command") == command for h in e.get("hooks", []))]
+if len(kept) != len(entries):
+    hooks[event] = kept
+    with open(cfg_path, "w") as f:
+        json.dump(d, f, indent=2)
+        f.write("\n")
+PY
+  ok "Removed hooks.$event entry ($command) from $cfg"
+}
+
 # confirm <message>
 # Prompts for confirmation unless --force is set.
 confirm() {
@@ -305,6 +338,25 @@ PY
   remove_file "$HOME/.claude/hooks/rtk-rewrite.sh"
   remove_file "$HOME/.claude/token-diet.md"
   remove_file "$HOME/.codex/token-diet.md"
+
+  echo ""
+  echo -e "${BOLD}docextract / ctxwarn context hooks (--with-context-hooks)${NC}"
+  local docextract_cmd="$HOME/.local/bin/token-diet-hooks/docextract-pre-read.sh"
+  local ctxwarn_cmd="$HOME/.local/bin/token-diet-hooks/ctxwarn-post.sh"
+  remove_hook_entry "$HOME/.claude/settings.json" "PreToolUse" "$docextract_cmd"
+  remove_hook_entry "$HOME/.claude/settings.json" "PostToolUse" "$ctxwarn_cmd"
+  if [ -d "$HOME/.local/bin/token-diet-hooks" ]; then
+    if $DRY_RUN; then
+      dry "rm -rf $HOME/.local/bin/token-diet-hooks"
+    else
+      rm -rf "$HOME/.local/bin/token-diet-hooks"
+      ok "Removed $HOME/.local/bin/token-diet-hooks"
+    fi
+  else
+    miss "$HOME/.local/bin/token-diet-hooks"
+  fi
+  remove_file "$HOME/.codex/awareness-docextract.md"
+  remove_file "$HOME/.gemini/awareness-docextract.md"
 
   echo ""
   echo -e "${BOLD}Instruction file references${NC}"

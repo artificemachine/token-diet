@@ -991,13 +991,26 @@ PY
   mock_install_prereqs
   mock_icm
   mock_cmd claude
-  # Copilot CLI binary name on PATH is `copilot` (npm @github/copilot), NOT
-  # `github-copilot-cli`. The detector checks both; mock whichever is real.
-  if check_command copilot; then
-    mock_cmd copilot
-  else
-    mock_cmd github-copilot-cli
-  fi
+  # Detector checks both `github-copilot-cli` (legacy Homebrew) and `copilot`
+  # (current npm @github/copilot). Mock the npm form to prove both work.
+  mock_cmd copilot
+  mkdir -p "$TMP_HOME/.copilot"
+
+  run bash "$SCRIPTS_DIR/install.sh" --icm-only --with-context-hooks --hosts copilot
+  [ "$status" -eq 0 ]
+
+  [ -f "$TMP_HOME/.copilot/awareness-docextract.md" ]
+}
+
+@test "context hooks: Copilot CLI detector also accepts the legacy github-copilot-cli name" {
+  mock_install_prereqs
+  mock_icm
+  mock_cmd claude
+  # Legacy Homebrew binary name. The v1.14.5 detector checks both names
+  # because some users (like this one) have only `copilot` from npm while
+  # others have only `github-copilot-cli` from Homebrew — silent misses
+  # are exactly what we're guarding against.
+  mock_cmd github-copilot-cli
   mkdir -p "$TMP_HOME/.copilot"
 
   run bash "$SCRIPTS_DIR/install.sh" --icm-only --with-context-hooks --hosts copilot

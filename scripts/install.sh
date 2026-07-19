@@ -277,7 +277,9 @@ detect_hosts() {
   check_command claude     && HAS_CLAUDE=true
   check_command codex      && HAS_CODEX=true
   check_command opencode   && HAS_OPENCODE=true
-  check_command github-copilot-cli && HAS_COPILOT=true
+  # Copilot CLI binary name varies: `github-copilot-cli` (legacy Homebrew) vs
+  # `copilot` (current npm @github/copilot). Check both.
+  { check_command github-copilot-cli || check_command copilot; } && HAS_COPILOT=true
   # VS Code: check if 'code' CLI exists
   check_command code       && HAS_VSCODE=true
   # Cowork (Claude Desktop): check for config file or desktop app

@@ -68,6 +68,7 @@ token-diet dashboard # Open the live browser stats
 | `token-diet mcp list` | **Hosts**: See which AI hosts (Gemini, Claude, etc.) are currently optimized. |
 | `token-diet budget hubs` | **Discovery**: Register "Project Hubs" (e.g. `~/Projects`) for automatic discovery. |
 | `token-diet budget status` | **Governance**: Check usage against your project budget. |
+| `token-diet budget --check` | **Warn**: Estimate a session transcript's token size and warn once per `.token-budget` `ctx_threshold` band. |
 | `token-diet doctor` | **Debug**: Run deep diagnostics on your setup. |
 | `token-diet repair` | **Fix**: Automatically fix hook and registration issues. |
 | `token-diet clean` | **Archive**: Reset RTK history while preserving daily totals. |

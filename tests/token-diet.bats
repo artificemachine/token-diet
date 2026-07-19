@@ -426,6 +426,34 @@ PY
   [[ "$output" == *"budget"* ]]
 }
 
+@test "budget --check --help exits 0 and prints usage" {
+  run "$SCRIPTS_DIR/token-diet" budget --check --help
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Usage: token-diet budget --check"* ]]
+}
+
+@test "budget --check: warns on a transcript over threshold" {
+  cd "$TMP_HOME"
+  local jsonl="$TMP_HOME/big.jsonl"
+  # Real tiktoken runs here (no mock in a subprocess) — repeated natural-language
+  # text compresses far less under BPE than a single repeated char would.
+  # 12000x "The quick brown fox..." verified >100000 tokens (~120001) at write time.
+  python3 -c "
+import json
+print(json.dumps({'content': 'The quick brown fox jumps over the lazy dog. ' * 12000}))
+" > "$jsonl"
+  run "$SCRIPTS_DIR/token-diet" budget --check --transcript "$jsonl"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Context"* ]]
+}
+
+@test "budget --check: silent and exits 0 for a missing transcript" {
+  cd "$TMP_HOME"
+  run "$SCRIPTS_DIR/token-diet" budget --check --transcript "$TMP_HOME/does-not-exist.jsonl"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
 # ---------------------------------------------------------------------------
 # Cycle 10.1 — loops: exits 0 when no repeated commands
 # ---------------------------------------------------------------------------

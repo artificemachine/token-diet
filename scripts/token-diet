@@ -12,7 +12,7 @@
 
 set -euo pipefail
 
-readonly TD_VERSION="1.12.0"
+readonly TD_VERSION="1.13.0"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # --- Colors -------------------------------------------------------------------
@@ -1186,8 +1186,20 @@ print(d.get('warn',1500000), d.get('hard',0))" 2>/dev/null)" \
       fi
       ;;
 
+    --check)
+      if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
+        echo "Usage: token-diet budget --check --transcript <file>"
+        echo ""
+        echo "  Estimate a session transcript's token size and warn once per"
+        echo "  threshold band (default 100000, or .token-budget's ctx_threshold)."
+        echo "  Always exits 0 — a warn arm must never fail a turn."
+        return 0
+      fi
+      python3 "$SCRIPT_DIR/lib/ctxwarn.py" "$@"
+      ;;
+
     *)
-      echo "Usage: token-diet budget <init|status>" >&2
+      echo "Usage: token-diet budget <init|status|--check>" >&2
       return 1
       ;;
   esac

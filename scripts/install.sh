@@ -1609,6 +1609,7 @@ install_context_hooks() {
   if [ "${DRY_RUN:-false}" = "true" ]; then
     dryrun "install -m755 $hooks_src_dir/*.sh $hooks_bin_dir/"
     $HAS_CLAUDE && dryrun "merge PreToolUse/Read + PostToolUse/* hooks into $HOME/.claude/settings.json (backed up first)"
+    $HAS_GEMINI && dryrun "merge PreToolUse/read_file + PostToolUse/* hooks into $HOME/.gemini/settings.json (backed up first)"
     dryrun "write awareness-docextract.md to codex, gemini, copilot, cowork configs (OpenCode handled below)"
     $HAS_OPENCODE && dryrun "install opencode.ts plugin + register in opencode.json plugin array (backed up first)"
     return 0
@@ -1635,6 +1636,32 @@ install_context_hooks() {
     fi
   fi
 
+  # Gemini CLI: verified hooks schema (2026-07-19) by extracting the
+  # `gemini hooks migrate --from-claude` implementation from the v0.49.0
+  # bundle (`gemini-APNDCIQH.js`). Gemini CLI uses the EXACT same
+  # settings.json JSON format as Claude Code, with one difference:
+  # tool names are mapped (Read→read_file, Bash→run_shell_command, etc.)
+  # via TOOL_NAME_MAPPING. The matchers we register map to:
+  #   docextract:  Read → read_file
+  #   ctxwarn:     *    → * (universal — no mapping needed)
+  # OQ-2 resolved: no guessing needed; the schema is proven compatible.
+  if $HAS_GEMINI; then
+    local gm_settings="$HOME/.gemini/settings.json"
+    if [ ! -f "$gm_settings" ]; then
+      warn "Gemini CLI: $gm_settings not found — hook registration skipped"
+    else
+      cp "$gm_settings" "$gm_settings.bak-token-diet-hooks-$(date +%s)"
+      # Gemini tool name mapping: Read → read_file (verified in
+      # gemini-APNDCIQH.js TOOL_NAME_MAPPING: Read: "read_file").
+      if merge_hook_entry "$gm_settings" "PreToolUse" "read_file" "$docextract_shim" 15 \
+        && merge_hook_entry "$gm_settings" "PostToolUse" "*" "$ctxwarn_shim" 15; then
+        ok "Gemini CLI: docextract + ctxwarn hooks registered in $gm_settings"
+      else
+        warn "Gemini CLI: $gm_settings could not be parsed as JSON — hook registration skipped, file left untouched"
+      fi
+    fi
+  fi
+
   # Every other detected harness — awareness-doc fallback, no hook schema verified yet.
   local awareness_src="$SCRIPT_DIR/lib/awareness-docextract.md"
   write_awareness_docextract() {
@@ -1645,6 +1672,9 @@ install_context_hooks() {
   }
 
   $HAS_CODEX    && write_awareness_docextract "$HOME/.codex"
+  # Gemini CLI: now has real hooks (see block above). Awareness-doc is a
+  # courtesy fallback — the hooks provide automated enforcement, the awareness
+  # doc reminds the agent what to do if hooks fail or are disabled.
   $HAS_GEMINI   && write_awareness_docextract "$HOME/.gemini"
   # Copilot CLI: OQ-3 resolved (2026-07-19) — verified config dir is ~/.copilot/
   # via README inspection (https://github.com/github/copilot-cli). No hook

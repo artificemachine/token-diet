@@ -250,6 +250,16 @@ main() {
   remove_file "$HOME/.local/bin/token-diet"
   remove_file "$HOME/.local/bin/token-diet-dashboard"
   remove_file "$HOME/.local/bin/token-diet-mcp"
+  if [ -d "$HOME/.local/bin/lib" ]; then
+    if $DRY_RUN; then
+      dry "rm -rf $HOME/.local/bin/lib"
+    else
+      rm -rf "$HOME/.local/bin/lib"
+      ok "Removed $HOME/.local/bin/lib"
+    fi
+  else
+    miss "$HOME/.local/bin/lib"
+  fi
   # Symlinks the installer leaves in ~/.local/bin (→ ~/.cargo/bin/<tool>).
   # The install step creates these for rtk, tilth and icm but earlier uninstall
   # versions only ran `cargo uninstall`, orphaning the symlinks. Remove them here.

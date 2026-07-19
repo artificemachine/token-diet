@@ -12,7 +12,7 @@
 
 set -euo pipefail
 
-readonly TD_VERSION="1.11.4"
+readonly TD_VERSION="1.12.0"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # --- Colors -------------------------------------------------------------------
@@ -1473,6 +1473,18 @@ PY
   exit 1
 }
 
+cmd_extract() {
+  if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
+    echo "Usage: token-diet extract <file>"
+    echo ""
+    echo "  Extract a document (pdf/csv/html/txt) to a hash-cached plain-text"
+    echo "  file and print the cache path. Exit codes: 2 no extractor for this"
+    echo "  type, 3 needs markitdown (docx/pptx/xlsx/epub/odt/rtf), 4 missing file."
+    return 0
+  fi
+  python3 "$SCRIPT_DIR/lib/docextract.py" "$@"
+}
+
 cmd_test_first() {
   local file="${1:-}"
   if [[ -z "$file" ]]; then
@@ -2476,6 +2488,7 @@ COMMANDS
   breakdown         Top commands by tokens saved  [--limit N]
   explain <cmd>     Token cost breakdown for a specific command
   budget <init|status|hubs> Per-project token budget with hubs discovery
+  extract <file>    Extract a document (pdf/csv/html/txt) to a cached plain-text file
   loops             Detect agent loop patterns (commands run 3+ times)
   route <task>      Suggest which tool (tilth/Serena/RTK/ICM) best fits the task
   icm <sub>         ICM memory: warmup (download model), status  [warmup|status]
@@ -2517,6 +2530,7 @@ case "${1:-gain}" in
   breakdown)         shift; cmd_breakdown "$@" ;;
   explain)           shift; cmd_explain "$@" ;;
   budget)            shift; cmd_budget "$@" ;;
+  extract)           shift; cmd_extract "$@" ;;
   loops)             cmd_loops ;;
   dashboard)         shift; cmd_dashboard "$@" ;;
   service)           shift; cmd_service "$@" ;;

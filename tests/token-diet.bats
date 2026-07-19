@@ -300,6 +300,22 @@ INSTALLER
 }
 
 # ---------------------------------------------------------------------------
+# Cycle 8.1 — extract: docextract subcommand
+# ---------------------------------------------------------------------------
+
+@test "extract --help exits 0 and prints usage" {
+  run "$SCRIPTS_DIR/token-diet" extract --help
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Usage: token-diet extract"* ]]
+}
+
+@test "help text includes extract command" {
+  run "$SCRIPTS_DIR/token-diet" --help
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"extract"* ]]
+}
+
+# ---------------------------------------------------------------------------
 # Cycle 9.1 — budget init: creates .token-budget in cwd
 # ---------------------------------------------------------------------------
 

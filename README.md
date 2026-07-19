@@ -80,6 +80,7 @@ token-diet dashboard # Open the live browser stats
 | `token-diet leaks` | **Audit**: Detect redundant file reads in history. |
 | `token-diet test-first` | **Strategy**: Suggest test files to read before implementation. |
 | `token-diet diff-reads` | **Context**: Suggest minimal line ranges to read based on git diff. |
+| `token-diet extract <file>` | **Extract**: Convert a PDF/csv/html/txt document to a hash-cached plain-text file, so agents read cheap text instead of raw bytes. |
 | `token-diet uninstall` | **Remove**: Cleanly remove all binaries and registrations. |
 
 ---

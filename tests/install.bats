@@ -870,6 +870,55 @@ PY
 }
 
 # ---------------------------------------------------------------------------
+# Cycle 6.1 — docextract pre-read shim: suffix passthrough policy
+#
+# Regression: the shim's intercepted-suffix set originally included .txt/.md,
+# which caused two distinct problems:
+#   1. .md: docextract's cache format is always .md, so reading a .md source
+#      → extracts to a .md cache file → shim intercepts the .md cache → loops
+#      forever. This is the live bug caught while writing the prior handoff.
+#   2. .txt: already plain text, extracting adds a pointless round-trip.
+# Both must pass through (exit 0). The real extraction targets (.pdf/.csv/
+# .html/.htm) must still block (exit 2) so Claude reads the extracted cache.
+# ---------------------------------------------------------------------------
+
+@test "docextract shim: .md file passes through (exit 0, no block)" {
+  mock_token_diet_extract
+
+  local md="$TMP_HOME/HANDOFF.md"
+  echo "# heading" > "$md"
+
+  run bash "$PROJECT_ROOT/scripts/lib/hooks/docextract-pre-read.sh" \
+    < <(printf '{"tool_input":{"file_path":"%s"}}' "$md")
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "docextract shim: .txt file passes through (exit 0, no block)" {
+  mock_token_diet_extract
+
+  local txt="$TMP_HOME/notes.txt"
+  echo "plain text" > "$txt"
+
+  run bash "$PROJECT_ROOT/scripts/lib/hooks/docextract-pre-read.sh" \
+    < <(printf '{"tool_input":{"file_path":"%s"}}' "$txt")
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "docextract shim: .pdf file still intercepts (exit 2, redirects to cache)" {
+  mock_token_diet_extract
+
+  local pdf="$TMP_HOME/sample.pdf"
+  printf '%%PDF-1.4 fake\n' > "$pdf"
+
+  run bash "$PROJECT_ROOT/scripts/lib/hooks/docextract-pre-read.sh" \
+    < <(printf '{"tool_input":{"file_path":"%s"}}' "$pdf")
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"read that file instead"* ]]
+}
+
+# ---------------------------------------------------------------------------
 # Cycle 7 — installed token-diet's Python cores (extract / budget --check)
 #
 # Regression: cmd_extract / cmd_budget --check shell out to

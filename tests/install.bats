@@ -868,3 +868,63 @@ for event in ("PreToolUse", "PostToolUse"):
             assert "token-diet-hooks" not in h.get("command", ""), f"hook entry not removed: {h}"
 PY
 }
+
+# ---------------------------------------------------------------------------
+# Cycle 7 — installed token-diet's Python cores (extract / budget --check)
+#
+# Regression: cmd_extract / cmd_budget --check shell out to
+# $SCRIPT_DIR/lib/<name>.py. Every other test in this file (and every
+# real-machine validation up to this point) ran token-diet FROM the repo
+# checkout, where scripts/lib/ is a sibling directory — so this always
+# resolved and the bug was invisible. Once installed to .local/bin, the
+# installed copy's own SCRIPT_DIR became .local/bin, and its lib/ was
+# never copied there, breaking both subcommands post-install. Found by a
+# live `install.sh --with-context-hooks` run against a real HOME.
+# ---------------------------------------------------------------------------
+
+@test "install: Python cores (docextract/tdcache/ctxwarn) are copied to .local/bin/lib" {
+  mock_install_prereqs
+  mock_icm
+  mock_cmd claude
+
+  run bash "$SCRIPTS_DIR/install.sh" --icm-only
+  [ "$status" -eq 0 ]
+
+  [ -f "$TMP_HOME/.local/bin/lib/docextract.py" ]
+  [ -f "$TMP_HOME/.local/bin/lib/tdcache.py" ]
+  [ -f "$TMP_HOME/.local/bin/lib/ctxwarn.py" ]
+}
+
+@test "install: the INSTALLED token-diet binary (not the repo checkout) can run extract and budget --check" {
+  mock_install_prereqs
+  mock_icm
+  mock_cmd claude
+
+  run bash "$SCRIPTS_DIR/install.sh" --icm-only
+  [ "$status" -eq 0 ]
+
+  local sample="$TMP_HOME/sample.txt"
+  echo "installed-binary smoke test" > "$sample"
+
+  run "$TMP_HOME/.local/bin/token-diet" extract "$sample"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"/.cache/token-diet/extract/"* ]]
+
+  local jsonl="$TMP_HOME/transcript.jsonl"
+  python3 -c "import json; print(json.dumps({'content': 'short'}))" > "$jsonl"
+  run "$TMP_HOME/.local/bin/token-diet" budget --check --transcript "$jsonl"
+  [ "$status" -eq 0 ]
+}
+
+@test "uninstall: removes .local/bin/lib" {
+  mock_install_prereqs
+  mock_icm
+  mock_cmd claude
+  run bash "$SCRIPTS_DIR/install.sh" --icm-only
+  [ "$status" -eq 0 ]
+  [ -d "$TMP_HOME/.local/bin/lib" ]
+
+  run bash "$SCRIPTS_DIR/uninstall.sh" --force
+  [ "$status" -eq 0 ]
+  [ ! -d "$TMP_HOME/.local/bin/lib" ]
+}

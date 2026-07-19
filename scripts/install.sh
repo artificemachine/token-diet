@@ -1396,10 +1396,13 @@ install_token_diet() {
     return 0
   fi
 
+  local src_lib="$SCRIPT_DIR/lib"
+
   if [ "${DRY_RUN:-false}" = "true" ]; then
     dryrun "install -m755 $src_bin $bin_dir/token-diet"
     [ -f "$src_dash" ] && dryrun "install -m755 $src_dash $bin_dir/token-diet-dashboard"
     [ -f "$src_mcp" ] && dryrun "install -m755 $src_mcp $bin_dir/token-diet-mcp"
+    dryrun "install $src_lib/{docextract,tdcache,ctxwarn}.py to $bin_dir/lib/ (cmd_extract / budget --check depend on these at runtime)"
     dryrun "write ~/.claude/token-diet.md + add @token-diet.md to ~/.claude/CLAUDE.md"
     dryrun "write ~/.codex/token-diet.md + add @token-diet.md to ~/.codex/AGENTS.md"
     dryrun "register token-diet MCP server"
@@ -1409,6 +1412,18 @@ install_token_diet() {
   mkdir -p "$bin_dir"
   install -m755 "$src_bin" "$bin_dir/token-diet"
   ok "token-diet installed: $bin_dir/token-diet"
+
+  # cmd_extract / cmd_budget --check shell out to $SCRIPT_DIR/lib/<name>.py —
+  # SCRIPT_DIR resolves to wherever this token-diet copy lives, so the
+  # installed copy needs its own lib/ alongside it or those subcommands
+  # silently break post-install (only worked from the dev checkout).
+  for py_core in docextract tdcache ctxwarn; do
+    if [ -f "$src_lib/$py_core.py" ]; then
+      mkdir -p "$bin_dir/lib"
+      install -m644 "$src_lib/$py_core.py" "$bin_dir/lib/$py_core.py"
+    fi
+  done
+  ok "Python cores installed: $bin_dir/lib/{docextract,tdcache,ctxwarn}.py"
 
   if [ -f "$src_dash" ]; then
     install -m755 "$src_dash" "$bin_dir/token-diet-dashboard"

@@ -1235,3 +1235,61 @@ PY
   [ "$status" -eq 0 ]
   [ ! -f "$TMP_HOME/.local/bin/lib/hosts.sh" ]
 }
+
+# ---------------------------------------------------------------------------
+# Cycle 9 — release.sh survives a clean working tree
+#
+# release.sh exited 1 silently, always, whenever `git status --porcelain` was
+# empty. The unstaged-count pipeline starts with `grep -v`, which exits 1 when
+# it selects no lines; under `set -euo pipefail` (line 15) that failure reaches
+# the bare assignment and set -e kills the script with no message.
+#
+# A clean tree is the PRECONDITION for tagging a release, so every real
+# invocation hit this and every casual dev run did not. Nothing past preflight
+# had ever executed. Same mechanism as the v1.15.x defect family: code never
+# executed in the condition it was written for.
+# ---------------------------------------------------------------------------
+
+@test "release.sh --dry-run exits 0 on a clean working tree" {
+  # The bug only fires when `git status --porcelain` is EMPTY, and a clean tree
+  # is the precondition a real release runs under. Rather than shim git or
+  # depend on the dev checkout being clean (writing this test dirties it) or on
+  # submodules being present (CI checks out without them), build a throwaway
+  # repo: release.sh derives ROOT from its own location, so a copy with stub
+  # forks and a genuinely clean tree exercises the real script hermetically.
+  local repo="$TMP_HOME/relrepo"
+  mkdir -p "$repo/scripts" "$repo/forks"/{rtk,tilth,serena,icm}
+  cp "$SCRIPTS_DIR/release.sh" "$repo/scripts/release.sh"
+  # release.sh reads TD_VERSION out of scripts/token-diet as its single source
+  # of truth and hard-exits if it cannot parse one.
+  echo 'readonly TD_VERSION="9.9.9"' > "$repo/scripts/token-diet"
+  # `ls -A` must see something, or preflight fails on "fork is empty" first.
+  local f
+  for f in rtk tilth serena icm; do echo "stub" > "$repo/forks/$f/.keep"; done
+
+  git -C "$repo" init -q
+  git -C "$repo" config user.email test@example.com
+  git -C "$repo" config user.name test
+  git -C "$repo" add -A
+  # core.hooksPath is set globally on this machine and blocks commits to main;
+  # the throwaway repo wants none of that policy.
+  git -C "$repo" -c core.hooksPath=/dev/null commit -qm "stub" --no-gpg-sign
+
+  # Precondition now genuinely holds, and is asserted rather than assumed.
+  run git -C "$repo" status --porcelain
+  [ -z "$output" ]
+
+  mock_cmd cargo
+  mock_cmd uv
+  mock_cmd gh
+
+  run bash "$repo/scripts/release.sh" --dry-run --sign-only
+  [ "$status" -eq 0 ]
+}
+
+@test "release.sh preflight checks all four forks, including icm" {
+  # The submodule loop listed rtk/tilth/serena only. There are four forks, not
+  # three — the same omission the v1.15.4 tag-message fix corrected elsewhere.
+  run grep -nE 'for fork in .*icm' "$SCRIPTS_DIR/release.sh"
+  [ "$status" -eq 0 ]
+}

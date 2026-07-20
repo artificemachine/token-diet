@@ -7,7 +7,8 @@
 # so this is the only layer that can catch a path leak arriving via a fork PR.
 #
 # Exit 0 = clean, exit 1 = leak found (fails the check). Reads only the diff;
-# never needs secrets. Pair with `on: pull_request` (NOT pull_request_target).
+# never needs secrets. Pair with the plain `on: pull_request` trigger, never
+# the riskier "target" variant that runs with base-branch secrets.
 set -euo pipefail
 
 BASE_SHA="${BASE_SHA:-}"

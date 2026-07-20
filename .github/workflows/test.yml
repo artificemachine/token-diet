@@ -1,0 +1,38 @@
+name: Tests
+
+# Runs the bats + pytest suite server-side on every push/PR to main. Prior to
+# this workflow, the test suite was only enforced by the local pre-commit
+# hook — a fork PR or a bypass (--no-verify) could land untested.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: bats + pytest
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Install bats-core, jq, bc, and poppler-utils (pdftotext)
+        run: sudo apt-get update && sudo apt-get install -y bats jq bc poppler-utils
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.x'
+
+      - name: Install Python test dependencies
+        run: pip install pytest tiktoken pdfplumber
+
+      - name: Run bats tests
+        run: bats tests/*.bats
+
+      - name: Run pytest
+        run: pytest tests/ -q

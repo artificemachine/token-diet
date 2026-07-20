@@ -562,6 +562,7 @@ PY
 
 @test "install.sh registers Serena in codex config when only a stray 'serena' substring exists" {
   mock_install_prereqs
+  mock_cmd codex
   # Config has NO real [mcp_servers.serena] block but a stray args line
   # containing "serena". The old bare-grep check treated this as
   # "already configured" and skipped real registration.
@@ -583,6 +584,7 @@ TOML
 
 @test "install.sh does not duplicate Serena block when a real [mcp_servers.serena] header already exists" {
   mock_install_prereqs
+  mock_cmd codex
   cat > "$TMP_HOME/.codex/config.toml" << 'TOML'
 [mcp_servers.serena]
 command = "uvx"
@@ -960,8 +962,7 @@ JSON
   [ "$mode" = "644" ]
 
   # Plugin source matches what we ship
-  rtk diff "$TMP_HOME/.config/opencode/plugins/token-diet-hooks.ts" "$PROJECT_ROOT/scripts/lib/hooks-plugins/opencode.ts"
-  [ "$status" -eq 0 ]
+  diff "$TMP_HOME/.config/opencode/plugins/token-diet-hooks.ts" "$PROJECT_ROOT/scripts/lib/hooks-plugins/opencode.ts"
 
   # opencode.json: other plugin preserved, ours appended (relative path)
   python3 - "$TMP_HOME/.config/opencode/opencode.json" << 'PY'
@@ -1024,12 +1025,12 @@ PY
   # Catches regressions where one handler gets accidentally removed.
   local src="$PROJECT_ROOT/scripts/lib/hooks-plugins/opencode.ts"
   [ -f "$src" ]
-  rtk grep -q '"tool.execute.before"' "$src"
-  rtk grep -q '"tool.execute.after"'  "$src"
+  grep -q '"tool.execute.before"' "$src"
+  grep -q '"tool.execute.after"'  "$src"
   # Must extract via token-diet (not native parser)
-  rtk grep -q 'token-diet extract'      "$src"
+  grep -q 'token-diet extract'      "$src"
   # Must mirror ctxwarn band logic (estimate / threshold / band file)
-  rtk grep -q 'DEFAULT_CTX_THRESHOLD\|ctx_threshold' "$src"
+  grep -qE 'DEFAULT_CTX_THRESHOLD|ctx_threshold' "$src"
 }
 
 # ---------------------------------------------------------------------------

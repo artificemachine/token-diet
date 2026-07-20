@@ -1858,3 +1858,50 @@ MOCK
   grep -q 'RELEASE_RETENTION' "$doc"
   grep -qi 'tags' "$doc"
 }
+
+# ---------------------------------------------------------------------------
+# Phase 5 Iteration 2 — the host registry, consumed by ONE site
+#
+# The 7-host list is enumerated six times in install.sh. They desync silently:
+# adding an eighth host means editing six places and nothing fails if one is
+# missed. Iteration 2 defines the list once in scripts/lib/hosts.sh and
+# converts only the slugs/labels array site. The other five sites stay
+# hardcoded until later iterations, on purpose.
+# ---------------------------------------------------------------------------
+
+@test "hosts registry: defines exactly 7 hosts, every slug carrying a label" {
+  source "$SCRIPTS_DIR/lib/hosts.sh"
+
+  local slugs=() labels=()
+  while IFS= read -r s; do slugs+=("$s"); done < <(td_host_slugs)
+  while IFS= read -r l; do labels+=("$l"); done < <(td_host_labels)
+
+  [ "${#slugs[@]}" -eq 7 ]
+  [ "${#labels[@]}" -eq 7 ]
+
+  local i
+  for i in "${!slugs[@]}"; do
+    [ -n "${slugs[$i]}" ]
+    [ -n "${labels[$i]}" ]
+  done
+}
+
+@test "hosts registry: slug set matches the hosts install.sh actually supports" {
+  source "$SCRIPTS_DIR/lib/hosts.sh"
+  run bash -c "source '$SCRIPTS_DIR/lib/hosts.sh'; td_host_slugs | tr '\n' ' '"
+  [ "$output" = "claude codex opencode copilot vscode cowork gemini " ]
+}
+
+@test "hosts registry: install.sh no longer hardcodes the slugs/labels arrays" {
+  # The single site Iteration 2 converts. The other five enumerations remain
+  # until their own iterations; this guard is deliberately narrow.
+  run grep -nE 'local slugs=\("claude"' "$SCRIPTS_DIR/install.sh"
+  [ "$status" -ne 0 ]
+  run grep -nE 'local labels=\("Claude Code"' "$SCRIPTS_DIR/install.sh"
+  [ "$status" -ne 0 ]
+}
+
+@test "hosts registry: install.sh sources the lib rather than redefining it" {
+  run grep -nE 'source "\$SCRIPT_DIR/lib/hosts\.sh"' "$SCRIPTS_DIR/install.sh"
+  [ "$status" -eq 0 ]
+}

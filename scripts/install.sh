@@ -14,6 +14,12 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 
+# Single definition of the supported host list. install.sh sources this from the
+# REPO at install time; the installed token-diet sources its own copy from
+# $SCRIPT_DIR/lib at runtime. Different paths, same file, so the lib must not
+# assume either. See docs/PLAN-phase5-host-registry.md.
+source "$SCRIPT_DIR/lib/hosts.sh"
+
 # --- Partial-failure reporting ----------------------------------------------
 # This script mutates config files it does not own, across up to seven hosts.
 # With `set -e` and no trap, a failure at host five exits silently with five
@@ -367,8 +373,11 @@ _host_disable() {
 # Applies --hosts filter or prompts when multiple hosts are found.
 # Zeros out HAS_* flags for any host not selected.
 confirm_hosts() {
-  local slugs=("claude" "codex" "opencode" "copilot" "vscode" "cowork" "gemini")
-  local labels=("Claude Code" "Codex CLI" "OpenCode" "Copilot CLI" "VS Code" "Cowork (Desktop)" "Gemini CLI")
+  # Read from the single registry in lib/hosts.sh. Line-by-line, not word-split:
+  # labels contain spaces ("Cowork (Desktop)").
+  local slugs=() labels=()
+  while IFS= read -r _slug;  do slugs+=("$_slug");   done < <(td_host_slugs)
+  while IFS= read -r _label; do labels+=("$_label"); done < <(td_host_labels)
   local detected_slugs=()
   local detected_labels=()
 

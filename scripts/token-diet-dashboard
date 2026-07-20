@@ -262,18 +262,42 @@ def all_budget_files(total_input, active_file=None):
             rows.append(_budget_entry(cfg, total_input, p, is_active=is_active))
     return rows
 
+# A day with fewer than this many commands is treated as noise for projection
+# purposes: too small a sample to say anything about the savings rate, but
+# large enough to distort an unweighted average.
+MIN_DAILY_COMMANDS = 10
+
 def projection_stats(data):
     if not data: return None
     daily = data.get("daily", [])
     if not daily: return None
-    recent = daily[-7:]
-    avg_saved = sum(d.get("saved_tokens", 0) for d in recent) / len(recent)
-    avg_pct = sum(d.get("savings_pct", 0) for d in recent) / len(recent)
+    # Low-volume days are excluded before averaging. An unweighted mean over
+    # raw days lets a 2-command day count as much as a 5,000-command day, so a
+    # weekend or a day the machine was off drags the projection down by an
+    # amount that has nothing to do with actual savings.
+    # Only filter when the data actually carries volume. A source that omits
+    # "commands" entirely would otherwise have every day treated as zero-volume
+    # and lose its projection silently -- filtering must degrade to a no-op
+    # when it has nothing to judge by, not to "no data".
+    has_volume = any("commands" in d for d in daily)
+    qualified = [d for d in daily if d.get("commands", 0) >= MIN_DAILY_COMMANDS] if has_volume else daily
+    if not qualified: return None
+    recent7 = qualified[-7:]
+    recent30 = qualified[-30:]
+    avg7 = sum(d.get("saved_tokens", 0) for d in recent7) / len(recent7)
+    avg30 = sum(d.get("saved_tokens", 0) for d in recent30) / len(recent30)
+    avg_pct = sum(d.get("savings_pct", 0) for d in recent7) / len(recent7)
     return {
-        "avg_daily_saved": round(avg_saved),
-        "weekly_projection": round(avg_saved * 7),
+        "avg_daily_saved": round(avg7),
+        "weekly_projection": round(avg7 * 7),
+        # 7-day reacts to recent behaviour; 30-day is the steadier baseline.
+        # Showing both makes an unrepresentative week visible instead of
+        # silently becoming "the" number.
+        "weekly_proj_30d": round(avg30 * 7),
         "avg_pct": round(avg_pct, 1),
-        "days_sampled": len(recent),
+        "days_sampled": len(recent7),
+        "days_qualified": len(qualified),
+        "days_total": len(daily),
     }
 def _get_version():
     ver_raw = run(["token-diet", "--version"])
@@ -476,7 +500,7 @@ function render(d){
     sh+='<div class=metric><div class=v style="color:#f85149">-</div><div class=l>RTK not installed</div></div>';
   }
   if(p){
-    sh+=`<div class=metric><div class=v style="color:#39d353">${fmt(p.weekly_projection)}</div><div class=l>est. weekly savings</div></div>`;
+    sh+=`<div class=metric><div class=v style="color:#39d353">${fmt(p.weekly_projection)}</div><div class=l>est. weekly savings<br><span style="font-size:0.75em;opacity:0.6">7-day trend &nbsp;|&nbsp; 30-day avg: ${fmt(p.weekly_proj_30d)}</span></div></div>`;
   }
   const active=[r,t,s].filter(Boolean).length;
   sh+=`<div class=metric><div class=v style="color:${active===3?'#39d353':'#e3b341'}">${active}/3</div><div class=l>tools active</div></div>`;

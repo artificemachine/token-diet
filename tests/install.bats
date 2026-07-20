@@ -1251,27 +1251,39 @@ PY
 # ---------------------------------------------------------------------------
 
 @test "release.sh --dry-run exits 0 on a clean working tree" {
+  # The bug only fires when `git status --porcelain` is EMPTY, and a clean tree
+  # is the precondition a real release runs under. Rather than shim git or
+  # depend on the dev checkout being clean (writing this test dirties it) or on
+  # submodules being present (CI checks out without them), build a throwaway
+  # repo: release.sh derives ROOT from its own location, so a copy with stub
+  # forks and a genuinely clean tree exercises the real script hermetically.
+  local repo="$TMP_HOME/relrepo"
+  mkdir -p "$repo/scripts" "$repo/forks"/{rtk,tilth,serena,icm}
+  cp "$SCRIPTS_DIR/release.sh" "$repo/scripts/release.sh"
+  # release.sh reads TD_VERSION out of scripts/token-diet as its single source
+  # of truth and hard-exits if it cannot parse one.
+  echo 'readonly TD_VERSION="9.9.9"' > "$repo/scripts/token-diet"
+  # `ls -A` must see something, or preflight fails on "fork is empty" first.
+  local f
+  for f in rtk tilth serena icm; do echo "stub" > "$repo/forks/$f/.keep"; done
+
+  git -C "$repo" init -q
+  git -C "$repo" config user.email test@example.com
+  git -C "$repo" config user.name test
+  git -C "$repo" add -A
+  # core.hooksPath is set globally on this machine and blocks commits to main;
+  # the throwaway repo wants none of that policy.
+  git -C "$repo" -c core.hooksPath=/dev/null commit -qm "stub" --no-gpg-sign
+
+  # Precondition now genuinely holds, and is asserted rather than assumed.
+  run git -C "$repo" status --porcelain
+  [ -z "$output" ]
+
   mock_cmd cargo
   mock_cmd uv
-  mock_cmd codesign
-  mock_cmd gpg
+  mock_cmd gh
 
-  # The bug only fires when `git status --porcelain` is EMPTY. The dev checkout
-  # is dirty while this very test is being written, so the condition is forced
-  # with a shim rather than asserted about the real tree: `status --porcelain`
-  # returns nothing, everything else delegates to the real git.
-  local real_git
-  real_git="$(command -v git)"
-  cat > "$TMP_BIN/git" <<GITSHIM
-#!/usr/bin/env bash
-if [ "\$1" = "status" ] && [ "\$2" = "--porcelain" ]; then
-  exit 0
-fi
-exec "$real_git" "\$@"
-GITSHIM
-  chmod +x "$TMP_BIN/git"
-
-  run bash -c "cd '$SCRIPTS_DIR/..' && PATH='$TMP_BIN:$PATH' bash scripts/release.sh --dry-run"
+  run bash "$repo/scripts/release.sh" --dry-run --sign-only
   [ "$status" -eq 0 ]
 }
 

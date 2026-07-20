@@ -12,7 +12,7 @@
 
 set -euo pipefail
 
-readonly TD_VERSION="1.14.7"
+readonly TD_VERSION="1.14.8"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # --- Colors -------------------------------------------------------------------
@@ -2192,6 +2192,17 @@ PY
   local tilth_doctor_json=""
   if $tilth_ok; then
     tilth_doctor_json=$(tilth doctor --json 2>/dev/null || echo "")
+    # Some tilth builds don't wire up a real `doctor` subcommand at all —
+    # `doctor` then parses as tilth's [QUERY] search argument and returns
+    # real (but unrelated) search-result JSON instead of failing outright.
+    # Only trust the output as a doctor report if it actually looks like one.
+    if [ -n "$tilth_doctor_json" ] && ! echo "$tilth_doctor_json" | python3 -c "
+import json, sys
+d = json.load(sys.stdin)
+sys.exit(0 if ('hosts' in d or 'checks' in d) else 1)
+" 2>/dev/null; then
+      tilth_doctor_json=""
+    fi
     if [ -n "$tilth_doctor_json" ]; then
       if $json_mode; then
         : # folded into JSON output below
@@ -2254,8 +2265,13 @@ print('true' if healthy else 'false')" 2>/dev/null || echo "unknown")
       if ! $json_mode; then
         echo -e "  ${BOLD}tilth${NC}"
       fi
-      _doctor_check_mcp_json "tilth" "claude-code"    "$cc_cfg"    "tilth_registered_hosts"
-      _doctor_check_mcp_json "tilth" "claude-code"    "$cc_global" "tilth_registered_hosts"
+      _doctor_check_mcp_json "tilth" "claude-code"    "$cc_cfg"    "tilth_registered_hosts" "silent"
+      if ! printf '%s\n' "${tilth_registered_hosts[@]+"${tilth_registered_hosts[@]}"}" | grep -q "^claude-code$"; then
+        local cc_installed=""; [ -f "$cc_cfg" ] && cc_installed="1"
+        _doctor_check_mcp_json "tilth" "claude-code"    "$cc_global" "tilth_registered_hosts" "" "$cc_installed"
+      else
+        $json_mode || ok "  claude-code   registered"
+      fi
       _doctor_check_mcp_json "tilth" "claude-desktop" "$cd_mac"    "tilth_registered_hosts"
       _doctor_check_mcp_json "tilth" "claude-desktop" "$cd_linux"  "tilth_registered_hosts"
       _doctor_check_mcp_json "tilth" "opencode"       "$oc_cfg"    "tilth_registered_hosts"

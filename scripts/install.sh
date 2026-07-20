@@ -342,9 +342,10 @@ confirm_hosts() {
     fi
   done
 
-  if [ "${#detected_slugs[@]}" -le 1 ]; then return; fi   # nothing to choose from
-
-  # --hosts flag supplied — apply without prompting
+  # --hosts flag supplied — apply without prompting, regardless of how many
+  # hosts were auto-detected. An explicit --hosts must always be honored:
+  # it previously only applied when 2+ hosts were detected, so on a machine
+  # with exactly 0 or 1 host detected, --hosts silently had no effect.
   if [ -n "$HOSTS_FILTER" ] && [ "$HOSTS_FILTER" != "all" ]; then
     for slug in "${slugs[@]}"; do
       if ! echo ",$HOSTS_FILTER," | grep -qi ",$slug,"; then
@@ -354,6 +355,8 @@ confirm_hosts() {
     info "Host integrations limited to: $HOSTS_FILTER"
     return
   fi
+
+  if [ "${#detected_slugs[@]}" -le 1 ]; then return; fi   # nothing to choose from
 
   # Interactive prompt (skip in dry-run / non-interactive)
   if [ "${DRY_RUN:-false}" = "true" ] || [ ! -t 0 ]; then return; fi

@@ -742,7 +742,7 @@ with open('$TMP_HOME/.claude/settings.json', 'w') as f:
     f.write('\n')
 "
 
-  run bash "$SCRIPTS_DIR/install.sh" --icm-only --with-context-hooks
+  run bash "$SCRIPTS_DIR/install.sh" --icm-only --with-context-hooks --hosts claude
   [ "$status" -eq 0 ]
 
   python3 - "$TMP_HOME/.claude/settings.json" "$TMP_HOME" << 'PY'
@@ -774,7 +774,7 @@ PY
   mock_icm
   mock_cmd claude
 
-  run bash "$SCRIPTS_DIR/install.sh" --icm-only --with-context-hooks
+  run bash "$SCRIPTS_DIR/install.sh" --icm-only --with-context-hooks --hosts claude
   [ "$status" -eq 0 ]
 
   [ -x "$TMP_HOME/.local/bin/token-diet-hooks/docextract-pre-read.sh" ]
@@ -788,9 +788,9 @@ PY
   mock_icm
   mock_cmd claude
 
-  run bash "$SCRIPTS_DIR/install.sh" --icm-only --with-context-hooks
+  run bash "$SCRIPTS_DIR/install.sh" --icm-only --with-context-hooks --hosts claude
   [ "$status" -eq 0 ]
-  run bash "$SCRIPTS_DIR/install.sh" --icm-only --with-context-hooks
+  run bash "$SCRIPTS_DIR/install.sh" --icm-only --with-context-hooks --hosts claude
   [ "$status" -eq 0 ]
 
   python3 - "$TMP_HOME/.claude/settings.json" "$TMP_HOME" << 'PY'
@@ -815,7 +815,7 @@ PY
   mock_cmd claude
   printf '{"broken json\n' > "$TMP_HOME/.claude/settings.json"
 
-  run bash "$SCRIPTS_DIR/install.sh" --icm-only --with-context-hooks
+  run bash "$SCRIPTS_DIR/install.sh" --icm-only --with-context-hooks --hosts claude
   [ "$status" -eq 0 ]
 
   grep -q "broken json" "$TMP_HOME/.claude/settings.json"
@@ -848,7 +848,7 @@ with open('$TMP_HOME/.claude/settings.json', 'w') as f:
     json.dump({'hooks': {'SessionStart': [{'matcher': '*', 'hooks': [{'type': 'command', 'command': 'echo unrelated', 'timeout': 5}]}]}}, f)
     f.write('\n')
 "
-  run bash "$SCRIPTS_DIR/install.sh" --icm-only --with-context-hooks
+  run bash "$SCRIPTS_DIR/install.sh" --icm-only --with-context-hooks --hosts claude
   [ "$status" -eq 0 ]
 
   run bash "$SCRIPTS_DIR/uninstall.sh" --force
@@ -952,7 +952,7 @@ PY
 }
 JSON
 
-  run bash "$SCRIPTS_DIR/install.sh" --icm-only --with-context-hooks
+  run bash "$SCRIPTS_DIR/install.sh" --icm-only --with-context-hooks --hosts claude,opencode
   [ "$status" -eq 0 ]
 
   # Plugin file exists, mode 644
@@ -976,7 +976,7 @@ assert "plugins/token-diet-hooks.ts" in plugins, f"new plugin not registered: {p
 PY
 
   # Idempotent — second run does NOT add a duplicate entry
-  run bash "$SCRIPTS_DIR/install.sh" --icm-only --with-context-hooks
+  run bash "$SCRIPTS_DIR/install.sh" --icm-only --with-context-hooks --hosts claude,opencode
   [ "$status" -eq 0 ]
   python3 - "$TMP_HOME/.config/opencode/opencode.json" << 'PY'
 import json, sys

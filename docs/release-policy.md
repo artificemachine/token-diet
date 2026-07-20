@@ -31,7 +31,17 @@ RELEASE_RETENTION=15 bash scripts/release.sh
 
 ## Enforcement
 
-`scripts/release.sh` prunes automatically after the tag step. It deletes the
+Retention is enforced in **two** places, and both are necessary.
+
+**`.github/workflows/release.yml`** is the one that matters in practice. It
+prunes immediately after creating a release, on every pushed `v*` tag. When
+this workflow first ran (v1.15.1) the release count went straight to 11,
+because the prune step existed only in `scripts/release.sh` and nothing runs
+that script on the tag path. Enforcement living somewhere that never executes
+is not enforcement — the same failure mode as a release gate that could not
+complete a run and a path-leak guard that could not fail.
+
+**`scripts/release.sh`** prunes automatically after the tag step. It deletes the
 GitHub release only and leaves the tag in place.
 
 - `--dry-run` reports what would be pruned without deleting anything.

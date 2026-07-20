@@ -18,7 +18,7 @@ jobs:
     name: bats + pytest
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install bats-core, jq, bc, and poppler-utils (pdftotext)
         run: sudo apt-get update && sudo apt-get install -y bats jq bc poppler-utils

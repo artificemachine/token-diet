@@ -1235,3 +1235,49 @@ PY
   [ "$status" -eq 0 ]
   [ ! -f "$TMP_HOME/.local/bin/lib/hosts.sh" ]
 }
+
+# ---------------------------------------------------------------------------
+# Cycle 9 — release.sh survives a clean working tree
+#
+# release.sh exited 1 silently, always, whenever `git status --porcelain` was
+# empty. The unstaged-count pipeline starts with `grep -v`, which exits 1 when
+# it selects no lines; under `set -euo pipefail` (line 15) that failure reaches
+# the bare assignment and set -e kills the script with no message.
+#
+# A clean tree is the PRECONDITION for tagging a release, so every real
+# invocation hit this and every casual dev run did not. Nothing past preflight
+# had ever executed. Same mechanism as the v1.15.x defect family: code never
+# executed in the condition it was written for.
+# ---------------------------------------------------------------------------
+
+@test "release.sh --dry-run exits 0 on a clean working tree" {
+  mock_cmd cargo
+  mock_cmd uv
+  mock_cmd codesign
+  mock_cmd gpg
+
+  # The bug only fires when `git status --porcelain` is EMPTY. The dev checkout
+  # is dirty while this very test is being written, so the condition is forced
+  # with a shim rather than asserted about the real tree: `status --porcelain`
+  # returns nothing, everything else delegates to the real git.
+  local real_git
+  real_git="$(command -v git)"
+  cat > "$TMP_BIN/git" <<GITSHIM
+#!/usr/bin/env bash
+if [ "\$1" = "status" ] && [ "\$2" = "--porcelain" ]; then
+  exit 0
+fi
+exec "$real_git" "\$@"
+GITSHIM
+  chmod +x "$TMP_BIN/git"
+
+  run bash -c "cd '$SCRIPTS_DIR/..' && PATH='$TMP_BIN:$PATH' bash scripts/release.sh --dry-run"
+  [ "$status" -eq 0 ]
+}
+
+@test "release.sh preflight checks all four forks, including icm" {
+  # The submodule loop listed rtk/tilth/serena only. There are four forks, not
+  # three — the same omission the v1.15.4 tag-message fix corrected elsewhere.
+  run grep -nE 'for fork in .*icm' "$SCRIPTS_DIR/release.sh"
+  [ "$status" -eq 0 ]
+}

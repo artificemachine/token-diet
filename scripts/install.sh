@@ -193,39 +193,35 @@ inject_opencode_rules() {
   mkdir -p "$(dirname "$oc_prompt_cfg")"
   [ -f "$oc_prompt_cfg" ] || echo '{}' > "$oc_prompt_cfg"
 
-  python3 - "$oc_prompt_cfg" "$rules_file" <<'PYEOF'
-import json, re, shutil, sys
+  TD_LIB_DIR="$SCRIPT_DIR/lib" python3 - "$oc_prompt_cfg" "$rules_file" <<'PYEOF'
+import os, re, sys
+sys.path.insert(0, os.environ["TD_LIB_DIR"])
+import tdconfig
+
 cfg_path, rules_path = sys.argv[1], sys.argv[2]
 BEGIN = "<!-- token-diet:begin -->"
 END   = "<!-- token-diet:end -->"
 with open(rules_path) as f: rules_body = f.read().strip()
 block = f"{BEGIN}\n{rules_body}\n{END}"
+pattern = re.compile(re.escape(BEGIN) + r".*?" + re.escape(END), re.DOTALL)
+
+def mutate(data):
+    data.setdefault("mode", {})
+    for mode_name in ("build", "plan"):
+        data["mode"].setdefault(mode_name, {})
+        existing = data["mode"][mode_name].get("prompt", "") or ""
+        if BEGIN in existing:
+            new = pattern.sub(block, existing, count=1)
+        else:
+            new = (existing + ("\n\n" if existing else "") + block).lstrip("\n")
+        data["mode"][mode_name]["prompt"] = new
 
 try:
-    with open(cfg_path) as f: data = json.load(f)
-except FileNotFoundError:
-    data = {}
-except (json.JSONDecodeError, ValueError) as _e:
-    import time as _t
-    _bak = cfg_path + ".corrupt-" + _t.strftime("%Y%m%d-%H%M%S")
-    shutil.copy2(cfg_path, _bak)
-    print(f"[token-diet] ABORT: {cfg_path} is malformed JSON ({_e}); backed up to {_bak}. Refusing to overwrite existing config — fix it and re-run.", file=sys.stderr)
+    tdconfig.update_json(cfg_path, mutate)
+except tdconfig.ConfigError as _e:
+    _q = tdconfig.quarantine(cfg_path)
+    print(f"[token-diet] ABORT: {cfg_path} is malformed JSON ({_e}); backed up to {_q}. Refusing to overwrite existing config — fix it and re-run.", file=sys.stderr)
     sys.exit(3)
-
-data.setdefault("mode", {})
-pattern = re.compile(re.escape(BEGIN) + r".*?" + re.escape(END), re.DOTALL)
-for mode_name in ("build", "plan"):
-    data["mode"].setdefault(mode_name, {})
-    existing = data["mode"][mode_name].get("prompt", "") or ""
-    if BEGIN in existing:
-        new = pattern.sub(block, existing, count=1)
-    else:
-        new = (existing + ("\n\n" if existing else "") + block).lstrip("\n")
-    data["mode"][mode_name]["prompt"] = new
-
-with open(cfg_path, "w") as f:
-    json.dump(data, f, indent=2)
-    f.write("\n")
 PYEOF
   ok "OpenCode prompt rules injected: $oc_prompt_cfg"
 }
@@ -853,70 +849,68 @@ JSON
     if [ "${DRY_RUN:-false}" = "true" ]; then
       dryrun "Write mcp.serena + mcp.tilth entries to $oc_cfg"
     elif $LOCAL_MODE; then
-      python3 - "$oc_cfg" "$PROJECT_ROOT" <<'PYEOF'
-import json, sys, shutil, os
+      TD_LIB_DIR="$SCRIPT_DIR/lib" python3 - "$oc_cfg" "$PROJECT_ROOT" <<'PYEOF'
+import os, sys
+sys.path.insert(0, os.environ["TD_LIB_DIR"])
+import tdconfig
+
 cfg, project_root = sys.argv[1], sys.argv[2]
+
+def mutate(data):
+    data.setdefault("mcp", {})
+    # Strict Installation Decoupling (CLAUDE.md §"Strict Installation Decoupling"):
+    # NEVER write forks/-relative absolute paths into a host MCP config. The
+    # install_serena() and install_tilth() functions above already provision
+    # bare commands at XDG-stable paths (~/.local/bin/serena, ~/.local/bin/tilth).
+    # We register the bare names + their MCP subcommand arguments only.
+    data["mcp"]["serena"] = {
+        "type": "local",
+        "command": ["serena", "start-mcp-server",
+                    "--context=ide", "--open-web-dashboard", "false", "--project-from-cwd"],
+        "enabled": True,
+    }
+    data["mcp"]["tilth"] = {
+        "type": "local",
+        "command": ["tilth", "--mcp"],
+        "enabled": True,
+    }
+
 try:
-    with open(cfg) as f: data = json.load(f)
-except FileNotFoundError:
-    data = {}
-except (json.JSONDecodeError, ValueError) as _e:
-    import time as _t
-    _bak = cfg + ".corrupt-" + _t.strftime("%Y%m%d-%H%M%S")
-    shutil.copy2(cfg, _bak)
-    print(f"[token-diet] ABORT: {cfg} is malformed JSON ({_e}); backed up to {_bak}. Refusing to overwrite existing config — fix it and re-run.", file=sys.stderr)
+    tdconfig.update_json(cfg, mutate)
+except tdconfig.ConfigError as _e:
+    _q = tdconfig.quarantine(cfg)
+    print(f"[token-diet] ABORT: {cfg} is malformed JSON ({_e}); backed up to {_q}. Refusing to overwrite existing config — fix it and re-run.", file=sys.stderr)
     sys.exit(3)
-data.setdefault("mcp", {})
-# Strict Installation Decoupling (CLAUDE.md §"Strict Installation Decoupling"):
-# NEVER write forks/-relative absolute paths into a host MCP config. The
-# install_serena() and install_tilth() functions above already provision
-# bare commands at XDG-stable paths (~/.local/bin/serena, ~/.local/bin/tilth).
-# We register the bare names + their MCP subcommand arguments only.
-data["mcp"]["serena"] = {
-    "type": "local",
-    "command": ["serena", "start-mcp-server",
-                "--context=ide", "--open-web-dashboard", "false", "--project-from-cwd"],
-    "enabled": True,
-}
-data["mcp"]["tilth"] = {
-    "type": "local",
-    "command": ["tilth", "--mcp"],
-    "enabled": True,
-}
-with open(cfg, "w") as f:
-    json.dump(data, f, indent=2)
-    f.write("\n")
 PYEOF
       ok "Serena + tilth MCP: OpenCode local ($oc_cfg)"
     else
-      python3 - "$oc_cfg" "${SERENA_REPO}" <<'PYEOF'
-import json, sys, shutil
+      TD_LIB_DIR="$SCRIPT_DIR/lib" python3 - "$oc_cfg" "${SERENA_REPO}" <<'PYEOF'
+import os, sys
+sys.path.insert(0, os.environ["TD_LIB_DIR"])
+import tdconfig
+
 cfg, repo = sys.argv[1], sys.argv[2]
+
+def mutate(data):
+    data.setdefault("mcp", {})
+    data["mcp"]["serena"] = {
+        "type": "local",
+        "command": ["uvx", "--from", "git+" + repo, "serena", "start-mcp-server",
+                    "--context=ide", "--open-web-dashboard", "false", "--project-from-cwd"],
+        "enabled": True
+    }
+    data["mcp"]["tilth"] = {
+        "type": "local",
+        "command": ["tilth", "--mcp"],
+        "enabled": True
+    }
+
 try:
-    with open(cfg) as f: data = json.load(f)
-except FileNotFoundError:
-    data = {}
-except (json.JSONDecodeError, ValueError) as _e:
-    import time as _t
-    _bak = cfg + ".corrupt-" + _t.strftime("%Y%m%d-%H%M%S")
-    shutil.copy2(cfg, _bak)
-    print(f"[token-diet] ABORT: {cfg} is malformed JSON ({_e}); backed up to {_bak}. Refusing to overwrite existing config — fix it and re-run.", file=sys.stderr)
+    tdconfig.update_json(cfg, mutate)
+except tdconfig.ConfigError as _e:
+    _q = tdconfig.quarantine(cfg)
+    print(f"[token-diet] ABORT: {cfg} is malformed JSON ({_e}); backed up to {_q}. Refusing to overwrite existing config — fix it and re-run.", file=sys.stderr)
     sys.exit(3)
-data.setdefault("mcp", {})
-data["mcp"]["serena"] = {
-    "type": "local",
-    "command": ["uvx", "--from", "git+" + repo, "serena", "start-mcp-server",
-                "--context=ide", "--open-web-dashboard", "false", "--project-from-cwd"],
-    "enabled": True
-}
-data["mcp"]["tilth"] = {
-    "type": "local",
-    "command": ["tilth", "--mcp"],
-    "enabled": True
-}
-with open(cfg, "w") as f:
-    json.dump(data, f, indent=2)
-    f.write("\n")
 PYEOF
       ok "Serena + tilth MCP: OpenCode ($oc_cfg)"
     fi
@@ -932,76 +926,73 @@ PYEOF
       dryrun "Write mcpServers.serena + mcpServers.tilth to $COWORK_CFG"
     else
       if $LOCAL_MODE; then
-        python3 - "$COWORK_CFG" <<'PYEOF'
-import json, sys, shutil
+        TD_LIB_DIR="$SCRIPT_DIR/lib" python3 - "$COWORK_CFG" <<'PYEOF'
+import os, sys
+sys.path.insert(0, os.environ["TD_LIB_DIR"])
+import tdconfig
+
 cfg = sys.argv[1]
+
+def mutate(data):
+    data.setdefault("mcpServers", {})
+    data["mcpServers"]["serena"] = {
+        "command": "docker",
+        "args": ["run", "--rm", "-i", "-v", "$(pwd):/workspace:ro",
+                 "--network", "none", "token-diet/serena:latest",
+                 "--context=claude-code", "--open-web-dashboard", "false", "--project", "/workspace"]
+    }
+
 try:
-    with open(cfg) as f: data = json.load(f)
-except FileNotFoundError:
-    data = {}
-except (json.JSONDecodeError, ValueError) as _e:
-    import time as _t
-    _bak = cfg + ".corrupt-" + _t.strftime("%Y%m%d-%H%M%S")
-    shutil.copy2(cfg, _bak)
-    print(f"[token-diet] ABORT: {cfg} is malformed JSON ({_e}); backed up to {_bak}. Refusing to overwrite existing config — fix it and re-run.", file=sys.stderr)
+    tdconfig.update_json(cfg, mutate)
+except tdconfig.ConfigError as _e:
+    _q = tdconfig.quarantine(cfg)
+    print(f"[token-diet] ABORT: {cfg} is malformed JSON ({_e}); backed up to {_q}. Refusing to overwrite existing config — fix it and re-run.", file=sys.stderr)
     sys.exit(3)
-data.setdefault("mcpServers", {})
-data["mcpServers"]["serena"] = {
-    "command": "docker",
-    "args": ["run", "--rm", "-i", "-v", "$(pwd):/workspace:ro",
-             "--network", "none", "token-diet/serena:latest",
-             "--context=claude-code", "--open-web-dashboard", "false", "--project", "/workspace"]
-}
-with open(cfg, "w") as f:
-    json.dump(data, f, indent=2)
-    f.write("\n")
 PYEOF
       else
-        python3 - "$COWORK_CFG" "${SERENA_REPO}" <<'PYEOF'
-import json, sys, shutil
+        TD_LIB_DIR="$SCRIPT_DIR/lib" python3 - "$COWORK_CFG" "${SERENA_REPO}" <<'PYEOF'
+import os, sys
+sys.path.insert(0, os.environ["TD_LIB_DIR"])
+import tdconfig
+
 cfg, repo = sys.argv[1], sys.argv[2]
+
+def mutate(data):
+    data.setdefault("mcpServers", {})
+    data["mcpServers"]["serena"] = {
+        "command": "uvx",
+        "args": ["--from", "git+" + repo, "serena", "start-mcp-server",
+                 "--context=claude-code", "--open-web-dashboard", "false", "--project-from-cwd"]
+    }
+
 try:
-    with open(cfg) as f: data = json.load(f)
-except FileNotFoundError:
-    data = {}
-except (json.JSONDecodeError, ValueError) as _e:
-    import time as _t
-    _bak = cfg + ".corrupt-" + _t.strftime("%Y%m%d-%H%M%S")
-    shutil.copy2(cfg, _bak)
-    print(f"[token-diet] ABORT: {cfg} is malformed JSON ({_e}); backed up to {_bak}. Refusing to overwrite existing config — fix it and re-run.", file=sys.stderr)
+    tdconfig.update_json(cfg, mutate)
+except tdconfig.ConfigError as _e:
+    _q = tdconfig.quarantine(cfg)
+    print(f"[token-diet] ABORT: {cfg} is malformed JSON ({_e}); backed up to {_q}. Refusing to overwrite existing config — fix it and re-run.", file=sys.stderr)
     sys.exit(3)
-data.setdefault("mcpServers", {})
-data["mcpServers"]["serena"] = {
-    "command": "uvx",
-    "args": ["--from", "git+" + repo, "serena", "start-mcp-server",
-             "--context=claude-code", "--open-web-dashboard", "false", "--project-from-cwd"]
-}
-with open(cfg, "w") as f:
-    json.dump(data, f, indent=2)
-    f.write("\n")
 PYEOF
       fi
 
       # Also register tilth if installed
       if check_command tilth; then
-        python3 - "$COWORK_CFG" <<'PYEOF'
-import json, sys
+        TD_LIB_DIR="$SCRIPT_DIR/lib" python3 - "$COWORK_CFG" <<'PYEOF'
+import os, sys
+sys.path.insert(0, os.environ["TD_LIB_DIR"])
+import tdconfig
+
 cfg = sys.argv[1]
+
+def mutate(data):
+    data.setdefault("mcpServers", {})
+    data["mcpServers"]["tilth"] = {"command": "tilth", "args": ["--mcp"]}
+
 try:
-    with open(cfg) as f: data = json.load(f)
-except FileNotFoundError:
-    data = {}
-except (json.JSONDecodeError, ValueError) as _e:
-    import shutil, time
-    _bak = cfg + ".corrupt-" + time.strftime("%Y%m%d-%H%M%S")
-    shutil.copy2(cfg, _bak)
-    print(f"[token-diet] ABORT: {cfg} is malformed JSON ({_e}); backed up to {_bak}. Refusing to overwrite existing config — fix it and re-run.", file=sys.stderr)
+    tdconfig.update_json(cfg, mutate)
+except tdconfig.ConfigError as _e:
+    _q = tdconfig.quarantine(cfg)
+    print(f"[token-diet] ABORT: {cfg} is malformed JSON ({_e}); backed up to {_q}. Refusing to overwrite existing config — fix it and re-run.", file=sys.stderr)
     sys.exit(3)
-data.setdefault("mcpServers", {})
-data["mcpServers"]["tilth"] = {"command": "tilth", "args": ["--mcp"]}
-with open(cfg, "w") as f:
-    json.dump(data, f, indent=2)
-    f.write("\n")
 PYEOF
         ok "Serena + tilth MCP: Cowork / Claude Desktop ($COWORK_CFG)"
       else
@@ -1226,23 +1217,23 @@ PYEOF
     if [ "${DRY_RUN:-false}" = "true" ]; then
       dryrun "Write mcp.icm to $oc_cfg"
     else
-      python3 - "$oc_cfg" <<'PYEOF'
-import json, sys, shutil
+      TD_LIB_DIR="$SCRIPT_DIR/lib" python3 - "$oc_cfg" <<'PYEOF'
+import os, sys
+sys.path.insert(0, os.environ["TD_LIB_DIR"])
+import tdconfig
+
 cfg = sys.argv[1]
+
+def mutate(data):
+    data.setdefault("mcp", {})
+    data["mcp"]["icm"] = {"type": "local", "command": ["icm", "serve", "--compact"], "enabled": True}
+
 try:
-    with open(cfg) as f: data = json.load(f)
-except FileNotFoundError:
-    data = {}
-except (json.JSONDecodeError, ValueError) as _e:
-    import time as _t
-    _bak = cfg + ".corrupt-" + _t.strftime("%Y%m%d-%H%M%S")
-    shutil.copy2(cfg, _bak)
-    print(f"[token-diet] ABORT: {cfg} is malformed JSON ({_e}); backed up to {_bak}. Refusing to overwrite existing config — fix it and re-run.", file=sys.stderr)
+    tdconfig.update_json(cfg, mutate)
+except tdconfig.ConfigError as _e:
+    _q = tdconfig.quarantine(cfg)
+    print(f"[token-diet] ABORT: {cfg} is malformed JSON ({_e}); backed up to {_q}. Refusing to overwrite existing config — fix it and re-run.", file=sys.stderr)
     sys.exit(3)
-data.setdefault("mcp", {})
-data["mcp"]["icm"] = {"type": "local", "command": ["icm", "serve", "--compact"], "enabled": True}
-with open(cfg, "w") as f:
-    json.dump(data, f, indent=2); f.write("\n")
 PYEOF
       ok "ICM MCP: OpenCode ($oc_cfg)"
     fi
@@ -1253,23 +1244,23 @@ PYEOF
     if [ "${DRY_RUN:-false}" = "true" ]; then
       dryrun "Write mcpServers.icm to $COWORK_CFG"
     else
-      python3 - "$COWORK_CFG" <<'PYEOF'
-import json, sys, shutil
+      TD_LIB_DIR="$SCRIPT_DIR/lib" python3 - "$COWORK_CFG" <<'PYEOF'
+import os, sys
+sys.path.insert(0, os.environ["TD_LIB_DIR"])
+import tdconfig
+
 cfg = sys.argv[1]
+
+def mutate(data):
+    data.setdefault("mcpServers", {})
+    data["mcpServers"]["icm"] = {"command": "icm", "args": ["serve", "--compact"]}
+
 try:
-    with open(cfg) as f: data = json.load(f)
-except FileNotFoundError:
-    data = {}
-except (json.JSONDecodeError, ValueError) as _e:
-    import time as _t
-    _bak = cfg + ".corrupt-" + _t.strftime("%Y%m%d-%H%M%S")
-    shutil.copy2(cfg, _bak)
-    print(f"[token-diet] ABORT: {cfg} is malformed JSON ({_e}); backed up to {_bak}. Refusing to overwrite existing config — fix it and re-run.", file=sys.stderr)
+    tdconfig.update_json(cfg, mutate)
+except tdconfig.ConfigError as _e:
+    _q = tdconfig.quarantine(cfg)
+    print(f"[token-diet] ABORT: {cfg} is malformed JSON ({_e}); backed up to {_q}. Refusing to overwrite existing config — fix it and re-run.", file=sys.stderr)
     sys.exit(3)
-data.setdefault("mcpServers", {})
-data["mcpServers"]["icm"] = {"command": "icm", "args": ["serve", "--compact"]}
-with open(cfg, "w") as f:
-    json.dump(data, f, indent=2); f.write("\n")
 PYEOF
       ok "ICM MCP: Cowork / Claude Desktop ($COWORK_CFG)"
     fi
@@ -1775,27 +1766,36 @@ install_context_hooks() {
         # the relative path we just installed). Always-backup before write.
         if [ -f "$opencode_cfg" ]; then
           cp "$opencode_cfg" "$opencode_cfg.bak-token-diet-opencode-$(date +%s)"
-          python3 - "$opencode_cfg" "$plugin_dst" << 'PY'
-import json, sys
+          TD_LIB_DIR="$SCRIPT_DIR/lib" python3 - "$opencode_cfg" "$plugin_dst" << 'PY'
+import os, sys
+sys.path.insert(0, os.environ["TD_LIB_DIR"])
+import tdconfig
+
 cfg_path, plugin_dst = sys.argv[1], sys.argv[2]
 # The plugin array stores paths relative to the opencode config file
 # directory (parent of opencode.json). plugins/token-diet-hooks.ts is the
 # canonical relative form.
 rel = "plugins/token-diet-hooks.ts"
+
+def mutate(cfg):
+    plugins = cfg.get("plugin", [])
+    if not isinstance(plugins, list):
+        plugins = []
+    if rel not in plugins and plugin_dst not in plugins:
+        plugins.append(rel)
+    cfg["plugin"] = plugins
+
+# This previously did `except Exception: cfg = {}`, which treated a malformed
+# opencode.json as EMPTY and then wrote it back containing only the plugin key
+# -- silently destroying every other setting the user had. Same shape as the
+# two truncate-then-swallow sites fixed in v1.15.0; this one survived that pass.
+# Now it aborts and preserves the original for inspection.
 try:
-    with open(cfg_path) as f:
-        cfg = json.load(f)
-except Exception:
-    cfg = {}
-plugins = cfg.get("plugin", [])
-if not isinstance(plugins, list):
-    plugins = []
-if rel not in plugins and plugin_dst not in plugins:
-    plugins.append(rel)
-cfg["plugin"] = plugins
-with open(cfg_path, "w") as f:
-    json.dump(cfg, f, indent=2)
-    f.write("\n")
+    tdconfig.update_json(cfg_path, mutate)
+except tdconfig.ConfigError as _e:
+    _q = tdconfig.quarantine(cfg_path)
+    print(f"[token-diet] ABORT: {cfg_path} is malformed JSON ({_e}); backed up to {_q}. Refusing to overwrite existing config — fix it and re-run.", file=sys.stderr)
+    sys.exit(3)
 PY
           ok "OpenCode plugin registered in $opencode_cfg"
         else
@@ -2067,15 +2067,20 @@ setup_project_hubs() {
   
   if [ -n "$user_hubs" ]; then
     mkdir -p "$cfg_dir"
-    python3 - "$cfg_file" "$user_hubs" << 'PY'
-import json, sys, pathlib
+    TD_LIB_DIR="$SCRIPT_DIR/lib" python3 - "$cfg_file" "$user_hubs" << 'PY'
+import os, pathlib, sys
+sys.path.insert(0, os.environ["TD_LIB_DIR"])
+import tdconfig
+
 path = pathlib.Path(sys.argv[1])
 raw = sys.argv[2].replace(",", " ").split()
 hubs = [h.strip() for h in raw if h.strip()]
 home = str(pathlib.Path.home())
 hubs = [h.replace(home, "~") for h in hubs]
-with open(path, "w") as f:
-    json.dump({"project_hubs": hubs}, f, indent=2)
+# Creating a fresh file (the caller early-returns if it already exists), so
+# there is no existing user data to lose here -- atomic_write_json is used for
+# consistency and to avoid leaving a half-written file behind on a crash.
+tdconfig.atomic_write_json(path, {"project_hubs": hubs})
 PY
     ok "Saved project hubs to $cfg_file"
   else

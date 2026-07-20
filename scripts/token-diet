@@ -12,7 +12,7 @@
 
 set -euo pipefail
 
-readonly TD_VERSION="1.15.3"
+readonly TD_VERSION="1.15.4"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # --- Colors -------------------------------------------------------------------
@@ -1001,14 +1001,17 @@ cmd_budget() {
         return 0
       fi
       local _baseline; _baseline=$(_get_rtk_total)
-      python3 - "$target" "$_baseline" << 'PY'
-import json, sys, datetime
+      TD_LIB_DIR="$SCRIPT_DIR/lib" python3 - "$target" "$_baseline" << 'PY'
+import datetime, os, sys
+sys.path.insert(0, os.environ["TD_LIB_DIR"])
+import tdconfig
+
 d = {"warn": 1500000, "hard": 0,
      "installed_at": datetime.date.today().isoformat(),
      "baseline_tokens": int(sys.argv[2])}
-with open(sys.argv[1], "w") as f:
-    json.dump(d, f, indent=2)
-    f.write("\n")
+# Caller already returned early if the file exists, so nothing is overwritten
+# here; atomic_write_json avoids leaving a half-written budget file on a crash.
+tdconfig.atomic_write_json(sys.argv[1], d)
 PY
       if $is_global; then
         ok "Created global $target  (warn: 1.5M, hard: unlimited, baseline: $(human_tokens "$_baseline"))"
@@ -1891,20 +1894,28 @@ PY
       return 0
     fi
 
-    python3 - "$cfg" "$tool" "$new_path" << 'PY'
-import json, sys, os
+    TD_LIB_DIR="$SCRIPT_DIR/lib" python3 - "$cfg" "$tool" "$new_path" << 'PY'
+import os, sys
+sys.path.insert(0, os.environ["TD_LIB_DIR"])
+import tdconfig
+
 cfg_path, tool_name, new_cmd = sys.argv[1], sys.argv[2], sys.argv[3]
-with open(cfg_path) as f:
-    d = json.load(f)
-servers = d.get("mcpServers", {})
-key = next((k for k in servers if tool_name.lower() in k.lower()), None)
-if key:
+
+def mutate(d):
+    servers = d.get("mcpServers", {})
+    key = next((k for k in servers if tool_name.lower() in k.lower()), None)
+    if key is None:
+        return False          # nothing to change; skip the write entirely
     servers[key]["command"] = new_cmd
-tmp = cfg_path + ".tmp"
-with open(tmp, "w") as f:
-    json.dump(d, f, indent=2)
-    f.write("\n")
-os.replace(tmp, cfg_path)
+
+# This was already atomic via os.replace, but hand-rolled: no fsync, no mode
+# preservation, no backup, and an unhandled json.load raising a raw traceback
+# on a malformed config. tdconfig covers all four.
+try:
+    tdconfig.update_json(cfg_path, mutate)
+except tdconfig.ConfigError as _e:
+    print(f"[token-diet] skipped {cfg_path}: {_e}", file=sys.stderr)
+    sys.exit(1)
 PY
     if [ $? -eq 0 ]; then
       $json_mode || ok "  ${host_label}  ${tool}: updated command → ${new_path}"

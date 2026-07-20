@@ -149,3 +149,51 @@ def test_verify_cli_rejects_malformed_json(tmp_path):
     p = tmp_path / "broken.json"
     p.write_text("{nope")
     assert tdconfig._cli(["verify", str(p)]) == 1
+
+
+# --- quarantine ---------------------------------------------------------------
+# quarantine() preserves an ALREADY-BROKEN file so the user can inspect what
+# their editor left behind. backup() preserves a currently-GOOD file before
+# token-diet mutates it. The install.sh sites need the former on their abort
+# path; conflating the two would either lose the corrupt original or litter
+# .corrupt- files on healthy configs.
+
+
+def test_quarantine_copies_malformed_file_and_leaves_original(tmp_path):
+    p = tmp_path / "broken.json"
+    p.write_text('{"broken json')
+    dest = tdconfig.quarantine(p)
+    assert dest is not None
+    assert dest.name.startswith("broken.json.corrupt-")
+    assert dest.read_text() == '{"broken json'
+    # The original must survive: quarantine copies, never moves.
+    assert p.exists() and p.read_text() == '{"broken json'
+
+
+def test_quarantine_returns_none_for_missing_file(tmp_path):
+    assert tdconfig.quarantine(tmp_path / "absent.json") is None
+
+
+def test_quarantine_never_raises_on_unwritable_dir(tmp_path):
+    """It runs on an error path; failing to preserve must not mask the corruption."""
+    d = tmp_path / "ro"
+    d.mkdir()
+    p = d / "broken.json"
+    p.write_text("{nope")
+    os.chmod(d, 0o500)
+    try:
+        assert tdconfig.quarantine(p) is None  # returns None, does not raise
+    finally:
+        os.chmod(d, 0o700)
+
+
+def test_quarantine_is_distinct_from_backup(tmp_path):
+    """The two must not collide: different prefixes, different purposes."""
+    p = tmp_path / "settings.json"
+    p.write_text('{"ok": true}')
+    b = tdconfig.backup(p)
+    q = tdconfig.quarantine(p)
+    assert b is not None and q is not None
+    assert ".bak-token-diet-" in b.name
+    assert ".corrupt-" in q.name
+    assert b != q

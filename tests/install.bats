@@ -1181,3 +1181,57 @@ PY
   [ "$status" -eq 0 ]
   [ ! -d "$TMP_HOME/.local/bin/lib" ]
 }
+
+# ---------------------------------------------------------------------------
+# Cycle 8 — Phase 5 Iteration 1: shared shell lib ships with the installed binary
+#
+# Strict Installation Decoupling (CLAUDE.md): once installed, token-diet runs
+# from $HOME/.local/bin and cannot source anything from the repo checkout. Any
+# shared shell lib must therefore be copied to $bin_dir/lib/ alongside the
+# Python cores. The v1.14.0 cmd_extract break happened because the copy
+# manifest was hardcoded and a newly-added core was omitted — tests passed from
+# the dev checkout, the installed binary was broken for every user. The glob
+# test below is the negative test for that failure mode.
+# ---------------------------------------------------------------------------
+
+@test "install: shell lib (hosts.sh) is copied to .local/bin/lib" {
+  mock_install_prereqs
+  mock_icm
+  mock_cmd claude
+
+  run bash "$SCRIPTS_DIR/install.sh" --icm-only
+  [ "$status" -eq 0 ]
+
+  [ -f "$TMP_HOME/.local/bin/lib/hosts.sh" ]
+}
+
+@test "install: shell-lib copy is glob-based, not a hardcoded manifest" {
+  mock_install_prereqs
+  mock_icm
+  mock_cmd claude
+
+  # Planted input: a lib file the installer has never heard of. A hardcoded
+  # manifest silently skips it — exactly the v1.14.0 failure mode.
+  local planted="$SCRIPTS_DIR/lib/zz-planted-negative-test.sh"
+  echo '# planted by tests/install.bats' > "$planted"
+
+  run bash "$SCRIPTS_DIR/install.sh" --icm-only
+  local st="$status"
+  rm -f "$planted"
+
+  [ "$st" -eq 0 ]
+  [ -f "$TMP_HOME/.local/bin/lib/zz-planted-negative-test.sh" ]
+}
+
+@test "uninstall: removes the installed shell lib" {
+  mock_install_prereqs
+  mock_icm
+  mock_cmd claude
+  run bash "$SCRIPTS_DIR/install.sh" --icm-only
+  [ "$status" -eq 0 ]
+  [ -f "$TMP_HOME/.local/bin/lib/hosts.sh" ]
+
+  run bash "$SCRIPTS_DIR/uninstall.sh" --force
+  [ "$status" -eq 0 ]
+  [ ! -f "$TMP_HOME/.local/bin/lib/hosts.sh" ]
+}

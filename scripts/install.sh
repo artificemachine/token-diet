@@ -1465,6 +1465,21 @@ install_token_diet() {
   done
   ok "Python cores installed: $bin_dir/lib/{docextract,tdcache,ctxwarn,tdconfig}.py"
 
+  # Shared shell libs. Globbed, not listed: a hardcoded manifest is what let
+  # cmd_extract ship broken in v1.14.0 — the new core was added to scripts/lib/
+  # and forgotten here, so every test passed from the dev checkout while the
+  # installed binary failed. Adding a lib file must be enough on its own.
+  shell_lib_count=0
+  for shell_lib in "$src_lib"/*.sh; do
+    [ -f "$shell_lib" ] || continue
+    mkdir -p "$bin_dir/lib"
+    install -m644 "$shell_lib" "$bin_dir/lib/$(basename "$shell_lib")"
+    shell_lib_count=$((shell_lib_count + 1))
+  done
+  if [ "$shell_lib_count" -gt 0 ]; then
+    ok "Shell libs installed: $shell_lib_count file(s) in $bin_dir/lib/"
+  fi
+
   if [ -f "$src_dash" ]; then
     install -m755 "$src_dash" "$bin_dir/token-diet-dashboard"
     ok "token-diet-dashboard installed: $bin_dir/token-diet-dashboard"

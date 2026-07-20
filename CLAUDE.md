@@ -38,7 +38,7 @@ token-diet/
 │   ├── token-diet.ps1        # CLI entry point — Windows (PowerShell)
 │   ├── token-diet-dashboard  # stdlib-only Python browser dashboard
 │   ├── token-diet-mcp        # MCP server entry point
-│   ├── lib/                  # Python cores + hook shims + rule templates (NOT shell helpers; nothing here is sourced)
+│   ├── lib/                  # Python cores + hook shims + rule templates + shared shell libs (*.sh). Every *.sh here is installed to ~/.local/bin/lib/ by glob — adding one needs no installer edit.
 │   ├── playbook.yml          # Ansible playbook
 │   ├── release.sh            # Release automation (tag, SBOM, GitHub release)
 │   └── build.sh              # Build from forks (no internet)

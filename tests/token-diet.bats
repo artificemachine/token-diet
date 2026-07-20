@@ -1780,15 +1780,19 @@ MOCK
   [ "$status" -ne 0 ]
 }
 
-@test "CLAUDE.md does not claim scripts/lib holds sourced shell helpers" {
-  # scripts/lib/ contains no .sh files and nothing sources it. The old wording
-  # sent reviewers looking for a seam that does not exist.
+@test "install.sh copies scripts/lib/*.sh by glob, never by hardcoded manifest" {
+  # Supersedes the old "scripts/lib holds no .sh files" tripwire, which fired as
+  # designed when Phase 5 Iteration 1 landed hosts.sh. The invariant that
+  # actually matters is not "no shell libs exist" but "every shell lib reaches
+  # the installed binary without an installer edit" — a hardcoded list is how
+  # cmd_extract shipped broken in v1.14.0.
   local root="$SCRIPTS_DIR/.."
   run grep -n 'Shared shell helpers sourced by the CLI' "$root/CLAUDE.md"
   [ "$status" -ne 0 ]
-  # And the claim must stay false-proof: if .sh files ever land there, revisit.
-  run bash -c "ls $SCRIPTS_DIR/lib/*.sh 2>/dev/null"
-  [ "$status" -ne 0 ]
+  # The glob loop must exist. Behavioural proof that it actually installs an
+  # unknown file lives in tests/install.bats ("copy is glob-based").
+  run grep -nE 'for shell_lib in "\$src_lib"/\*\.sh' "$SCRIPTS_DIR/install.sh"
+  [ "$status" -eq 0 ]
 }
 
 @test "no raw open(path,\"w\") config writes remain in install.sh or token-diet" {

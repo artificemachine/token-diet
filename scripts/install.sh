@@ -14,6 +14,47 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 
+# --- Partial-failure reporting ----------------------------------------------
+# This script mutates config files it does not own, across up to seven hosts.
+# With `set -e` and no trap, a failure at host five exits silently with five
+# hosts already modified and no record of which. TD_MUTATED accumulates every
+# path touched so the trap can tell the user exactly what state they are in.
+TD_MUTATED=()
+
+# Call after successfully modifying a file, so a later failure can report it.
+td_record_mutation() {
+  TD_MUTATED+=("$1")
+}
+
+_td_on_error() {
+  local exit_code=$1 line=$2
+  echo "" >&2
+  printf '%b\n' "${RED:-}[install] FAILED at line ${line} (exit ${exit_code})${NC:-}" >&2
+
+  if [ "${#TD_MUTATED[@]}" -gt 0 ]; then
+    echo "" >&2
+    echo "Files already modified before the failure:" >&2
+    local f
+    for f in "${TD_MUTATED[@]}"; do
+      echo "  - $f" >&2
+    done
+    echo "" >&2
+    echo "Each modified config has a timestamped backup alongside it:" >&2
+    echo "  ls -t <file>.bak-token-diet-*" >&2
+    echo "" >&2
+    echo "To revert one:  cp <file>.bak-token-diet-<ts> <file>" >&2
+    echo "To remove everything this installer added:  bash scripts/uninstall.sh" >&2
+  else
+    echo "No config files were modified before the failure." >&2
+  fi
+
+  echo "" >&2
+  echo "Re-running install.sh is safe: every registration step is idempotent." >&2
+  exit "$exit_code"
+}
+
+trap '_td_on_error $? $LINENO' ERR
+
 # --- Configuration -----------------------------------------------------------
 RTK_REPO="https://github.com/artificemachine/rtk"
 TILTH_REPO="https://github.com/artificemachine/tilth"
@@ -1407,7 +1448,7 @@ install_token_diet() {
     dryrun "install -m755 $src_bin $bin_dir/token-diet"
     [ -f "$src_dash" ] && dryrun "install -m755 $src_dash $bin_dir/token-diet-dashboard"
     [ -f "$src_mcp" ] && dryrun "install -m755 $src_mcp $bin_dir/token-diet-mcp"
-    dryrun "install $src_lib/{docextract,tdcache,ctxwarn}.py to $bin_dir/lib/ (cmd_extract / budget --check depend on these at runtime)"
+    dryrun "install $src_lib/{docextract,tdcache,ctxwarn,tdconfig}.py to $bin_dir/lib/ (cmd_extract / budget --check / MCP registration depend on these at runtime)"
     dryrun "write ~/.claude/token-diet.md + add @token-diet.md to ~/.claude/CLAUDE.md"
     dryrun "write ~/.codex/token-diet.md + add @token-diet.md to ~/.codex/AGENTS.md"
     dryrun "register token-diet MCP server"
@@ -1422,13 +1463,16 @@ install_token_diet() {
   # SCRIPT_DIR resolves to wherever this token-diet copy lives, so the
   # installed copy needs its own lib/ alongside it or those subcommands
   # silently break post-install (only worked from the dev checkout).
-  for py_core in docextract tdcache ctxwarn; do
+  # tdconfig is required by the installed token-diet-install.sh (MCP
+  # registration imports it), so it ships with the other cores. Omitting a
+  # newly-added core here is exactly how cmd_extract shipped broken in v1.14.0.
+  for py_core in docextract tdcache ctxwarn tdconfig; do
     if [ -f "$src_lib/$py_core.py" ]; then
       mkdir -p "$bin_dir/lib"
       install -m644 "$src_lib/$py_core.py" "$bin_dir/lib/$py_core.py"
     fi
   done
-  ok "Python cores installed: $bin_dir/lib/{docextract,tdcache,ctxwarn}.py"
+  ok "Python cores installed: $bin_dir/lib/{docextract,tdcache,ctxwarn,tdconfig}.py"
 
   if [ -f "$src_dash" ]; then
     install -m755 "$src_dash" "$bin_dir/token-diet-dashboard"
@@ -1455,31 +1499,55 @@ PYEOF
     # injecting "mcpServers" into an OpenCode config triggers ConfigInvalidError.
     for cfg in "$HOME/.claude/settings.json" "$HOME/Library/Application Support/Claude/claude_desktop_config.json" "$HOME/.config/Claude/claude_desktop_config.json" "$COWORK_CFG"; do
       if [ -f "$cfg" ]; then
-        python3 - "$cfg" << 'PYEOF'
-import json, sys
+        if ! TD_LIB_DIR="$SCRIPT_DIR/lib" python3 - "$cfg" << 'PYEOF'
+import os, sys
+sys.path.insert(0, os.environ["TD_LIB_DIR"])
+import tdconfig
+
 cfg = sys.argv[1]
 try:
-    with open(cfg) as f: data = json.load(f)
-    data.setdefault("mcpServers", {})
-    data["mcpServers"]["token-diet"] = {"command": "token-diet-mcp", "args": []}
-    with open(cfg, "w") as f: json.dump(data, f, indent=2)
-except Exception: pass
+    tdconfig.update_json(
+        cfg,
+        lambda d: d.setdefault("mcpServers", {}).update(
+            {"token-diet": {"command": "token-diet-mcp", "args": []}}
+        ),
+    )
+except tdconfig.ConfigError as e:
+    print(f"skipped (config unreadable): {e}", file=sys.stderr)
+    sys.exit(1)
 PYEOF
+        then
+          warn "token-diet MCP: skipped $cfg (see message above)"
+        else
+          td_record_mutation "$cfg"
+        fi
       fi
     done
     # OpenCode uses "mcp" key — write there, not "mcpServers"
     for cfg in "$HOME/.config/opencode/opencode.json" "$HOME/.opencode.json"; do
       if [ -f "$cfg" ]; then
-        python3 - "$cfg" << 'PYEOF'
-import json, sys
+        if ! TD_LIB_DIR="$SCRIPT_DIR/lib" python3 - "$cfg" << 'PYEOF'
+import os, sys
+sys.path.insert(0, os.environ["TD_LIB_DIR"])
+import tdconfig
+
 cfg = sys.argv[1]
 try:
-    with open(cfg) as f: data = json.load(f)
-    data.setdefault("mcp", {})
-    data["mcp"]["token-diet"] = {"type": "local", "command": ["token-diet-mcp"], "enabled": True}
-    with open(cfg, "w") as f: json.dump(data, f, indent=2)
-except Exception: pass
+    tdconfig.update_json(
+        cfg,
+        lambda d: d.setdefault("mcp", {}).update(
+            {"token-diet": {"type": "local", "command": ["token-diet-mcp"], "enabled": True}}
+        ),
+    )
+except tdconfig.ConfigError as e:
+    print(f"skipped (config unreadable): {e}", file=sys.stderr)
+    sys.exit(1)
 PYEOF
+        then
+          warn "token-diet MCP: skipped $cfg (see message above)"
+        else
+          td_record_mutation "$cfg"
+        fi
       fi
     done
   fi

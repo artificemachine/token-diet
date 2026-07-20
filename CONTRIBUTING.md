@@ -2,14 +2,37 @@
 
 ## How to Contribute
 
-1. **Open an issue** — describe the bug, feature request, or improvement you have in mind. Include relevant context (OS, tool versions, error output).
+Small fixes (typos, docs, an obvious one-line bug) are welcome as a direct pull
+request. No issue needed.
 
-2. **Open a pull request** — once the issue exists, submit a PR that references it (e.g. `Fixes #42`). Keep the PR focused on the single issue it addresses.
-
-Pull requests without a corresponding issue will not be reviewed.
+For anything larger, please open an issue first so we can agree on the approach
+before you spend time on it. Include relevant context: OS, tool versions, and
+the error output.
 
 ## Guidelines
 
-- Follow the conventions in [CLAUDE.md](CLAUDE.md) (version bumps, CHANGELOG append-only, no automatic submodule updates).
-- Run the full test suite before submitting: `bats tests/*.bats && pytest tests/ -q`.
-- Never push directly to `main` — always use a feature or fix branch.
+- Run the test suite before submitting: `bats tests/*.bats && pytest tests/ -q`.
+- Keep each PR focused on one change.
+- Work on a branch; `main` is protected.
+- `CHANGELOG.md` is append-only. Add your entry at the end, don't edit existing ones.
+- Don't bump the pinned submodules in `forks/` as part of an unrelated change.
+
+## Development setup
+
+```bash
+git clone --recursive https://github.com/artificemachine/token-diet.git
+cd token-diet
+bash scripts/install.sh --dry-run   # see what an install would do
+bats tests/*.bats && pytest tests/ -q
+```
+
+`--recursive` matters: the four tools in `forks/` are submodules, and the
+air-gapped install path (`--local`) builds from them.
+
+Requires `bash`, `python3`, `jq`, and `bc`. `bats-core` and `pytest` for tests.
+
+## Project conventions
+
+Detailed conventions live in [CLAUDE.md](CLAUDE.md), which doubles as the
+instruction file for AI coding agents working in this repo. The parts that
+matter for a human contributor are already listed above.

@@ -7,8 +7,14 @@ credentials.json
 .superharness/
 target/
 .serena/
+# .vscode/mcp.json was tracked until 2026-07-20 and had its portable `tilth`
+# command replaced with a machine-local absolute path on every install, because
+# install.sh runs `tilth install <host>` and tilth's installer writes the
+# absolute binary path. That produced five separate "fix the path" commits
+# (4751685, 43eebaa, 2495d6a, 1e9a92c, f408b4f) none of which addressed the
+# cause. It is per-machine IDE config; the portable template is installed to
+# ~/.config/token-diet/vscode-mcp.template.json instead.
 .vscode/
-!.vscode/mcp.json
 dist/
 excalidraw.log
 __pycache__/
@@ -26,3 +32,8 @@ shipguard.txt
 .hablatone
 .ship-check-passed
 .shipguard/
+
+# Agent session working files. These accumulate machine-local absolute paths
+# and read as session logs rather than project artifacts, so they stay out of
+# the public tree. Keep them locally; never commit.
+HANDOFF.md

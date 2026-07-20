@@ -4,6 +4,15 @@ name: Path Leak Guard
 # in PR diffs — the server-side equivalent of pre-commit check 1d, which never
 # runs on external fork PRs or on API-side merges.
 #
+# Two modes run here:
+#   1. diff mode      — added lines of the PR only. Fast, blocks new leaks.
+#   2. full-tree mode — every tracked file's full content. Catches leaks that
+#                       predate this guard or arrived outside a PR. Added after
+#                       a home path was found sitting in a committed file while
+#                       diff mode had been green on every PR, because diff mode
+#                       only matches paths under a known subdirectory
+#                       (Documents|Desktop|Downloads|Library|.local).
+#
 # Uses the plain `pull_request` trigger, never the riskier "target" variant:
 # fork code runs with a read-only token and no secrets. The job only reads
 # the diff, so that's all it needs. To actually BLOCK merges, mark "Path
@@ -11,6 +20,8 @@ name: Path Leak Guard
 
 on:
   pull_request:
+    branches: [main]
+  push:
     branches: [main]
 
 permissions:
@@ -24,14 +35,23 @@ jobs:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           fetch-depth: 1
+
+      # Runs on both push and pull_request. This is the check that would have
+      # caught the leak that diff mode missed.
+      - name: Scan full tree for hardcoded local paths
+        run: bash .github/scripts/path-leak-scan.sh --full-tree
+
       - name: Fetch PR base and head commits
+        if: github.event_name == 'pull_request'
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           git fetch --depth=1 origin "$BASE_SHA"
           git fetch --depth=1 origin "$HEAD_SHA"
+
       - name: Scan PR diff for hardcoded local paths
+        if: github.event_name == 'pull_request'
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}

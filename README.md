@@ -1,133 +1,196 @@
 # token-diet
 
-**Put your AI coding sessions on a diet.** Orchestrate RTK, tilth, Serena, and ICM to slash token costs by 40-90%.
+[![Tests](https://github.com/artificemachine/token-diet/actions/workflows/test.yml/badge.svg)](https://github.com/artificemachine/token-diet/actions/workflows/test.yml)
+[![Path Leak Guard](https://github.com/artificemachine/token-diet/actions/workflows/path-leak.yml/badge.svg)](https://github.com/artificemachine/token-diet/actions/workflows/path-leak.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20WSL-lightgrey.svg)](#requirements)
 
-## 1-Minute Overview
+**Your AI coding agent reads too much.** token-diet installs and wires four
+tools that sit between the agent and your machine, so it reads what it needs
+instead of everything.
 
-### What is it?
-`token-diet` is a unified installer and dashboard for the ultimate token optimization stack. It wires together four specialized tools that act as a "filter" between your AI agent and your code:
+One command installs the stack and registers it across every AI host you have:
+Claude Code, Codex CLI, OpenCode, Copilot CLI, VS Code, Claude Desktop, and
+Gemini CLI.
 
-1.  **[RTK](https://github.com/rtk-ai/rtk)**: Compresses huge CLI outputs (builds, tests, logs) before the agent sees them.
-2.  **[tilth](https://github.com/jahala/tilth)**: Uses AST (tree-sitter) to read only the code symbols the agent actually needs.
-3.  **[Serena](https://github.com/oraios/serena)**: Provides IDE-grade navigation (LSP) so agents stop reading whole files just to find a definition.
-4.  **[ICM](https://github.com/artificemachine/icm)**: Infinite Context Memory — persistent cross-session, cross-tool recall so agents stop re-deriving decisions and facts they already learned.
+```console
+$ token-diet gain
 
-### Why use it?
-- **Slash Costs**: Save up to 90% on command output and 40% on code reading.
-- **Bigger Context**: Fit 5x more information into the same context window.
-- **Faster Agents**: Fewer tokens mean faster responses and fewer "out of context" errors.
+RTK — command output compression (tracked)
+──────────────────────────────────────────────────
+  Commands filtered:     200194
+  Tokens in:             110.2M
+  Tokens saved:          92.5M  (83.9%)
+  Exec time:             157h 2m
+  Efficiency:  ████████████████░░░░  83.9%
+  ✓  RTK 0.43.0 — active
 
-### Global vs. Per-Project?
-All four tools are installed **Globally** as binaries, but they operate with **Project-Level** context.
-
-| Tool | Installation | Scope of Work |
-| :--- | :--- | :--- |
-| **RTK** | **Global** (`~/.local/bin`) | **Per-Project History**: RTK stores command history in `~/.rtk/history.json`. `token-diet` allows you to define per-project `.token-budget` files to govern costs. |
-| **tilth** | **Global** (`~/.local/bin`) | **Per-Project Scanning**: When an agent calls tilth, it scans the files in your **current project directory**. It doesn't store permanent state between projects. |
-| **Serena** | **Global** (uvx/Docker) | **Per-Project Memories**: Serena's "Memories" (learned code patterns) are project-specific. It reads from and learns your active project directory. |
-| **ICM** | **Global** (`~/.local/bin`) | **Cross-Session Memory**: ICM persists decisions, facts, and resolved errors across sessions and tools. Keyword recall works offline; `token-diet icm warmup` enables semantic recall. |
-
-**In short:** You install them once (Global), but your AI agent uses them to optimize whichever project folder you currently have open (Per-Project).
-
----
-
-## Quick Start
-
-### 1. Install (macOS / Linux / WSL)
-```bash
-# Preview what will happen
-bash scripts/install.sh --dry-run
-
-# Install everything
-bash scripts/install.sh
+tilth — AST-aware code reading (tree-sitter)
+──────────────────────────────────────────────────
+  MCP hosts:             claude-code,claude-desktop,opencode,codex,gemini
+  ✓  tilth 0.9.0 — active
 ```
-*(Windows users: run `.\scripts\Install.ps1`)*
 
-**Opt-in: document/context hooks.** `--with-context-hooks` additionally registers
-two Claude Code hooks: `docextract` intercepts `Read` on pdf/csv/html/txt files
-and swaps in a cached plain-text extraction, and `ctxwarn` warns once per
-session when the transcript crosses your `.token-budget` threshold. Off by
-default — it's the first token-diet feature that intercepts a live tool call.
-Every other detected harness gets an instruction doc (`awareness-docextract.md`)
-instead, since their hook schemas aren't verified yet.
+That 83.9% is one real machine's measured history over 200k commands, not a
+marketing figure. Your number will differ. See
+[docs/benchmarks.md](docs/benchmarks.md) for what is measured, what is
+benchmarked, and what is neither.
+
+## Install
+
+```bash
+git clone --recursive https://github.com/artificemachine/token-diet.git
+cd token-diet
+
+bash scripts/install.sh --dry-run   # see exactly what it would touch
+bash scripts/install.sh             # do it
+token-diet health                   # verify
+```
+
+`--recursive` matters: the four tools live in `forks/` as submodules. If you
+already cloned without it, run `git submodule update --init --recursive`.
+
+The installer detects which AI hosts you have and registers only those. Use
+`--hosts claude,vscode` to narrow it, and `--dry-run` first if you want to see
+the config files it will edit.
+
+### Requirements
+
+`bash`, `python3`, `git`, `jq`, `bc`. The default install fetches Rust and `uv`
+if they're missing; `--local` builds everything from the pinned forks instead
+and needs no network.
+
+Optional: `poppler-utils` (better PDF extraction), `tiktoken` and `pdfplumber`
+(exact token counts and richer PDF parsing). Everything degrades gracefully
+without them.
+
+## What the four tools do
+
+| Tool | Job | Savings |
+| :--- | :--- | :--- |
+| **[RTK](https://github.com/rtk-ai/rtk)** | Compresses CLI output (builds, tests, logs) before the agent sees it | 60-90% output reduction, measured live from your own history |
+| **[tilth](https://github.com/jahala/tilth)** | Reads code by AST, returning the symbols asked for instead of whole files | -38% to -44% cost per correct answer, [benchmarked](docs/benchmarks.md) |
+| **[Serena](https://github.com/oraios/serena)** | LSP navigation, so the agent jumps to a definition instead of reading to find it | Fewer prompt turns; not separately measured |
+| **[ICM](https://github.com/artificemachine/icm)** | Persistent cross-session memory, so facts get recalled instead of re-derived | Recall replaces re-reading; not separately measured |
+
+There is deliberately no single headline "saves X%" number. Two of the four are
+not separately measured, and inventing a combined figure would mean publishing
+a guess. [docs/benchmarks.md](docs/benchmarks.md) explains the method for each.
+
+### Installed globally, scoped per project
+
+All four install once as global binaries. They operate on whichever project
+directory you're in: RTK keeps per-project history, tilth and Serena scan the
+current tree, and ICM persists across sessions and tools. Per-project token
+budgets live in a `.token-budget` file.
+
+## Optional: context hooks
+
+`--with-context-hooks` registers two hooks that intercept live tool calls:
+
+- **docextract** — when the agent reads a PDF, CSV, or HTML file, it gets a
+  cached plain-text extraction instead of raw bytes.
+- **ctxwarn** — warns once per session when the transcript crosses the
+  `ctx_threshold` in your `.token-budget`.
+
 ```bash
 bash scripts/install.sh --with-context-hooks
 ```
 
-### 2. Verify
-```bash
-token-diet health
-```
+Off by default, because these are the only features that intercept a live tool
+call. Real hooks are wired for Claude Code, Gemini CLI, and OpenCode. Codex CLI
+and Copilot CLI have no hook API, so they get an instruction document instead.
 
-### 3. Use
-Once installed, your AI agent (Claude Code, Codex, Gemini CLI, VS Code, etc.) will automatically use the optimized tools. You can monitor your diet via the CLI or dashboard:
+## Commands
 
 ```bash
-token-diet           # See your total token savings
-token-diet dashboard # Open the live browser stats
+token-diet              # savings dashboard (default)
+token-diet dashboard    # live browser UI
+token-diet health       # quick check: tools + registrations
+token-diet doctor       # deep diagnosis  [--json]
+token-diet repair       # fix what doctor finds  [--dry-run]
 ```
 
----
-
-## Main Commands
+<details>
+<summary>Full command reference</summary>
 
 | Command | Purpose |
 | :--- | :--- |
-| `token-diet gain` | **Status**: See how many tokens you've saved today. |
-| `token-diet dashboard` | **Live UI**: Open the browser dashboard with persistent daily history. |
-| `token-diet health` | **Check**: Quick health check of tools and registrations. |
-| `token-diet mcp list` | **Hosts**: See which AI hosts (Gemini, Claude, etc.) are currently optimized. |
-| `token-diet budget hubs` | **Discovery**: Register "Project Hubs" (e.g. `~/Projects`) for automatic discovery. |
-| `token-diet budget status` | **Governance**: Check usage against your project budget. |
-| `token-diet budget --check` | **Warn**: Estimate a session transcript's token size and warn once per `.token-budget` `ctx_threshold` band. |
-| `token-diet doctor` | **Debug**: Run deep diagnostics on your setup. |
-| `token-diet repair` | **Fix**: Automatically fix hook and registration issues. |
-| `token-diet clean` | **Archive**: Reset RTK history while preserving daily totals. |
-| `token-diet hook off` | **Toggle**: Temporarily disable the RTK output filter. |
-| `token-diet breakdown` | **Analytics**: Show top commands by token savings. |
-| `token-diet explain` | **Inspect**: Break down costs for a specific command. |
-| `token-diet loops` | **Safety**: Detect and flag agent loop patterns. |
-| `token-diet route` | **Advisory**: Suggest which tool fits a specific task. |
-| `token-diet icm warmup` | **Memory**: One-time embedding-model download (~270 MB) to enable ICM cross-tool semantic recall; runs offline after. `token-diet icm status` shows state. |
-| `token-diet leaks` | **Audit**: Detect redundant file reads in history. |
-| `token-diet test-first` | **Strategy**: Suggest test files to read before implementation. |
-| `token-diet diff-reads` | **Context**: Suggest minimal line ranges to read based on git diff. |
-| `token-diet extract <file>` | **Extract**: Convert a PDF/csv/html/txt document to a hash-cached plain-text file, so agents read cheap text instead of raw bytes. |
-| `token-diet uninstall` | **Remove**: Cleanly remove all binaries and registrations. |
+| `token-diet gain` | Token savings dashboard. The default when run with no arguments. |
+| `token-diet dashboard` | Live browser UI with daily history. `--no-open` to skip launching a browser. |
+| `token-diet health` | Quick check: tools responding, MCP hosts registered. |
+| `token-diet doctor` | Deep diagnosis of hooks, registrations, and versions. `--json` for machine output. |
+| `token-diet repair` | Fix hook and stale-registration issues found by `doctor`. `--dry-run` to preview. |
+| `token-diet version` | Installed versions of all four tools. |
+| `token-diet mcp list` | Which AI hosts are currently wired up. `mcp install` to register. |
+| `token-diet budget init` | Create a `.token-budget` for the current project. |
+| `token-diet budget status` | Usage against the project budget. |
+| `token-diet budget hubs` | Register project roots (e.g. `~/Work`) for budget discovery. |
+| `token-diet breakdown` | Top commands by tokens saved. `--limit N`. |
+| `token-diet explain <cmd>` | Cost breakdown for one command. |
+| `token-diet loops` | Detect agent loop patterns (same command 3+ times). |
+| `token-diet leaks` | Detect files read repeatedly in history. |
+| `token-diet route <task>` | Suggest which of the four tools fits a task. |
+| `token-diet test-first <file>` | Suggest the test counterpart to read first. |
+| `token-diet diff-reads <file>` | Suggest minimal line ranges based on recent git diff. |
+| `token-diet extract <file>` | Extract a PDF/CSV/HTML/TXT document to a hash-cached plain-text file. |
+| `token-diet strip <file>` | Strip comments from a source file to reduce tokens. `--stats` to preview. |
+| `token-diet icm warmup` | One-time embedding-model download (~270 MB) for ICM semantic recall. Offline after. |
+| `token-diet clean` | Archive and reset RTK history, preserving daily totals. |
+| `token-diet hook on\|off` | Toggle the RTK output filter. |
+| `token-diet serena-gc` | Find and kill orphaned Serena/LSP processes. `--force` to kill. |
+| `token-diet service` | Manage the always-on dashboard daemon: `install\|uninstall\|start\|stop\|status`. |
+| `token-diet upstream` | Check the pinned forks against their upstreams: `setup\|check\|diff`. |
+| `token-diet update` | Update the tools. `--fresh` for a clean reinstall. |
+| `token-diet uninstall` | Remove all binaries, configs, and registrations. `--dry-run`, `--force`. |
 
----
+</details>
 
-## Smart Discovery
-`token-diet` automatically finds your `.token-budget` files using a hybrid logic:
-1.  **RTK History**: It remembers every project you've ever worked in.
-2.  **Project Hubs**: It scans your registered code roots (e.g., `~/Dev`).
-3.  **Local Context**: It always checks your current folder and its neighbors.
+### Budget discovery
 
-Register a new hub to see all its project budgets on the dashboard:
+`token-diet` finds `.token-budget` files three ways: from RTK history (every
+project you've worked in), from registered hubs, and from the current directory.
+
 ```bash
 token-diet budget hubs add ~/Work
 ```
 
----
-
-## Full Reset / Uninstall
-
-If you need to start from a clean slate or remove the stack entirely:
+## Uninstall
 
 ```bash
-# 1. Remove all binaries (including RTK and tilth), configs, and MCP registrations
-token-diet uninstall --force
-
-# 2. (Optional) Remove Serena memories and logs
-rm -rf ~/.serena
+token-diet uninstall --force     # binaries, configs, registrations
+rm -rf ~/.serena                 # optional: Serena memories and logs
 ```
 
-On Windows: `.\token-diet.ps1 uninstall -Force`
+`--dry-run` shows what would be removed. `--include-data` also removes Serena
+memories.
 
----
+## Platform support
 
-## Enterprise / Air-Gapped
-`token-diet` supports fully offline installation from local forks. See the [Enterprise Guide](docs/enterprise.md) for details.
+macOS, Linux, and WSL are the supported platforms and are covered by CI.
+
+**Windows (native) is experimental.** PowerShell scripts exist
+(`scripts/Install.ps1`, `scripts/token-diet.ps1`) and there is a Pester suite,
+but neither runs in CI, and the PowerShell CLI does not yet implement the
+context hooks (`docextract`, `ctxwarn`), `serena-gc`, the Docker helpers, or
+`budget hubs`. Treat it as unverified. WSL is the recommended path on Windows.
+
+## Air-gapped install
+
+`bash scripts/install.sh --local` builds everything from the pinned forks with
+no network access. See the [Enterprise Guide](docs/enterprise.md).
+
+## Development
+
+```bash
+bats tests/*.bats && pytest tests/ -q
+```
+
+197 bats tests and 61 pytest tests. See [CONTRIBUTING.md](CONTRIBUTING.md) for
+setup, and [docs/engineering-notes.md](docs/engineering-notes.md) for how this
+project is tested and debugged.
 
 ## License
-MIT — all upstream tools are MIT-licensed.
+
+MIT. All four upstream tools are MIT-licensed. See
+[compliance/](compliance/) for the SBOM and third-party license inventory.

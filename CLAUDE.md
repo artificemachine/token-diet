@@ -4,7 +4,7 @@ Token optimization stack installer and compliance kit for RTK + tilth + Serena +
 
 ## Identity
 
-- **What:** Unified installer, CLI dashboard, and compliance kit that wires RTK, tilth, Serena, and ICM together to reduce AI agent token costs by 40–90%.
+- **What:** Unified installer, CLI dashboard, and compliance kit that wires RTK, tilth, Serena, and ICM together to reduce AI agent token costs. Per-tool figures and their methods are in `docs/benchmarks.md`; do not publish a combined stack-wide percentage, since two of the four tools are not separately measured.
 - **Stack:** Bash (CLI entry point), PowerShell (Windows CLI), Python (dashboard, tests), Rust (RTK + tilth + ICM submodule forks), Docker (Serena container)
 - **Version:** `TD_VERSION` in `scripts/token-diet` and `$script:TD_VERSION` in `scripts/token-diet.ps1` (current: 1.10.4)
 - **Status:** active

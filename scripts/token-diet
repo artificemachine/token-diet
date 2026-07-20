@@ -12,7 +12,7 @@
 
 set -euo pipefail
 
-readonly TD_VERSION="1.14.10"
+readonly TD_VERSION="1.15.0"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # --- Colors -------------------------------------------------------------------
@@ -223,13 +223,20 @@ cmd_gain() {
     json=$(rtk gain --format json 2>/dev/null)
     local cmds saved input pct ms
     local arch="$HOME/.config/token-diet/archived_stats.json"
-        read -r cmds input saved pct ms <<< "$(echo "$json" | python3 - "$arch" << 'PY'
+        # The live rtk JSON is passed as argv[2], NOT piped. `python3 -` already
+        # consumes stdin to read this program from the heredoc, so a pipe into
+        # it is silently discarded (shellcheck SC2259). When this read from
+        # sys.stdin, it always hit the except branch and reported zero live
+        # activity, so `gain` displayed archived totals only — under-reporting
+        # by the entire current history.
+        read -r cmds input saved pct ms <<< "$(python3 - "$arch" "$json" << 'PY'
 import sys,json,pathlib
 arch_p = pathlib.Path(sys.argv[1])
+raw = sys.argv[2] if len(sys.argv) > 2 else ""
 try:
-    live = json.load(sys.stdin).get('summary', {})
+    live = json.loads(raw).get('summary', {}) if raw.strip() else {}
     cmds, inp, saved, time = live.get('total_commands', 0), live.get('total_input', 0), live.get('total_saved', 0), live.get('total_time_ms', 0)
-except:
+except Exception:
     cmds, inp, saved, time = 0, 0, 0, 0
 if arch_p.exists():
     try:
@@ -2466,7 +2473,8 @@ COMMANDS
   doctor            Deep configuration and hook diagnosis  [--json]
   repair            Fix what doctor finds: RTK hooks, stale MCP commands  [--dry-run] [--json]
   mcp               Manage MCP server registrations  [install|list]
-  clean             Archive and reset RTK history to speed up dashboard\n  upstream          Manage and verify original repository updates  [setup|check|diff]
+  clean             Archive and reset RTK history to speed up dashboard
+  upstream          Manage and verify original repository updates  [setup|check|diff]
   hook              Toggle RTK hook  [on|off]
   breakdown         Top commands by tokens saved  [--limit N]
   explain <cmd>     Token cost breakdown for a specific command
@@ -2482,16 +2490,18 @@ COMMANDS
   serena-gc         Detect and kill orphaned Serena/LSP processes  [--force]
   dashboard         Open live browser dashboard  [--no-open]
   service <sub>     Manage always-on dashboard daemon  (install|uninstall|start|stop|status)
-  version           Show installed versions of all three tools
+  version           Show installed versions of all four tools
   update            Update tools  [--fresh] [installer flags]
   uninstall         Remove all token-diet components  [--dry-run] [--force]
   --help            Show this help
 
 TOOLS
-  RTK    Command output compression       60-90% savings (tracked)
-  tilth  AST-aware code reading           38-44% savings (structural)
-  Serena LSP symbol navigation            fewer prompt turns (structural)
-  ICM    Persistent cross-tool memory     recall replaces re-reading (structural)
+  RTK    Command output compression   60-90% output reduction, measured live
+                                      from your own rtk history (see: gain)
+  tilth  AST-aware code reading       -38% to -44% cost per correct answer,
+                                      benchmarked (see: docs/benchmarks.md)
+  Serena LSP symbol navigation        fewer prompt turns; not separately measured
+  ICM    Persistent cross-tool memory recall replaces re-reading; not measured
 
 INSTALL
   bash install.sh             Install all tools

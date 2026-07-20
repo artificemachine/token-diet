@@ -61,6 +61,43 @@ load test_helper
   [[ "$output" == *"ICM"* ]]
 }
 
+# ---------------------------------------------------------------------------
+# Regression: `gain` must include LIVE rtk data, not just archived totals.
+#
+# The live JSON used to be piped into `python3 - "$arch" << 'PY'`. `python3 -`
+# reads its program from stdin, which the heredoc already supplies, so the pipe
+# was discarded (shellcheck SC2259). json.load(sys.stdin) then parsed the
+# Python source, hit the except branch, and reported zero live activity --
+# `gain` silently displayed archived totals alone. On the machine where this
+# was found that meant reporting 4.8M tokens saved instead of 92.5M.
+# ---------------------------------------------------------------------------
+
+@test "gain: includes live rtk totals, not only archived stats" {
+  mock_cmd_with_gain   # live: 10 commands, 5000 in, 3500 saved
+  mock_cmd tilth
+  mock_cmd uvx
+
+  run "$SCRIPTS_DIR/token-diet" gain
+  [ "$status" -eq 0 ]
+  # 10 live commands must appear. A zeroed live branch would render 0 here.
+  [[ "$output" == *"10"* ]]
+  [[ "$output" != *"Commands filtered:     0"* ]]
+}
+
+@test "gain: sums live rtk totals with archived stats" {
+  mock_cmd_with_gain   # live: 10 commands
+  mock_cmd tilth
+  mock_cmd uvx
+  mkdir -p "$TMP_HOME/.config/token-diet"
+  printf '{"cmds": 90, "input": 1000, "saved": 500, "time_ms": 100}\n' \
+    > "$TMP_HOME/.config/token-diet/archived_stats.json"
+
+  run "$SCRIPTS_DIR/token-diet" gain
+  [ "$status" -eq 0 ]
+  # 10 live + 90 archived = 100. Reporting 90 means live was dropped again.
+  [[ "$output" == *"100"* ]]
+}
+
 @test "gain: shows ICM version and active when icm installed" {
   mock_cmd_with_gain
   mock_cmd tilth

@@ -1,0 +1,78 @@
+name: Bug report
+description: Something behaves differently than documented
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        If this is a security issue, please don't file it here. Use
+        [private reporting](https://github.com/artificemachine/token-diet/security/advisories/new)
+        instead. See [SECURITY.md](../blob/main/SECURITY.md).
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you expected, and what you got instead.
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. bash scripts/install.sh --dry-run
+        2. token-diet doctor
+        3. ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: doctor
+    attributes:
+      label: Output of `token-diet doctor`
+      description: >
+        Paste the full output. This covers tool versions, hook state, and MCP
+        registrations, which is most of what's needed to diagnose an issue.
+        Redact anything you consider sensitive.
+      render: shell
+    validations:
+      required: false
+
+  - type: input
+    id: version
+    attributes:
+      label: token-diet version
+      description: Output of `token-diet version`
+    validations:
+      required: true
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - macOS
+        - Linux
+        - WSL
+        - Windows (native, experimental)
+    validations:
+      required: true
+
+  - type: dropdown
+    id: host
+    attributes:
+      label: Which AI host
+      multiple: true
+      options:
+        - Claude Code
+        - Codex CLI
+        - OpenCode
+        - Copilot CLI
+        - VS Code
+        - Claude Desktop
+        - Gemini CLI
+        - Not host-specific
+    validations:
+      required: false

@@ -756,6 +756,7 @@ MOCK
   mock_cmd_with_gain
   mock_cmd tilth
   mock_cmd uv
+  mock_cmd uvx
   mock_cmd codex
   # Write a Codex config using single-quoted TOML (valid TOML literal string)
   mkdir -p "$TMP_HOME/.codex"

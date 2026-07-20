@@ -1763,6 +1763,34 @@ MOCK
   [ "$status" -ne 0 ]
 }
 
+@test "the actionable plan cites no literal source line numbers" {
+  # Stale coordinates caused a correct finding to be reported as false: an agent
+  # grepped install.sh:276,289,298,304,318,332, found a PATH export and a
+  # comment, and concluded the claim was wrong when only the address had
+  # drifted. Actionable items must carry a recipe that re-derives on read.
+  #
+  # Scoped to the PLAN deliberately. A DATED AUDIT is a historical record, and
+  # "the bug was at install.sh:1456" is a legitimate thing for a record to say.
+  # It is acting on a stale coordinate that causes harm, not preserving one.
+  local plan="$SCRIPTS_DIR/../docs/PLAN-production-ready.md"
+  [ -f "$plan" ]
+  run grep -nE '[A-Za-z0-9_.-]+\.(sh|yml|ps1|py|json|md):[0-9]+' "$plan"
+  [ "$status" -ne 0 ]
+  run grep -nE 'token-diet:[0-9]+' "$plan"
+  [ "$status" -ne 0 ]
+}
+
+@test "CLAUDE.md does not claim scripts/lib holds sourced shell helpers" {
+  # scripts/lib/ contains no .sh files and nothing sources it. The old wording
+  # sent reviewers looking for a seam that does not exist.
+  local root="$SCRIPTS_DIR/.."
+  run grep -n 'Shared shell helpers sourced by the CLI' "$root/CLAUDE.md"
+  [ "$status" -ne 0 ]
+  # And the claim must stay false-proof: if .sh files ever land there, revisit.
+  run bash -c "ls $SCRIPTS_DIR/lib/*.sh 2>/dev/null"
+  [ "$status" -ne 0 ]
+}
+
 @test "no raw open(path,\"w\") config writes remain in install.sh or token-diet" {
   # open(p,"w") truncates before serializing, so a mid-write failure leaves a
   # zero-byte config. All config mutation goes through tdconfig (atomic write,

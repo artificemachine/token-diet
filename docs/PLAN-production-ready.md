@@ -21,7 +21,7 @@ data-loss bug. Everything after is improvement, not remediation.
 ### 1.1 Remove personal data from public HEAD (hard gate)
 - `HANDOFF.md` at HEAD carries 6 occurrences of local username + home paths (lines 91, 103, 118, 134, 161, 306).
 - Decision to make: delete `HANDOFF.md` from the repo entirely, or move to `docs/handoffs/` with paths scrubbed. Recommend **delete from repo, keep locally untracked** — it is an agent working file, not a project artifact.
-- Do **not** rewrite git history. That call was already made and is correct (`HANDOFF.md:306`).
+- Do **not** rewrite git history. That call was already made and is correct (`HANDOFF.md`).
 - Add `HANDOFF.md` to `.gitignore` so it cannot regress.
 - **Test:** `git grep -c "$(id -un)" HEAD` returns 0. Add to `.github/workflows/path-leak.yml` a full-tree scan (not just PR diff) so this cannot come back.
 
@@ -34,25 +34,25 @@ data-loss bug. Everything after is improvement, not remediation.
 - Line 1-15 must answer: what it does, proof it works, how to install.
 - Add demo: asciinema cast or GIF of `token-diet gain`. Repo currently has **zero** images.
 - Add badges: CI status, license, version, platform.
-- Move the Global-vs-Per-Project table (`README.md:20-30`) below Quickstart.
+- Move the Global-vs-Per-Project table (`README.md`) below Quickstart.
 - Add a Prerequisites section: `jq`, `bc`, `poppler-utils`, `tiktoken`, `pdfplumber`.
 - Document `git clone --recursive` / `git submodule update --init` (currently absent; `--local` install fails without it).
 
 ### 1.4 Fix claims (do this or drop the numbers)
 - Replace unsourced "40-90%" / "60-90%" with the measured tilth figure and link `forks/tilth/benchmark/README.md`.
-- Reconcile README, `CLAUDE.md:7`, and the GitHub description to one number.
-- Remove or substantiate "Fit 5x more information" (`README.md:22`).
+- Reconcile README, `CLAUDE.md`, and the GitHub description to one number.
+- Remove or substantiate "Fit 5x more information" (`README.md`).
 - **Test:** a `docs/benchmarks.md` exists and every quantitative claim in README links to it.
 
 ### 1.5 README/CLI drift
 - Document the 6 missing commands: `strip`, `serena-gc`, `service`, `update`, `upstream`, `version`.
 - Fix `budget` documented three ways (README vs `--help` vs usage string at `:1148`).
-- Fix `scripts/token-diet:2469`: literal `\n` mangles `--help` output.
+- **RESOLVED v1.15.0.** A literal `\n` mangled the `clean` line of `--help` output; verify with `token-diet --help | grep -c '\\n'` (expect 0).
 - **Test:** extend the existing project pre-commit doc-sync check into a bats test asserting every dispatch case appears in README.
 
 ### 1.6 Community files
 - Add `SECURITY.md`, `CODE_OF_CONDUCT.md`, `.github/ISSUE_TEMPLATE/`, PR template.
-- Soften `CONTRIBUTING.md:9` ("PRs without an issue will not be reviewed").
+- Soften `CONTRIBUTING.md` ("PRs without an issue will not be reviewed").
 
 ### 1.7 docs/ reorganization
 - 19 files, 6 dated session handoffs, stale `PLAN-*` and bug reports, no index.
@@ -67,25 +67,25 @@ data-loss bug. Everything after is improvement, not remediation.
 **Goal:** the installer cannot silently destroy user config.
 
 ### 2.1 H1 — silent truncation (data loss, verified)
-`scripts/install.sh:1456-1467`: `open(cfg,"w")` truncates before dump, wrapped in `except Exception: pass`. A mid-write failure empties the user's `~/.claude/settings.json` with no message and no backup. Also silently no-ops on malformed JSON, contradicting 7 sibling blocks that abort loudly.
+**RESOLVED v1.15.0 + v1.15.4.** `open(cfg,"w")` truncated before dump, wrapped in `except Exception: pass`. A mid-write failure empties the user's `~/.claude/settings.json` with no message and no backup. Also silently no-ops on malformed JSON, contradicting 7 sibling blocks that abort loudly.
 - **RED:** test that a write failure mid-dump leaves the original file intact.
 - **GREEN:** write to temp + `os.replace`; on exception, restore and report.
 - **REFACTOR:** collapse the 7 copy-pasted malformed-JSON-abort blocks into one helper.
 
 ### 2.2 H2 — non-atomic writes, systemic
-Exactly 1 of ~15 mutation sites uses `os.replace` (`token-diet:1900`). Everything else is `open(w)` or `write_text()`, including `merge_hook_entry` (`install.sh:1168`) and all MCP registration.
+**RESOLVED v1.15.4** — all mutation sites now go through `tdconfig`; verify with `grep -c 'open(.*"w")' scripts/install.sh scripts/token-diet` (expect 0). Was: exactly 1 of ~15 sites used `os.replace`, everything else `open(w)` or `write_text()`, including `merge_hook_entry` and all MCP registration.
 - Single `atomic_write_json()` helper, used everywhere.
 - Pre-mutation backup on the success path, not only when input is already corrupt.
 - **Test:** parametrized test asserting every config-mutation entry point is atomic and pre-backs-up.
 
 ### 2.3 Codex TOML blind append
-`install.sh:751,759,1134` mutate `config.toml` via `cat >>`, never parsed or validated, grep-guarded, no backup. Parse, validate, write atomically.
+**RESOLVED** — no `cat >>` appends to `config.toml` remain; verify with `grep -n '>> .*config.toml' scripts/install.sh` (expect none). Was: three sites mutated `config.toml` via `cat >>`, never parsed or validated, grep-guarded, no backup. Parse, validate, write atomically.
 
 ### 2.4 SC2259 — likely live bug
-`scripts/token-diet:226`: `read <<<` plus heredoc on the same command; the redirect overrides piped input. Probably a real parsing bug in `gain`. Reproduce, fix, regression-test.
+**RESOLVED v1.15.0** (the `gain` under-reporting bug). Was: heredoc on the same command as a pipe; the redirect discarded the piped input. Probably a real parsing bug in `gain`. Reproduce, fix, regression-test.
 
 ### 2.5 H3 — `curl | sh` on the default path
-`install.sh:222,238` pipe rustup and uv installers unpinned, no checksum, on the default path, in a project that ships an SBOM and an air-gap mode. Pin + verify checksum, or require explicit opt-in.
+**OPEN.** Four `curl | sh` sites remain; locate with `grep -nE 'curl.*\|\s*(sh|bash)' scripts/install.sh`. They pipe rustup and uv installers unpinned, no checksum, on the default path, in a project that ships an SBOM and an air-gap mode. Pin + verify checksum, or require explicit opt-in.
 
 ### 2.6 Partial-failure recovery
 `set -euo pipefail` with no `ERR`/`EXIT` trap. Failure at host 5 of 7 leaves 5 hosts mutated, no rollback, no resume. Add a trap that reports exactly what was mutated and how to revert.
@@ -99,7 +99,7 @@ Exactly 1 of ~15 mutation sites uses `os.replace` (`token-diet:1900`). Everythin
 
 - 3.1 `.github/dependabot.yml` (github-actions + pip).
 - 3.2 `security.yml`: ShipGuard + gitleaks on PR, hard-fail.
-- 3.3 Pin Python deps. `tiktoken`/`pdfplumber` currently declared only inside `test.yml:32`, unpinned, installed at CI runtime. Add `requirements-dev.txt`.
+- 3.3 Pin Python deps. **RESOLVED v1.15.1** — `requirements-test.txt` pins `pytest`/`tiktoken`/`pdfplumber` and `test.yml` installs from it. Was: declared inline in the workflow, unpinned, installed at CI runtime.
 - 3.4 Port CHANGELOG append-only and README doc-sync checks into CI.
 - 3.5 `release.yml` wrapping `scripts/release.sh` (currently referenced by no workflow; 5 releases shipped by hand today).
 - 3.6 Mark `test.yml` and `path-leak.yml` as required status checks on `main`.
@@ -123,9 +123,28 @@ Pick one and commit to it:
 
 ### 5.1 The single highest-leverage change in the repo
 Extract `lib/hosts.sh`: one host registry (slug, label, detect-fn, register-fn, check-fn), sourced by both entry points. This alone kills three findings:
-- `scripts/lib/` is documented as "sourced by the CLI" and is **never sourced** (only `source` in 4,555 lines is `install.sh:224` for cargo env).
-- `codex_mcp_command()` and `mcp_command_exists()` are byte-identical across `install.sh` and `token-diet`, including a duplicated embedded Python TOML parser.
-- The 7-host list is declared **six times in one file** (`install.sh:276,289,298,304,318,332`) with parallel arrays that desync silently, plus 77 `HAS_*` refs.
+> **Coordinates removed 2026-07-20.** This section previously cited exact line
+> numbers. The file drifted, the numbers rotted, and an agent grepping them
+> found unrelated code and concluded the *finding* was false when only its
+> *address* had changed — nearly discarding a correct finding. Facts below are
+> stated as recipes that re-derive on read. Do not reintroduce literal line
+> numbers here. See `notes/compounding/lessons/2026-07-20-documented-facts-need-generators.md`.
+
+- `scripts/lib/` is documented as "sourced by the CLI" and is **never sourced**.
+  It contains **no shell files at all** (`ls scripts/lib/*.sh` → none); the only
+  `source` across both entry points is `~/.cargo/env`
+  (`grep -n '^\s*source ' scripts/install.sh scripts/token-diet`).
+- `codex_mcp_command()` and `mcp_command_exists()` are **near-duplicates**, not
+  byte-identical: they diverge on the helper they call (`check_command` in
+  `install.sh`, `check_cmd` in `token-diet`). Duplicated logic including an
+  embedded Python TOML parser. Locate with
+  `grep -n 'codex_mcp_command()\|mcp_command_exists()' scripts/install.sh scripts/token-diet`.
+- The 7-host list is enumerated **six times in `install.sh`** — `HAS_*` init,
+  detection, reporting, slug→bool accessor, slug→disable, and the parallel
+  `slugs`/`labels` arrays — which desync silently. Locate with
+  `grep -n 'HAS_[A-Z]' scripts/install.sh`, plus the arrays via
+  `grep -n 'local slugs=' scripts/install.sh`. Also enumerated again in
+  `token-diet` and `Install.ps1`.
 
 **Test first:** add a bats test asserting the host list is defined exactly once. It fails today; that is the RED.
 

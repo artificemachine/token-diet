@@ -1,0 +1,11 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/artificemachine/token-diet/security/advisories/new
+    about: Report privately, not as a public issue.
+  - name: Issue with RTK, tilth, Serena, or ICM itself
+    url: https://github.com/artificemachine/token-diet/blob/main/README.md
+    about: >
+      token-diet installs and wires these tools but doesn't maintain them.
+      If the bug is in the tool itself, report it upstream. If it's in how
+      token-diet invokes or registers it, file here.

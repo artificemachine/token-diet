@@ -2099,8 +2099,13 @@ cmd_doctor() {
   local -a tilth_registered_hosts=() serena_registered_hosts=() icm_registered_hosts=()
 
   _doctor_check_mcp_json() {
-    local tool="$1" host_label="$2" cfg="$3" hosts_var="$4" silent_miss="${5:-}"
-    [ -f "$cfg" ] || return 0  # host not installed — skip silently
+    local tool="$1" host_label="$2" cfg="$3" hosts_var="$4" silent_miss="${5:-}" assume_installed="${6:-}"
+    # host not installed — skip silently, UNLESS the caller already confirmed
+    # this host via a sibling config path (assume_installed): in that case a
+    # missing file here means genuinely "not registered", not "not installed".
+    if [ ! -f "$cfg" ] && [ -z "$assume_installed" ]; then
+      return 0
+    fi
 
     local registered
     registered=$(python3 - "$cfg" "$tool" << 'PY'
@@ -2272,7 +2277,10 @@ print('true' if healthy else 'false')" 2>/dev/null || echo "unknown")
   # settings.json doesn't count if .claude.json succeeds.
   _doctor_check_mcp_json "serena" "claude-code" "$cc_cfg"    "serena_registered_hosts" "silent"
   if ! printf '%s\n' "${serena_registered_hosts[@]+"${serena_registered_hosts[@]}"}" | grep -q "^claude-code$"; then
-    _doctor_check_mcp_json "serena" "claude-code" "$cc_global" "serena_registered_hosts"
+    # If settings.json exists, claude-code is installed even when .claude.json
+    # is absent — a miss here is genuinely "not registered", not "not installed".
+    local cc_installed=""; [ -f "$cc_cfg" ] && cc_installed="1"
+    _doctor_check_mcp_json "serena" "claude-code" "$cc_global" "serena_registered_hosts" "" "$cc_installed"
   else
     $json_mode || ok "  claude-code   registered"
   fi
@@ -2287,7 +2295,8 @@ print('true' if healthy else 'false')" 2>/dev/null || echo "unknown")
   $json_mode || echo -e "  ${BOLD}icm${NC}"
   _doctor_check_mcp_json "icm" "claude-code" "$cc_cfg"    "icm_registered_hosts" "silent"
   if ! printf '%s\n' "${icm_registered_hosts[@]+"${icm_registered_hosts[@]}"}" | grep -q "^claude-code$"; then
-    _doctor_check_mcp_json "icm" "claude-code" "$cc_global" "icm_registered_hosts"
+    local cc_installed=""; [ -f "$cc_cfg" ] && cc_installed="1"
+    _doctor_check_mcp_json "icm" "claude-code" "$cc_global" "icm_registered_hosts" "" "$cc_installed"
   else
     $json_mode || ok "  claude-code   registered"
   fi

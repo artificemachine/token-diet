@@ -1,0 +1,33 @@
+version: 2
+
+# Deliberately NOT enabled: the "gitsubmodule" ecosystem.
+#
+# forks/{rtk,tilth,serena,icm} are audited forks pinned to specific commits, and
+# the project convention is that they are never updated automatically — an
+# automated bump would move code that this repo vouches for without the audit
+# that the vouching depends on. Submodule bumps stay manual and deliberate.
+
+updates:
+  # GitHub Actions — the workflows pin actions to commit SHAs, which is correct
+  # for supply-chain safety but means a pinned action silently goes stale.
+  # Dependabot rewrites the SHA and updates the trailing "# vX" comment.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "chore(ci)"
+    labels:
+      - "dependencies"
+
+  # Python test dependencies, pinned in requirements-test.txt.
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "chore(deps)"
+    labels:
+      - "dependencies"

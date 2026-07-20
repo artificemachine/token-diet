@@ -1,0 +1,13 @@
+# Pinned test dependencies for CI and local runs.
+#
+# These were previously declared inline and unpinned in .github/workflows/test.yml
+# ("pip install pytest tiktoken pdfplumber"), which meant a CI run's result
+# depended on whatever PyPI served that day — a green suite could turn red with
+# no change to this repo, and a regression in a dependency would look like a
+# regression here. Dependabot proposes bumps against this file.
+#
+# Install: pip install -r requirements-test.txt
+
+pytest==9.0.3
+tiktoken==0.13.0
+pdfplumber==0.11.9

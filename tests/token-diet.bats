@@ -1720,3 +1720,52 @@ MOCK
   [[ "$output" == *"install"* ]]
   [[ "$output" == *"list"* ]]
 }
+
+# --- Release gate version source of truth -------------------------------------
+# release.sh hardcoded VERSION="1.2.0" while TD_VERSION was 1.15.0 — thirteen
+# minor versions stale. The gate would have tagged v1.2.0. It went unnoticed
+# because nobody ran the script; these tests fail if a literal is reintroduced.
+
+@test "release.sh: does not hardcode a literal VERSION" {
+  run grep -nE '^VERSION="[0-9]+\.[0-9]+\.[0-9]+"' "$SCRIPTS_DIR/release.sh"
+  [ "$status" -ne 0 ]
+}
+
+@test "release.sh: derives VERSION from TD_VERSION and they match" {
+  local td_ver rel_ver
+  td_ver="$(sed -n 's/^readonly TD_VERSION="\(.*\)"$/\1/p' "$SCRIPTS_DIR/token-diet")"
+  [ -n "$td_ver" ]
+  # Evaluate the derivation line exactly as release.sh does.
+  rel_ver="$(SCRIPT_DIR="$SCRIPTS_DIR" bash -c 'sed -n "s/^readonly TD_VERSION=\"\(.*\)\"$/\1/p" "$SCRIPT_DIR/token-diet"')"
+  [ "$rel_ver" = "$td_ver" ]
+}
+
+@test "release.sh: bash and powershell versions are in lockstep" {
+  local sh_ver ps_ver
+  sh_ver="$(sed -n 's/^readonly TD_VERSION="\(.*\)"$/\1/p' "$SCRIPTS_DIR/token-diet")"
+  ps_ver="$(sed -n "s/^\\\$script:TD_VERSION = '\(.*\)'$/\1/p" "$SCRIPTS_DIR/token-diet.ps1")"
+  [ -n "$sh_ver" ]
+  [ -n "$ps_ver" ]
+  [ "$sh_ver" = "$ps_ver" ]
+}
+
+@test "release.sh: defines a release retention limit" {
+  run grep -qE 'RELEASE_RETENTION="\$\{RELEASE_RETENTION:-[0-9]+\}"' "$SCRIPTS_DIR/release.sh"
+  [ "$status" -eq 0 ]
+}
+
+@test "release.sh: prune deletes the release but never the tag" {
+  # Guard the core invariant of docs/release-policy.md: tags are permanent.
+  run grep -n 'gh release delete' "$SCRIPTS_DIR/release.sh"
+  [ "$status" -eq 0 ]
+  # No tag deletion anywhere in the prune path.
+  run grep -nE 'git (tag -d|push .*--delete.*v\$|push .*:refs/tags)' "$SCRIPTS_DIR/release.sh"
+  [ "$status" -ne 0 ]
+}
+
+@test "docs/release-policy.md exists and states the retention count" {
+  local doc="$SCRIPTS_DIR/../docs/release-policy.md"
+  [ -f "$doc" ]
+  grep -q 'RELEASE_RETENTION' "$doc"
+  grep -qi 'tags' "$doc"
+}

@@ -1,0 +1,62 @@
+name: Release
+
+# Creates a GitHub release when a v* tag is pushed.
+#
+# This exists because of a concrete failure: v1.15.0 was merged and tagged, and
+# the release was simply forgotten — the tag sat on main with no release page
+# until the next session noticed. Tagging and releasing were two manual steps,
+# and the second one is easy to skip because nothing breaks when you do.
+#
+# Notes are auto-generated from the commit range. That is deliberately a floor,
+# not a ceiling: the curated "## Summary / ## Test plan" notes this project
+# writes by hand are better, and a human can edit the release afterwards. The
+# point is that a tag can no longer exist without a release.
+#
+# Idempotent: if a release for the tag already exists (because it was created
+# by hand first, which is the normal path), this does nothing and succeeds.
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: create release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          fetch-depth: 0
+          submodules: false
+
+      - name: Verify tag matches TD_VERSION
+        # A tag that disagrees with the shipped version is worse than no tag:
+        # it makes `git checkout v1.15.1` return something that reports a
+        # different version. release.sh derives its tag from TD_VERSION, but a
+        # hand-pushed tag bypasses that entirely — this is the server-side check.
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME#v}"
+          td="$(sed -n 's/^readonly TD_VERSION="\(.*\)"$/\1/p' scripts/token-diet)"
+          echo "tag=$tag  TD_VERSION=$td"
+          if [ "$tag" != "$td" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match TD_VERSION $td in scripts/token-diet"
+            exit 1
+          fi
+
+      - name: Create release if missing
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            echo "Release $GITHUB_REF_NAME already exists — nothing to do."
+            exit 0
+          fi
+          gh release create "$GITHUB_REF_NAME" \
+            --title "$GITHUB_REF_NAME" \
+            --generate-notes

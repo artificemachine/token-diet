@@ -18,7 +18,16 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(dirname "$SCRIPT_DIR")"
 FORKS="$ROOT/forks"
 DIST="$ROOT/dist"
-VERSION="1.2.0"
+
+# Single source of truth: scripts/token-diet's TD_VERSION. This was hardcoded
+# to "1.2.0" until v1.15.1 — thirteen minor versions stale — so the gate would
+# have tagged the wrong version had anyone run it. Never restate the version here.
+VERSION="$(sed -n 's/^readonly TD_VERSION="\(.*\)"$/\1/p' "$SCRIPT_DIR/token-diet")"
+[ -n "$VERSION" ] || { echo "cannot read TD_VERSION from $SCRIPT_DIR/token-diet" >&2; exit 1; }
+
+# Curated GitHub releases to retain. Tags are permanent history and are never
+# pruned; releases are the browsable surface. See docs/release-policy.md.
+RELEASE_RETENTION="${RELEASE_RETENTION:-10}"
 
 # --- Colors -------------------------------------------------------------------
 if [ -t 1 ]; then
@@ -39,9 +48,9 @@ PASS=0
 FAIL=0
 WARN=0
 
-record_ok()   { ok "$1";   (( PASS++ )); }
+record_ok()   { ok "$1";   PASS=$((PASS + 1)); }
 record_fail() { fail "$1"; }
-record_warn() { warn "$1"; (( WARN++ )); }
+record_warn() { warn "$1"; WARN=$((WARN + 1)); }
 
 # --- Flags --------------------------------------------------------------------
 DO_TESTS=true
@@ -154,7 +163,7 @@ if $DO_TESTS; then
     fi
   else
     skip "uv not found — skipping serena pytest (install uv to enable)"
-    (( WARN++ ))
+    WARN=$((WARN + 1))
   fi
 
 fi  # DO_TESTS
@@ -169,7 +178,7 @@ if $DO_SIGN && ! $DRY_RUN; then
 
   if [ ! -f "$RTK_BIN" ] || [ ! -f "$TILTH_BIN" ]; then
     skip "Binaries not found in dist/ — run 'bash scripts/build.sh --release' first"
-    (( WARN++ ))
+    WARN=$((WARN + 1))
   else
     OS="$(uname -s)"
 
@@ -194,7 +203,7 @@ if $DO_SIGN && ! $DRY_RUN; then
           codesign -s - "$TILTH_BIN" && record_ok "tilth signed (ad-hoc)"
         else
           skip "Signing skipped — add Developer ID certificate and re-run"
-          (( WARN++ ))
+          WARN=$((WARN + 1))
         fi
       else
         info "Found identity: $IDENTITY"
@@ -210,7 +219,7 @@ if $DO_SIGN && ! $DRY_RUN; then
 
       if ! command -v gpg &>/dev/null; then
         skip "gpg not found — install gnupg and re-run"
-        (( WARN++ ))
+        WARN=$((WARN + 1))
       else
         GPG_KEY=$(gpg --list-secret-keys --keyid-format=long 2>/dev/null | grep "^sec" | head -1 | awk '{print $2}' | cut -d/ -f2 || true)
 
@@ -218,7 +227,7 @@ if $DO_SIGN && ! $DRY_RUN; then
           warn "No GPG secret key found."
           warn "Generate one with: gpg --full-generate-key"
           skip "Signing skipped — no GPG key available"
-          (( WARN++ ))
+          WARN=$((WARN + 1))
         else
           info "Using GPG key: $GPG_KEY"
           gpg --batch --yes --detach-sign --armor --local-user "$GPG_KEY" "$RTK_BIN"
@@ -239,7 +248,7 @@ if $DO_TAG && ! $DRY_RUN; then
 
   if git tag -l "v$VERSION" | grep -q "v$VERSION"; then
     skip "Tag v$VERSION already exists"
-    (( WARN++ ))
+    WARN=$((WARN + 1))
   else
     if [ "$WARN" -gt 0 ]; then
       echo ""
@@ -266,6 +275,52 @@ See CHANGELOG.md for full details."
   fi
 
 fi  # DO_TAG
+
+# --- Release Retention --------------------------------------------------------
+# Enforces docs/release-policy.md: keep the newest $RELEASE_RETENTION releases.
+# Deletes the GitHub *release* only; the underlying tag is left in place, so
+# nothing is lost from history. Drifted to 13 before v1.15.1 because this was a
+# manual step documented in an untracked file.
+prune_releases() {
+  command -v gh >/dev/null 2>&1 || { skip "gh not installed — release retention not checked"; return 0; }
+  gh auth status >/dev/null 2>&1 || { skip "gh not authenticated — release retention not checked"; return 0; }
+
+  local all excess
+  # gh lists newest-first; anything past the retention count is excess.
+  all=$(gh release list --limit 200 --json tagName --jq '.[].tagName' 2>/dev/null) || {
+    record_warn "Could not list releases — retention not enforced"; return 0; }
+  [ -n "$all" ] || return 0
+
+  excess=$(printf '%s\n' "$all" | tail -n +$((RELEASE_RETENTION + 1)))
+  if [ -z "$excess" ]; then
+    record_ok "Release retention: $(printf '%s\n' "$all" | grep -c .) release(s), within the $RELEASE_RETENTION limit"
+    return 0
+  fi
+
+  if $DRY_RUN; then
+    warn "Would prune $(printf '%s\n' "$excess" | grep -c .) release(s) beyond the newest $RELEASE_RETENTION:"
+    printf '%s\n' "$excess" | sed 's/^/           /'
+    return 0
+  fi
+
+  local t
+  while read -r t; do
+    [ -n "$t" ] || continue
+    if gh release delete "$t" --yes >/dev/null 2>&1; then
+      info "Pruned release $t (tag retained)"
+    else
+      record_warn "Failed to prune release $t"
+    fi
+  done <<< "$excess"
+  record_ok "Release retention enforced — newest $RELEASE_RETENTION kept"
+}
+
+# Only runs on a real release path. --test-only / --sign-only must never delete
+# a release as a side effect of running checks; --dry-run reports without acting.
+if $DO_TAG || $DRY_RUN; then
+  header "Release Retention"
+  prune_releases
+fi
 
 # --- Summary ------------------------------------------------------------------
 header "Release Gate Summary"

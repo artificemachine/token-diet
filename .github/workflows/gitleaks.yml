@@ -1,0 +1,59 @@
+name: Secret Scan
+
+# Server-side secret scanning. Pre-commit check 1 already scans locally, but
+# that never runs on a fork PR, on an API-side merge, or when a commit lands
+# with --no-verify. Same gap the Tests and Path Leak Guard workflows exist to
+# close.
+#
+# Scans full history: a credential is compromised the moment it is pushed, so
+# scanning only the tip would miss anything already committed and later
+# "removed" in a follow-up commit.
+#
+# Deliberately runs the gitleaks BINARY rather than gitleaks/gitleaks-action.
+# That action requires a paid GITLEAKS_LICENSE for organization-owned repos,
+# and this repo is org-owned — the action would fail closed on licensing, not
+# on findings, which is a confusing way for a security gate to break. The
+# binary is Apache-2.0 and has no such restriction.
+#
+# To actually BLOCK merges, mark "gitleaks" as a required status check in
+# branch protection for main. Without that, this reports but does not gate.
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+env:
+  # Pinned. Bumped by dependabot? No — dependabot does not track raw release
+  # downloads, so this is a deliberate manual pin; check for updates when
+  # touching this file.
+  GITLEAKS_VERSION: "8.30.1"
+
+jobs:
+  gitleaks:
+    name: gitleaks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          fetch-depth: 0
+          # Never scan the pinned forks — separate audited repos with their own
+          # history; pulling them in would slow the scan and surface findings
+          # this repo cannot act on.
+          submodules: false
+
+      - name: Install gitleaks
+        run: |
+          set -euo pipefail
+          url="https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          curl --fail --silent --show-error --location "$url" -o /tmp/gitleaks.tar.gz
+          tar -xzf /tmp/gitleaks.tar.gz -C /tmp gitleaks
+          sudo install -m 0755 /tmp/gitleaks /usr/local/bin/gitleaks
+          gitleaks version
+
+      - name: Scan repository history
+        run: gitleaks git . --redact --verbose --no-banner

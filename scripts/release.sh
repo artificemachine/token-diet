@@ -83,7 +83,7 @@ if [ "$BRANCH" != "main" ]; then
 fi
 
 # Verify submodules are initialized
-for fork in rtk tilth serena; do
+for fork in rtk tilth serena icm; do
   if [ -z "$(ls -A "$FORKS/$fork" 2>/dev/null)" ]; then
     fail "forks/$fork is empty — run: git submodule update --init --recursive"
   fi
@@ -98,7 +98,11 @@ if git status --porcelain | grep -q "^?? forks/README.md"; then
 fi
 
 # Warn about any other unstaged changes
-UNSTAGED=$(git status --porcelain | grep -v "^?? " | grep -v "^M  " | wc -l | tr -d ' ')
+# `grep -v` exits 1 when it selects no lines, and a clean tree feeds it nothing.
+# Under `set -euo pipefail` that killed the whole script at this assignment,
+# silently, in exactly the condition a release runs in. Count with grep -c and
+# absorb the empty-input exit; -c prints 0 rather than failing the pipeline.
+UNSTAGED=$(git status --porcelain | grep -cvE '^(\?\? |M  )' || true)
 if [ "$UNSTAGED" -gt 0 ]; then
   record_warn "Unstaged changes present — commit or stash before tagging"
   git status --short

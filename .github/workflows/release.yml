@@ -60,3 +60,33 @@ jobs:
           gh release create "$GITHUB_REF_NAME" \
             --title "$GITHUB_REF_NAME" \
             --generate-notes
+
+      - name: Enforce release retention
+        # Retention MUST live here, not only in scripts/release.sh.
+        #
+        # When this workflow first ran (v1.15.1) the release count immediately
+        # went to 11, over the documented limit of 10, because the prune step
+        # existed only in release.sh and nothing runs release.sh on the tag
+        # path. Enforcement that lives somewhere which never executes is not
+        # enforcement — the same failure mode as the release gate that could
+        # not run and the path-leak guard that could not fail.
+        #
+        # Deletes the GitHub release only. Tags are permanent history and are
+        # never pruned. See docs/release-policy.md.
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_RETENTION: "10"
+        run: |
+          set -euo pipefail
+          all="$(gh release list --limit 200 --json tagName --jq '.[].tagName')"
+          [ -n "$all" ] || exit 0
+          excess="$(printf '%s\n' "$all" | tail -n +$((RELEASE_RETENTION + 1)))"
+          if [ -z "$excess" ]; then
+            echo "Release retention: $(printf '%s\n' "$all" | grep -c .) release(s), within the $RELEASE_RETENTION limit."
+            exit 0
+          fi
+          while read -r t; do
+            [ -n "$t" ] || continue
+            echo "Pruning release $t (tag retained)"
+            gh release delete "$t" --yes
+          done <<< "$excess"

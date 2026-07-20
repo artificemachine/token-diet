@@ -1763,6 +1763,46 @@ MOCK
   [ "$status" -ne 0 ]
 }
 
+@test "no raw open(path,\"w\") config writes remain in install.sh or token-diet" {
+  # open(p,"w") truncates before serializing, so a mid-write failure leaves a
+  # zero-byte config. All config mutation goes through tdconfig (atomic write,
+  # fsync, os.replace, mode preserved, backup taken).
+  run grep -nE 'open\([^)]*, *"w"\)' "$SCRIPTS_DIR/install.sh"
+  [ "$status" -ne 0 ]
+  run grep -nE 'open\([^)]*, *"w"\)' "$SCRIPTS_DIR/token-diet"
+  [ "$status" -ne 0 ]
+}
+
+@test "no silent-swallow config reads remain" {
+  # `except Exception: cfg = {}` treats a malformed config as EMPTY and then
+  # writes it back, destroying every setting the user had. One such site
+  # survived the v1.15.0 pass at install.sh's opencode plugin registration.
+  run grep -nE 'except Exception:\s*$' "$SCRIPTS_DIR/install.sh"
+  [ "$status" -ne 0 ]
+}
+
+@test "release.sh: tag message hardcodes no tool version or submodule SHA" {
+  # The template hardcoded every field and every one had drifted false: it
+  # printed token-diet's own $VERSION as RTK's version, claimed tilth 0.5.7
+  # (actually 0.9.0) and serena-agent 0.1.4 (actually 1.5.4.dev0), listed three
+  # stale SHAs, and omitted forks/icm entirely. All values are derived now.
+  local body
+  body="$(sed -n '/TAG_MSG=/,/See CHANGELOG/p' "$SCRIPTS_DIR/release.sh")"
+  [ -n "$body" ]
+  # No literal 40-char git SHA.
+  ! grep -qE '[0-9a-f]{40}' <<< "$body"
+  # No literal semver for a fork tool (derived values only).
+  ! grep -qE '(rtk|tilth|serena|icm)[^\n]*[0-9]+\.[0-9]+\.[0-9]+' <<< "$body"
+}
+
+@test "release.sh: tag message makes no unverified vulnerability claim" {
+  # "0 vulnerabilities (164 deps)" was asserted on every tag with no audit ever
+  # running at tag time — an unverified security claim in permanent history.
+  local body
+  body="$(sed -n '/TAG_MSG=/,/See CHANGELOG/p' "$SCRIPTS_DIR/release.sh")"
+  ! grep -qiE 'vulnerabilit|0 known|cve' <<< "$body"
+}
+
 @test "release.yml enforces retention, not only release.sh" {
   # v1.15.1 was auto-created by release.yml and immediately put the count at 11,
   # over the documented limit, because the prune step lived only in release.sh

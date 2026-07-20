@@ -1763,6 +1763,23 @@ MOCK
   [ "$status" -ne 0 ]
 }
 
+@test "release.yml enforces retention, not only release.sh" {
+  # v1.15.1 was auto-created by release.yml and immediately put the count at 11,
+  # over the documented limit, because the prune step lived only in release.sh
+  # and nothing runs release.sh on the tag path. Enforcement in a place that
+  # never executes is not enforcement.
+  local wf="$SCRIPTS_DIR/../.github/workflows/release.yml"
+  [ -f "$wf" ]
+  grep -q 'RELEASE_RETENTION' "$wf"
+  grep -q 'gh release delete' "$wf"
+}
+
+@test "release.yml never deletes a tag" {
+  local wf="$SCRIPTS_DIR/../.github/workflows/release.yml"
+  run grep -nE 'git (tag -d|push .*--delete|push .*:refs/tags)' "$wf"
+  [ "$status" -ne 0 ]
+}
+
 @test "docs/release-policy.md exists and states the retention count" {
   local doc="$SCRIPTS_DIR/../docs/release-policy.md"
   [ -f "$doc" ]

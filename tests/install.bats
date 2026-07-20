@@ -1293,3 +1293,31 @@ PY
   run grep -nE 'for fork in .*icm' "$SCRIPTS_DIR/release.sh"
   [ "$status" -eq 0 ]
 }
+
+@test "install: the INSTALLED token-diet-install.sh can source the host registry" {
+  # install.sh is itself installed as token-diet-install.sh, so its SCRIPT_DIR
+  # becomes the bin dir and `source $SCRIPT_DIR/lib/hosts.sh` resolves to the
+  # INSTALLED lib, not the repo one. If Iteration 1's copy step regresses, the
+  # installed installer dies at its first source line. This is the v1.14.0
+  # failure mode aimed at the installer itself.
+  mock_install_prereqs
+  mock_icm
+  mock_cmd claude
+
+  run bash "$SCRIPTS_DIR/install.sh" --icm-only
+  [ "$status" -eq 0 ]
+
+  [ -f "$TMP_HOME/.local/bin/token-diet-install.sh" ]
+  [ -f "$TMP_HOME/.local/bin/lib/hosts.sh" ]
+
+  # Source the installed lib the way the installed installer does, and confirm
+  # the registry is actually populated rather than merely present.
+  run bash -c "cd '$TMP_HOME/.local/bin' && source ./lib/hosts.sh && td_host_slugs | wc -l | tr -d ' '"
+  [ "$status" -eq 0 ]
+  [ "$output" = "7" ]
+
+  run bash "$TMP_HOME/.local/bin/token-diet-install.sh" --verify
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"No such file"* ]]
+  [[ "$output" != *"hosts.sh"* ]]
+}

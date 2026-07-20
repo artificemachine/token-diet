@@ -18,6 +18,9 @@ try:
 except ImportError:
     tiktoken = None
 
+RED = "\033[0;31m"
+NC = "\033[0m"
+
 DEFAULT_THRESHOLD = 100000
 
 
@@ -141,7 +144,7 @@ def main(argv):
 
     if should_warn(estimate, threshold, state_path):
         k = estimate // 1000
-        print(f"⚠️ Context ~{k}k tokens. Consider /compact or a fresh session.")
+        print(f"{RED}⚠️ Context ~{k}k tokens. Consider /compact or a fresh session.{NC}")
 
     sys.exit(0)
 

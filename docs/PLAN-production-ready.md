@@ -23,7 +23,7 @@ data-loss bug. Everything after is improvement, not remediation.
 - Decision to make: delete `HANDOFF.md` from the repo entirely, or move to `docs/handoffs/` with paths scrubbed. Recommend **delete from repo, keep locally untracked** — it is an agent working file, not a project artifact.
 - Do **not** rewrite git history. That call was already made and is correct (`HANDOFF.md:306`).
 - Add `HANDOFF.md` to `.gitignore` so it cannot regress.
-- **Test:** `git grep -c airm2max HEAD` returns 0. Add to `.github/workflows/path-leak.yml` a full-tree scan (not just PR diff) so this cannot come back.
+- **Test:** `git grep -c "$(id -un)" HEAD` returns 0. Add to `.github/workflows/path-leak.yml` a full-tree scan (not just PR diff) so this cannot come back.
 
 ### 1.2 Root directory triage
 - Keep `CLAUDE.md` and `AGENTS.md` (both are recognized conventions now, not smells).
@@ -59,7 +59,7 @@ data-loss bug. Everything after is improvement, not remediation.
 - Archive session-era docs to `docs/archive/`, add `docs/README.md` index.
 - Write `docs/engineering-notes.md`: the CI-caught-real-bugs story, the clean-container reproduction method, the tilth dead-code root-cause chase. **This is the most persuasive artifact available and currently does not exist.**
 
-**Phase 1 exit:** 186 bats + 46 pytest green, `git grep airm2max HEAD` = 0, README renders with demo + badges.
+**Phase 1 exit:** 186 bats + 46 pytest green, `git grep "$(id -un)" HEAD` = 0, README renders with demo + badges.
 
 ---
 

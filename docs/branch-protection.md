@@ -40,12 +40,27 @@ The accompanying `branch-protection.json`:
 
 ## Why these specific settings
 
-**`enforce_admins: false`** — deliberate, and the most important field here.
-This is a solo-maintained repo. With `enforce_admins: true` and no second
-reviewer available, an admin who needs to land an urgent fix has no path
-forward except disabling protection, which is worse than not having had it.
-False keeps the gates real for normal work while leaving an explicit,
-deliberate override.
+**`enforce_admins: true`** — the most important field here, and it was
+initially set to `false` for the wrong reason.
+
+The argument for `false` was lockout risk on a solo repo: no second reviewer,
+so an admin needing to land an urgent fix would be stuck. But the only person
+who can trip these gates on this repo *is* the admin, so `false` produced a
+gate that does not gate anyone who matters. That is the same defect class this
+project spent 2026-07-20 removing: a release gate that aborted before its first
+check, a path-leak guard that could not fail, a retention policy living in a
+file nothing executes. Protection that exempts the only merger is protection in
+name.
+
+The lockout escape hatch costs one API call and is fully reversible:
+
+```bash
+# Temporarily lift admin enforcement, land the fix, then re-enable.
+gh api -X DELETE repos/artificemachine/token-diet/branches/main/protection/enforce_admins
+gh api -X POST   repos/artificemachine/token-diet/branches/main/protection/enforce_admins
+```
+
+Safe path is the default; the override is explicit and deliberate.
 
 **`required_pull_request_reviews: null`** — a solo repo cannot satisfy a
 required-reviewer rule. Setting it would block every merge permanently. The PR

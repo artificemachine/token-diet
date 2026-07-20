@@ -122,3 +122,71 @@ def test_projection_stats(dashboard_mod):
     res = dashboard_mod.projection_stats(fake_data)
     # average saved is 1500. weekly = 1500 * 7 = 10500.
     assert res["weekly_projection"] == 10500
+
+
+# --- Low-volume filtering -----------------------------------------------------
+# An unweighted mean over raw days lets a 2-command day count as much as a
+# 5,000-command day, so a weekend or a day the machine was off drags the
+# projection down by an amount unrelated to the actual savings rate.
+
+def test_projection_excludes_low_volume_days(dashboard_mod):
+    """A near-idle day must not drag the average down."""
+    fake_data = {
+        "daily": [
+            {"date": "2026-04-01", "saved_tokens": 10000, "commands": 500},
+            {"date": "2026-04-02", "saved_tokens": 10000, "commands": 500},
+            # Machine barely used. Two commands should not count as a full day.
+            {"date": "2026-04-03", "saved_tokens": 10, "commands": 2},
+        ]
+    }
+    res = dashboard_mod.projection_stats(fake_data)
+    # Only the two qualifying days average: 10000, not (10000+10000+10)/3.
+    assert res["avg_daily_saved"] == 10000
+    assert res["weekly_projection"] == 70000
+    assert res["days_sampled"] == 2
+    assert res["days_qualified"] == 2
+    assert res["days_total"] == 3
+
+
+def test_projection_filter_is_noop_without_volume_data(dashboard_mod):
+    """Data with no "commands" key at all keeps its projection.
+
+    Filtering must degrade to a no-op when it has nothing to judge by. Treating
+    a missing field as zero volume would silently drop every day and return
+    None, turning an absent field into "no data".
+    """
+    fake_data = {
+        "daily": [
+            {"date": "2026-04-01", "saved_tokens": 1000},
+            {"date": "2026-04-02", "saved_tokens": 2000},
+        ]
+    }
+    res = dashboard_mod.projection_stats(fake_data)
+    assert res is not None
+    assert res["weekly_projection"] == 10500
+
+
+def test_projection_returns_none_when_all_days_low_volume(dashboard_mod):
+    """If volume data exists and nothing qualifies, report nothing rather than a lie."""
+    fake_data = {
+        "daily": [
+            {"date": "2026-04-01", "saved_tokens": 5, "commands": 1},
+            {"date": "2026-04-02", "saved_tokens": 5, "commands": 2},
+        ]
+    }
+    assert dashboard_mod.projection_stats(fake_data) is None
+
+
+def test_projection_reports_30_day_average(dashboard_mod):
+    """The 30-day baseline is reported alongside the 7-day trend."""
+    daily = [
+        {"date": f"2026-04-{i:02d}", "saved_tokens": 1000, "commands": 100}
+        for i in range(1, 11)
+    ]
+    # Last 7 days run hotter than the preceding stretch.
+    for d in daily[-7:]:
+        d["saved_tokens"] = 2000
+    res = dashboard_mod.projection_stats({"daily": daily})
+    assert res["weekly_projection"] == 14000          # 7-day: 2000 * 7
+    assert res["weekly_proj_30d"] < res["weekly_projection"]
+    assert res["days_qualified"] == 10

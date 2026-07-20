@@ -39,6 +39,7 @@ __all__ = [
     "atomic_write_text",
     "backup",
     "load_json",
+    "quarantine",
     "update_json",
 ]
 
@@ -60,6 +61,29 @@ def backup(path: os.PathLike | str) -> pathlib.Path | None:
         return None
     dest = p.with_name(f"{p.name}.bak-token-diet-{int(time.time())}")
     shutil.copy2(p, dest)
+    return dest
+
+
+def quarantine(path: os.PathLike | str) -> pathlib.Path | None:
+    """Copy an already-malformed `path` aside as `<name>.corrupt-<stamp>`.
+
+    Distinct from `backup`, and the distinction matters. `backup` preserves a
+    file that is currently *good*, before token-diet mutates it. `quarantine`
+    preserves a file that is *already broken*, so the user can inspect what
+    their editor left behind before anything else touches it.
+
+    Returns the quarantine path, or None if the source does not exist. Never
+    raises: it is called on an error path, and a failure to preserve a corrupt
+    file must not mask the corruption itself.
+    """
+    p = pathlib.Path(path)
+    if not p.exists():
+        return None
+    dest = p.with_name(f"{p.name}.corrupt-{time.strftime('%Y%m%d-%H%M%S')}")
+    try:
+        shutil.copy2(p, dest)
+    except OSError:
+        return None
     return dest
 
 

@@ -257,16 +257,30 @@ if $DO_TAG && ! $DRY_RUN; then
       [[ "$CONFIRM" =~ ^[Yy]$ ]] || { info "Tag skipped."; exit 0; }
     fi
 
+    # Every value here is derived. The previous template hardcoded all of it and
+    # every single field had drifted false: it printed token-diet's own $VERSION
+    # as RTK's version, claimed tilth 0.5.7 (actually 0.9.0) and serena-agent
+    # 0.1.4 (actually 1.5.4.dev0), listed three stale submodule SHAs, and omitted
+    # forks/icm entirely -- there are four forks, not three.
+    #
+    # It also asserted "0 vulnerabilities (164 deps)" on every tag. No audit runs
+    # at tag time, so that was an unverified security claim baked into permanent
+    # history. Dropped rather than derived: state what is known, not what sounds
+    # reassuring. Run `cargo audit` / `uv run pip-audit` separately and record
+    # real results in the release notes if that claim is wanted.
     TAG_MSG="token-diet v$VERSION
 
-RTK ${VERSION}: 0 vulnerabilities (164 deps)
-tilth 0.5.7: 0 vulnerabilities (93 deps)
-serena-agent 0.1.4: 0 known vulnerabilities
+Tool versions:
+$(for t in rtk tilth icm; do
+    # `<tool> --version` prints "<tool> X.Y.Z"; keep only the version field.
+    v="$(command -v "$t" >/dev/null 2>&1 && "$t" --version 2>/dev/null | tail -1 | awk '{print $NF}')"
+    printf '  %-7s %s\n' "$t:" "${v:-not installed}"
+  done)
+$(sp="$(sed -n 's/^version *= *"\(.*\)"$/\1/p' "$FORKS/serena/pyproject.toml" 2>/dev/null | head -1)"
+  printf '  %-7s %s\n' "serena:" "${sp:-unknown}")
 
 Submodule commits:
-  forks/rtk:    8c27defe878c1514528821c0998ed9747e43a9c7
-  forks/tilth:  8aa3d26fa252f4938f7bc883ec67a5b9ddfdf123
-  forks/serena: 1acd0118b253e99a3bfaecfdd464499509b3ceb0
+$(git submodule status 2>/dev/null | awk '{printf "  %-14s %s\n", $2":", $1}' | sed 's/[+-]//')
 
 See CHANGELOG.md for full details."
 

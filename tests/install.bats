@@ -1367,3 +1367,39 @@ PY
   [ "$status" -eq 0 ]
   [ ! -f "$TMP_HOME/.local/config/compat.json" ]
 }
+
+# ---------------------------------------------------------------------------
+# Cycle 11 — the default (network) install pins to the audited fork revisions
+#
+# The default install ran `cargo install --git <repo> --force` and
+# `uvx --from git+<repo>` with no revision, floating to upstream HEAD — so a
+# default install did NOT match the pinned/audited forks/ submodules or
+# compat.json's "tested" versions. The pin is derived from the superproject
+# gitlink (single source of truth), never duplicated.
+# ---------------------------------------------------------------------------
+
+@test "install: default cargo installs pin --rev to the submodule gitlink" {
+  local rtk_rev tilth_rev icm_rev
+  rtk_rev="$(git -C "$SCRIPTS_DIR/.." rev-parse 'HEAD:forks/rtk')"
+  tilth_rev="$(git -C "$SCRIPTS_DIR/.." rev-parse 'HEAD:forks/tilth')"
+  icm_rev="$(git -C "$SCRIPTS_DIR/.." rev-parse 'HEAD:forks/icm')"
+
+  run bash "$SCRIPTS_DIR/install.sh" --dry-run
+  [ "$status" -eq 0 ]
+
+  [[ "$output" == *"cargo install --git https://github.com/artificemachine/rtk --rev $rtk_rev"* ]]
+  [[ "$output" == *"cargo install --git https://github.com/artificemachine/tilth --rev $tilth_rev"* ]]
+  [[ "$output" == *"--rev $icm_rev"* ]]
+}
+
+@test "install: default serena launcher pins the uvx git ref" {
+  local serena_rev
+  serena_rev="$(git -C "$SCRIPTS_DIR/.." rev-parse 'HEAD:forks/serena')"
+
+  run bash "$SCRIPTS_DIR/install.sh" --dry-run
+  [ "$status" -eq 0 ]
+
+  # Every serena uvx ref must carry @<rev>, none may be the bare floating ref.
+  [[ "$output" == *"git+https://github.com/artificemachine/serena@$serena_rev"* ]]
+  [[ "$output" != *"git+https://github.com/artificemachine/serena serena"* ]]
+}

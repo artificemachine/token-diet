@@ -131,7 +131,26 @@ remove_opencode_mcp_key() {
     return 0
   fi
   python3 - "$cfg" "$key" << 'PY'
-import json, sys
+import json, os, sys, tempfile
+def atomic_write(path, text):
+    d = os.path.dirname(path) or "."
+    fd, tmp = tempfile.mkstemp(dir=d, prefix=".td-", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w") as f:
+            f.write(text)
+            f.flush()
+            os.fsync(f.fileno())
+        try:
+            os.chmod(tmp, os.stat(path).st_mode & 0o7777)
+        except OSError:
+            pass
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
 cfg_path, key = sys.argv[1], sys.argv[2]
 with open(cfg_path) as f:
     d = json.load(f)
@@ -146,9 +165,7 @@ if "mcpServers" in d and key in d["mcpServers"]:
         del d["mcpServers"]
     changed = True
 if changed:
-    with open(cfg_path, "w") as f:
-        json.dump(d, f, indent=2)
-        f.write("\n")
+    atomic_write(cfg_path, json.dumps(d, indent=2) + "\n")
 PY
   ok "Removed mcp.$key from $cfg"
 }
@@ -166,7 +183,26 @@ remove_opencode_plugin() {
     return 0
   fi
   python3 - "$cfg" "$relpath" << 'PY'
-import json, sys
+import json, os, sys, tempfile
+def atomic_write(path, text):
+    d = os.path.dirname(path) or "."
+    fd, tmp = tempfile.mkstemp(dir=d, prefix=".td-", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w") as f:
+            f.write(text)
+            f.flush()
+            os.fsync(f.fileno())
+        try:
+            os.chmod(tmp, os.stat(path).st_mode & 0o7777)
+        except OSError:
+            pass
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
 cfg_path, relpath = sys.argv[1], sys.argv[2]
 try:
     with open(cfg_path) as f:
@@ -176,9 +212,7 @@ except Exception:
 plugins = d.get("plugin")
 if isinstance(plugins, list) and relpath in plugins:
     d["plugin"] = [p for p in plugins if p != relpath]
-    with open(cfg_path, "w") as f:
-        json.dump(d, f, indent=2)
-        f.write("\n")
+    atomic_write(cfg_path, json.dumps(d, indent=2) + "\n")
 PY
   ok "Removed plugin $relpath from $cfg"
 }
@@ -194,15 +228,32 @@ remove_json_key() {
     return 0
   fi
   python3 - "$cfg" "$key" << 'PY'
-import json, sys
+import json, os, sys, tempfile
+def atomic_write(path, text):
+    d = os.path.dirname(path) or "."
+    fd, tmp = tempfile.mkstemp(dir=d, prefix=".td-", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w") as f:
+            f.write(text)
+            f.flush()
+            os.fsync(f.fileno())
+        try:
+            os.chmod(tmp, os.stat(path).st_mode & 0o7777)
+        except OSError:
+            pass
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
 cfg_path, key = sys.argv[1], sys.argv[2]
 with open(cfg_path) as f:
     d = json.load(f)
 if "mcpServers" in d and key in d["mcpServers"]:
     del d["mcpServers"][key]
-    with open(cfg_path, "w") as f:
-        json.dump(d, f, indent=2)
-        f.write("\n")
+    atomic_write(cfg_path, json.dumps(d, indent=2) + "\n")
 PY
   ok "Removed mcpServers.$key from $cfg"
 }
@@ -219,15 +270,32 @@ remove_vscode_template_server() {
     return 0
   fi
   python3 - "$cfg" "$key" << 'PY'
-import json, sys
+import json, os, sys, tempfile
+def atomic_write(path, text):
+    d = os.path.dirname(path) or "."
+    fd, tmp = tempfile.mkstemp(dir=d, prefix=".td-", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w") as f:
+            f.write(text)
+            f.flush()
+            os.fsync(f.fileno())
+        try:
+            os.chmod(tmp, os.stat(path).st_mode & 0o7777)
+        except OSError:
+            pass
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
 cfg_path, key = sys.argv[1], sys.argv[2]
 with open(cfg_path) as f:
     d = json.load(f)
 if "servers" in d and key in d["servers"]:
     del d["servers"][key]
-    with open(cfg_path, "w") as f:
-        json.dump(d, f, indent=2)
-        f.write("\n")
+    atomic_write(cfg_path, json.dumps(d, indent=2) + "\n")
 PY
   ok "Removed servers.$key from $cfg"
 }
@@ -242,7 +310,26 @@ strip_opencode_rules() {
     return 0
   fi
   python3 - "$cfg" <<'PY'
-import json, re, sys
+import json, os, re, sys, tempfile
+def atomic_write(path, text):
+    d = os.path.dirname(path) or "."
+    fd, tmp = tempfile.mkstemp(dir=d, prefix=".td-", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w") as f:
+            f.write(text)
+            f.flush()
+            os.fsync(f.fileno())
+        try:
+            os.chmod(tmp, os.stat(path).st_mode & 0o7777)
+        except OSError:
+            pass
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
 cfg_path = sys.argv[1]
 BEGIN = "<!-- token-diet:begin -->"
 END   = "<!-- token-diet:end -->"
@@ -258,9 +345,7 @@ for mode_name in ("build", "plan"):
         data["mode"][mode_name]["prompt"] = pattern.sub("\n", prompt).strip("\n")
         changed = True
 if changed:
-    with open(cfg_path, "w") as f:
-        json.dump(data, f, indent=2)
-        f.write("\n")
+    atomic_write(cfg_path, json.dumps(data, indent=2) + "\n")
 PY
   ok "Stripped token-diet prompt block from $cfg"
 }
@@ -295,7 +380,26 @@ remove_hook_entry() {
     return 0
   fi
   python3 - "$cfg" "$event" "$command" << 'PY'
-import json, sys
+import json, os, sys, tempfile
+def atomic_write(path, text):
+    d = os.path.dirname(path) or "."
+    fd, tmp = tempfile.mkstemp(dir=d, prefix=".td-", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w") as f:
+            f.write(text)
+            f.flush()
+            os.fsync(f.fileno())
+        try:
+            os.chmod(tmp, os.stat(path).st_mode & 0o7777)
+        except OSError:
+            pass
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
 cfg_path, event, command = sys.argv[1], sys.argv[2], sys.argv[3]
 try:
     with open(cfg_path) as f:
@@ -307,9 +411,7 @@ entries = hooks.get(event, [])
 kept = [e for e in entries if not any(h.get("command") == command for h in e.get("hooks", []))]
 if len(kept) != len(entries):
     hooks[event] = kept
-    with open(cfg_path, "w") as f:
-        json.dump(d, f, indent=2)
-        f.write("\n")
+    atomic_write(cfg_path, json.dumps(d, indent=2) + "\n")
 PY
   ok "Removed hooks.$event entry ($command) from $cfg"
 }
@@ -472,7 +574,26 @@ main() {
       dry "remove [mcp_servers.{tilth,serena,icm,token-diet}] blocks from $codex_cfg"
     else
       python3 - "$codex_cfg" << 'PY'
-import sys, re
+import os, re, sys, tempfile
+def atomic_write(path, text):
+    d = os.path.dirname(path) or "."
+    fd, tmp = tempfile.mkstemp(dir=d, prefix=".td-", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w") as f:
+            f.write(text)
+            f.flush()
+            os.fsync(f.fileno())
+        try:
+            os.chmod(tmp, os.stat(path).st_mode & 0o7777)
+        except OSError:
+            pass
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
 path = sys.argv[1]
 with open(path) as f:
     lines = f.read().splitlines(keepends=True)
@@ -502,8 +623,7 @@ while i < len(lines):
     out.append(lines[i])
     i += 1
 
-with open(path, "w") as f:
-    f.write("".join(out))
+atomic_write(path, "".join(out))
 PY
       ok "Removed mcp_servers.{tilth,serena,icm,token-diet} from $codex_cfg"
     fi

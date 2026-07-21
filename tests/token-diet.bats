@@ -1805,6 +1805,41 @@ MOCK
   [ "$status" -ne 0 ]
 }
 
+@test "no raw truncating open(cfg,\"w\") remains in uninstall.sh removers" {
+  # Same hazard as install.sh, other direction: the JSON/TOML removers in
+  # uninstall.sh rewrite configs the user owns ($HOME/.claude/settings.json,
+  # opencode.json, codex config.toml, the VS Code template). A raw
+  # open(cfg,"w") truncates on entry, so a crash or full disk mid-write leaves
+  # a zero-byte config behind. Every remover now serializes fully, writes to a
+  # sibling temp file, fsyncs, and os.replace()s it into place (mode preserved).
+  #
+  # The regex requires a non-identifier char before `open` so it flags a raw
+  # truncating open(...) but NOT the atomic path's own os.fdopen(fd,"w") writer.
+  run grep -nE '(^|[^A-Za-z0-9_.])open\([^)]*, *"w"\)' "$SCRIPTS_DIR/uninstall.sh"
+  [ "$status" -ne 0 ]
+}
+
+@test "the uninstall.sh open(w) guard fires on a reintroduced raw write" {
+  # Negative control for the guard above — a guard that cannot fail is not a
+  # guard. Plant a raw truncating open(cfg,"w") into a copy and assert the
+  # regex flags it; then plant the atomic os.fdopen(fd,"w") form and assert the
+  # regex does NOT flag it. If either assertion breaks, the guard has stopped
+  # discriminating and the real check above is worthless.
+  local work; work="$(mktemp -d)"
+
+  cp "$SCRIPTS_DIR/uninstall.sh" "$work/planted.sh"
+  printf '%s\n' '    with open(cfg_path, "w") as f:' >> "$work/planted.sh"
+  run grep -nE '(^|[^A-Za-z0-9_.])open\([^)]*, *"w"\)' "$work/planted.sh"
+  [ "$status" -eq 0 ]
+
+  cp "$SCRIPTS_DIR/uninstall.sh" "$work/atomic.sh"
+  printf '%s\n' '    with os.fdopen(fd, "w") as f:' >> "$work/atomic.sh"
+  run grep -nE '(^|[^A-Za-z0-9_.])open\([^)]*, *"w"\)' "$work/atomic.sh"
+  [ "$status" -ne 0 ]
+
+  rm -rf "$work"
+}
+
 @test "no silent-swallow config reads remain" {
   # `except Exception: cfg = {}` treats a malformed config as EMPTY and then
   # writes it back, destroying every setting the user had. One such site

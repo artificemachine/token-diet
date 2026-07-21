@@ -186,7 +186,7 @@ no network access. See the [Enterprise Guide](docs/enterprise.md).
 bats tests/*.bats && pytest tests/ -q
 ```
 
-197 bats tests and 61 pytest tests. See [CONTRIBUTING.md](CONTRIBUTING.md) for
+226 bats tests and 69 pytest tests. See [CONTRIBUTING.md](CONTRIBUTING.md) for
 setup, and [docs/engineering-notes.md](docs/engineering-notes.md) for how this
 project is tested and debugged.
 

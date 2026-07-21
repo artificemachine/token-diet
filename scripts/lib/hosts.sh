@@ -55,3 +55,36 @@ td_host_labels() {
     printf '%s\n' "${entry#*|}"
   done
 }
+
+# Print the HOME-relative config file paths that the canonical MCP-host registry
+# (config/hosts-mcp.json) records for <host>, one per line, in registry order.
+#
+# Reads the `home_configs` array. The registry path is passed IN by the caller,
+# never assumed here: install.sh passes its repo copy
+# ($PROJECT_ROOT/config/hosts-mcp.json); the installed token-diet passes its own
+# ($SCRIPT_DIR/../config/hosts-mcp.json). This keeps the lib decoupled from where
+# it lives (Strict Installation Decoupling).
+#
+# Returns non-zero and prints nothing when python3 is missing, the registry is
+# absent/malformed, or the host has no entries, so callers can fall back to their
+# previous hardcoded paths without changing behavior.
+td_host_config_paths() {
+  local registry="$1" host="$2"
+  [ -f "$registry" ] || return 1
+  command -v python3 >/dev/null 2>&1 || return 1
+  python3 - "$registry" "$host" <<'PY' || return 1
+import json, sys
+registry, host = sys.argv[1], sys.argv[2]
+try:
+    with open(registry, encoding="utf-8") as f:
+        data = json.load(f)
+except Exception:
+    sys.exit(1)
+paths = [e["path"] for e in data.get("home_configs", [])
+         if e.get("host") == host and e.get("path")]
+if not paths:
+    sys.exit(1)
+for p in paths:
+    print(p)
+PY
+}

@@ -1447,3 +1447,70 @@ PY
   [[ "$output" == *"git+https://github.com/artificemachine/serena@$serena_rev"* ]]
   [[ "$output" != *"git+https://github.com/artificemachine/serena serena"* ]]
 }
+
+# ---------------------------------------------------------------------------
+# Phase 5 Iteration 4 — resolve_cowork_cfg reads config paths from the
+# canonical MCP-host registry (config/hosts-mcp.json) instead of hardcoding
+# the Claude Desktop paths. Converges ONE bash consumer of the config-path
+# data onto the registry (Stage 6 HIGH #1: config-path drift).
+# ---------------------------------------------------------------------------
+
+@test "hosts.sh: td_host_config_paths returns a host's config paths in registry order" {
+  source "$SCRIPTS_DIR/lib/hosts.sh"
+  local reg="$TMP_HOME/reg.json"
+  cat > "$reg" <<'JSON'
+{ "home_configs": [
+  { "path": "SENTINEL/mac.json",       "host": "claude-desktop", "format": "json" },
+  { "path": ".claude/settings.json",   "host": "claude-code",    "format": "json" },
+  { "path": "SENTINEL/linux.json",     "host": "claude-desktop", "format": "json" }
+]}
+JSON
+  run td_host_config_paths "$reg" claude-desktop
+  [ "$status" -eq 0 ]
+  [ "${#lines[@]}" -eq 2 ]
+  # Order preserved; interleaved other-host entries filtered out.
+  [ "${lines[0]}" = "SENTINEL/mac.json" ]
+  [ "${lines[1]}" = "SENTINEL/linux.json" ]
+}
+
+@test "hosts.sh: td_host_config_paths fails (no output) when the registry is absent" {
+  source "$SCRIPTS_DIR/lib/hosts.sh"
+  run td_host_config_paths "$TMP_HOME/does-not-exist.json" claude-desktop
+  [ "$status" -ne 0 ]
+  [ -z "$output" ]
+}
+
+@test "hosts.sh: td_host_config_paths fails (no output) for a host with no entries" {
+  source "$SCRIPTS_DIR/lib/hosts.sh"
+  local reg="$TMP_HOME/reg.json"
+  cat > "$reg" <<'JSON'
+{ "home_configs": [ { "path": ".claude/settings.json", "host": "claude-code", "format": "json" } ] }
+JSON
+  run td_host_config_paths "$reg" claude-desktop
+  [ "$status" -ne 0 ]
+  [ -z "$output" ]
+}
+
+@test "install.sh: resolve_cowork_cfg derives the Cowork path from the registry" {
+  mock_install_prereqs
+  # A distinctive Claude Desktop path only the registry knows about.
+  local reg="$TMP_HOME/hosts-mcp.json"
+  cat > "$reg" <<'JSON'
+{ "home_configs": [
+  { "path": ".claude/settings.json",              "host": "claude-code",    "format": "json" },
+  { "path": "sentinel-cowork/mac-desktop.json",   "host": "claude-desktop", "format": "json" },
+  { "path": "sentinel-cowork/linux-desktop.json", "host": "claude-desktop", "format": "json" }
+]}
+JSON
+  # Force HAS_COWORK true without a config file present, so the cowork dry-run
+  # write branch runs and prints "... to $COWORK_CFG".
+  mock_cmd claude-desktop
+  TD_HOSTS_MCP_REGISTRY="$reg" run bash "$SCRIPTS_DIR/install.sh" \
+    --serena-only --hosts cowork --dry-run
+  [ "$status" -eq 0 ]
+  # Neither sentinel file exists, so resolve_cowork_cfg falls to the uname
+  # default: the mac path on Darwin, the linux path elsewhere. Either proves the
+  # path came from the registry, not the hardcoded Library/... default.
+  [[ "$output" == *"sentinel-cowork/"*"-desktop.json"* ]]
+  [[ "$output" != *"Library/Application Support/Claude/claude_desktop_config.json"* ]]
+}

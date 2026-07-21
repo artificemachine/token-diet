@@ -12,7 +12,7 @@
 
 set -euo pipefail
 
-readonly TD_VERSION="1.15.14"
+readonly TD_VERSION="1.15.15"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # --- Colors -------------------------------------------------------------------
@@ -139,33 +139,98 @@ codex_mcp_command_issue() {
 hosts_registered() {
   local tool="$1"
   local found=()
-  local configs=(
-    "$HOME/.claude.json"
-    "$HOME/.claude/settings.json"
-    "$HOME/Library/Application Support/Claude/claude_desktop_config.json"
-    "$HOME/.config/Claude/claude_desktop_config.json"
-    "$HOME/.opencode.json"
-    "$HOME/.config/opencode/opencode.json"
-  )
-  _tool_in_cfg() {
-    python3 - "$1" "$2" << 'PY' 2>/dev/null
-import json, sys
-d = json.load(open(sys.argv[1]))
-# A config may have both "mcpServers" and "mcp" keys (e.g. opencode). Merge both.
-servers = {**d.get('mcpServers', {}), **d.get('mcp', {})}
-sys.exit(0 if any(sys.argv[2] in k.lower() for k in servers.keys()) else 1)
+
+  # Canonical MCP-host registry (config/hosts-mcp.json) is the single source of
+  # truth for which JSON home-config files to scan and the MCP key dialect. This
+  # replaces a hardcoded config-path list + inline dialect that had drifted from
+  # the registry. Resolve it exactly like _compat_min resolves compat.json:
+  # installed SCRIPT_DIR is ~/.local/bin, so ../config -> ~/.local/config, where
+  # install.sh ships hosts-mcp.json; a repo checkout resolves ../config ->
+  # repo/config. When the registry is unreadable the helper falls back to the
+  # historical hardcoded path list, so detection keeps working (Strict
+  # Installation Decoupling + defense in depth).
+  local registry="$SCRIPT_DIR/../config/hosts-mcp.json"
+
+  # JSON home-config scan (claude-code / claude-desktop / opencode). Codex, VS
+  # Code and Gemini keep their own matchers below, unchanged. The helper prints
+  # one host per matching file (opencode may appear twice; de-duped just below).
+  local _hline
+  while IFS= read -r _hline; do
+    [ -n "$_hline" ] && found+=("$_hline")
+  done < <(python3 - "$registry" "$HOME" "$tool" 2>/dev/null << 'PY'
+import json, os, sys
+registry, home, tool = sys.argv[1], sys.argv[2], sys.argv[3]
+tool_l = tool.lower()
+
+# Ordered relative paths of JSON home-config files to scan. Primary source: the
+# canonical registry. Fallback (registry missing/malformed): the historical
+# hardcoded list, so host detection still works decoupled from the registry.
+dialect = ["mcpServers", "mcp", "servers"]
+paths = None
+try:
+    with open(registry, encoding="utf-8") as f:
+        reg = json.load(f)
+    dialect = reg.get("mcp_key_dialect", dialect)
+    paths = []
+    for e in reg.get("home_configs", []):
+        if e.get("format") != "json":
+            continue
+        # Gemini has its own matcher below; a *settings.json path would otherwise
+        # be mis-attributed to claude-code by the substring rules.
+        if e.get("host") == "gemini":
+            continue
+        p = e.get("path")
+        if p:
+            paths.append(p)
+    # Legacy XDG OpenCode path, not yet represented in the registry.
+    paths.append(".config/opencode/opencode.json")
+except Exception:
+    paths = [
+        ".claude.json",
+        ".claude/settings.json",
+        "Library/Application Support/Claude/claude_desktop_config.json",
+        ".config/Claude/claude_desktop_config.json",
+        ".opencode.json",
+        ".config/opencode/opencode.json",
+    ]
+
+def attribute(rel):
+    # Verbatim port of the previous bash `case "$cfg"` substring logic. Ordering
+    # matters and its quirks are preserved: the Linux claude-desktop path
+    # (.config/Claude/claude_desktop_config.json) matches no arm -> no host.
+    if "Application Support" in rel:
+        return "claude-desktop"
+    if ".claude.json" in rel:
+        return "claude-code"
+    if "settings.json" in rel:
+        return "claude-code"
+    if "opencode" in rel:
+        return "opencode"
+    return None
+
+for rel in paths:
+    path = os.path.join(home, rel)
+    if not os.path.isfile(path):
+        continue
+    try:
+        with open(path, encoding="utf-8") as f:
+            d = json.load(f)
+    except Exception:
+        continue
+    # Merge all dialect keys (mcpServers, mcp, servers). A config may carry both
+    # mcpServers and mcp (e.g. opencode) — merge, do not first-truthy, so neither
+    # is dropped. Substring key match (my-tilth-server matches tool "tilth").
+    servers = {}
+    for key in dialect:
+        v = d.get(key)
+        if isinstance(v, dict):
+            servers.update(v)
+    if any(tool_l in k.lower() for k in servers):
+        host = attribute(rel)
+        if host:
+            print(host)
 PY
-  }
-  for cfg in "${configs[@]}"; do
-    [ -f "$cfg" ] || continue
-    _tool_in_cfg "$cfg" "$tool" || continue
-    case "$cfg" in
-      *"Application Support"*) found+=("claude-desktop") ;;
-      *".claude.json"*)        found+=("claude-code") ;;
-      *settings.json*)         found+=("claude-code") ;;
-      *opencode*)              found+=("opencode") ;;
-    esac
-  done
+)
 
   # OpenCode: check both legacy (~/.opencode.json) and XDG path together.
   # Either file registering the tool counts as "opencode" registered.
@@ -2522,6 +2587,13 @@ helpEOF
 }
 
 # --- Dispatch -----------------------------------------------------------------
+# Only dispatch when executed directly. When sourced (e.g. by the characterization
+# bats tests that call hosts_registered() against a planted $HOME), skip dispatch
+# so callers can exercise individual functions in isolation.
+if [ "${BASH_SOURCE[0]}" != "${0}" ]; then
+  return 0 2>/dev/null || true
+fi
+
 case "${1:-gain}" in
   gain)              cmd_gain ;;
   health)            cmd_health ;;

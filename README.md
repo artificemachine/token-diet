@@ -13,23 +13,7 @@ One command installs the stack and registers it across every AI host you have:
 Claude Code, Codex CLI, OpenCode, Copilot CLI, VS Code, Claude Desktop, and
 Gemini CLI.
 
-```console
-$ token-diet gain
-
-RTK — command output compression (tracked)
-──────────────────────────────────────────────────
-  Commands filtered:     200194
-  Tokens in:             110.2M
-  Tokens saved:          92.5M  (83.9%)
-  Exec time:             157h 2m
-  Efficiency:  ████████████████░░░░  83.9%
-  ✓  RTK 0.43.0 — active
-
-tilth — AST-aware code reading (tree-sitter)
-──────────────────────────────────────────────────
-  MCP hosts:             claude-code,claude-desktop,opencode,codex,gemini
-  ✓  tilth 0.9.0 — active
-```
+![token-diet gain: RTK compressed 110.2M tokens to 17.7M (83.9% saved) over 200194 commands; tilth active across 5 MCP hosts](docs/assets/demo-gain.svg)
 
 That 83.9% is one real machine's measured history over 200k commands, not a
 marketing figure. Your number will differ. See

@@ -1,0 +1,32 @@
+{
+  "schema": 1,
+  "_comment": "Canonical MCP-host registry. Single source of truth for which AI hosts token-diet detects, where their config files live, and how their MCP-server blocks are keyed. The dashboard reads this at runtime; install.sh copies it alongside the binary (Strict Installation Decoupling). Order of `all_hosts`, `home_configs`, `project_configs`, and dialect keys is observable in output and MUST be preserved.",
+
+  "mcp_key_dialect": ["mcpServers", "mcp", "servers"],
+
+  "all_hosts": ["claude-code", "claude-desktop", "opencode", "codex", "vscode", "gemini"],
+
+  "home_configs": [
+    { "path": ".claude/settings.json",                                              "host": "claude-code",    "format": "json" },
+    { "path": ".claude.json",                                                        "host": "claude-code",    "format": "json" },
+    { "path": "Library/Application Support/Claude/claude_desktop_config.json",        "host": "claude-desktop", "format": "json" },
+    { "path": ".config/Claude/claude_desktop_config.json",                            "host": "claude-desktop", "format": "json" },
+    { "path": ".opencode.json",                                                       "host": "opencode",       "format": "json" },
+    { "path": ".gemini/settings.json",                                                "host": "gemini",         "format": "json" },
+    { "path": ".codex/config.toml",                                                   "host": "codex",          "format": "text" }
+  ],
+
+  "project_configs": [
+    { "path": ".vscode/mcp.json",       "host": "vscode", "format": "text" },
+    { "path": ".vscode/settings.json",  "host": "vscode", "format": "text" }
+  ],
+
+  "presence": {
+    "claude-code":    { "base": "home",    "paths": [".claude", ".claude.json"] },
+    "claude-desktop": { "base": "home",    "paths": ["Library/Application Support/Claude", ".config/Claude"] },
+    "opencode":       { "base": "home",    "paths": [".opencode.json"] },
+    "codex":          { "base": "home",    "paths": [".codex"] },
+    "vscode":         { "base": "project", "paths": [".vscode"] },
+    "gemini":         { "base": "home",    "paths": [".gemini"] }
+  }
+}

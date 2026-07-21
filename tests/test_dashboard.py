@@ -91,6 +91,70 @@ def test_registered_hosts_detection(dashboard_mod, tmp_path):
         assert "claude-code" in hosts
         assert "codex" in hosts
 
+# --- Canonical MCP-host registry ---------------------------------------------
+# The host config paths + MCP-key dialect used to be hardcoded in the dashboard
+# AND independently in bash (install.sh/uninstall.sh/token-diet). Because Python
+# cannot source the bash registry, the two drifted silently. The dashboard now
+# reads config/hosts-mcp.json as the single source of truth.
+
+def _write_registry(tmp_path, reg):
+    reg_file = tmp_path / "hosts-mcp.json"
+    reg_file.write_text(json.dumps(reg))
+    return reg_file
+
+
+def test_registered_hosts_reads_canonical_file(dashboard_mod, tmp_path, monkeypatch):
+    """_registered_hosts() is driven by the canonical registry, not hardcoded paths."""
+    reg = {
+        "schema": 1,
+        "mcp_key_dialect": ["mcpServers"],
+        "all_hosts": ["myhost"],
+        "home_configs": [{"path": "custom/cfg.json", "host": "myhost", "format": "json"}],
+        "project_configs": [],
+        "presence": {"myhost": {"base": "home", "paths": ["custom"]}},
+    }
+    reg_file = _write_registry(tmp_path, reg)
+    monkeypatch.setattr(dashboard_mod, "_host_registry_path", lambda: reg_file)
+
+    home = tmp_path / "home"
+    (home / "custom").mkdir(parents=True)
+    (home / "custom" / "cfg.json").write_text(json.dumps({"mcpServers": {"mytool": {}}}))
+    with patch("pathlib.Path.home", return_value=home), \
+         patch("pathlib.Path.cwd", return_value=home):
+        hosts = dashboard_mod._registered_hosts("mytool")
+        assert hosts == ["myhost"]
+
+
+def test_missing_hosts_reads_canonical_file(dashboard_mod, tmp_path, monkeypatch):
+    """_missing_hosts() uses all_hosts + presence from the canonical registry."""
+    reg = {
+        "schema": 1,
+        "mcp_key_dialect": ["mcpServers"],
+        "all_hosts": ["myhost"],
+        "home_configs": [{"path": "custom/cfg.json", "host": "myhost", "format": "json"}],
+        "project_configs": [],
+        "presence": {"myhost": {"base": "home", "paths": ["custom"]}},
+    }
+    reg_file = _write_registry(tmp_path, reg)
+    monkeypatch.setattr(dashboard_mod, "_host_registry_path", lambda: reg_file)
+
+    home = tmp_path / "home"
+    (home / "custom").mkdir(parents=True)  # host dir exists but no MCP registration
+    with patch("pathlib.Path.home", return_value=home), \
+         patch("pathlib.Path.cwd", return_value=home):
+        missing = dashboard_mod._missing_hosts("mytool")
+        assert missing == ["myhost"]
+
+
+def test_real_registry_preserves_default_host_set(dashboard_mod):
+    """The shipped registry encodes exactly today's six hosts, in order."""
+    reg = dashboard_mod._load_host_registry()
+    assert reg["all_hosts"] == [
+        "claude-code", "claude-desktop", "opencode", "codex", "vscode", "gemini",
+    ]
+    assert reg["mcp_key_dialect"] == ["mcpServers", "mcp", "servers"]
+
+
 def test_budget_stats_calculation(dashboard_mod, tmp_path):
     """budget_stats() correctly calculates used tokens based on baseline."""
     home = tmp_path / "home"

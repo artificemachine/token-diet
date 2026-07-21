@@ -1491,6 +1491,81 @@ JSON
   [ -z "$output" ]
 }
 
+# ---------------------------------------------------------------------------
+# Phase 5 Iteration 5 — detect_hosts found/not-found REPORTING is registry-driven
+#
+# Characterization guard for the lowest-blast-radius enumeration site. The
+# reporting block must stay BYTE-IDENTICAL after being converted from seven
+# hardcoded `if $HAS_* ...` lines to a loop over the host registry. The dotted
+# alignment ("Claude Code ....." / the two-space "Cowork (Desktop)  ") is the
+# fragile part: every label is padded to a fixed column, and Cowork's label is
+# exactly wide enough to carry zero dots. These tests pin every dot.
+#
+# Detection is made deterministic and machine-independent by restricting PATH to
+# the sandbox bin plus system dirs, then mocking exactly the hosts we want
+# "found". The detection block's found lines say "found"; the later verify block
+# says "available", so asserting the contiguous "... found" block targets the
+# reporting site unambiguously.
+# ---------------------------------------------------------------------------
+
+# PATH the installer sees: mocked bins first, then real system dirs for
+# coreutils/python3/uname. Real host binaries (claude, codex, ...) live in
+# $HOME/.local/bin or Homebrew and are therefore invisible unless we mock them.
+# Computed per-test: $TMP_BIN is only set once setup() has run.
+td_test_host_path() { printf '%s' "$TMP_BIN:/usr/bin:/bin:/usr/sbin:/sbin"; }
+
+@test "install.sh: detect_hosts reporting is byte-identical (all seven found)" {
+  mock_install_prereqs
+  # Mock every host so all seven report "found". Cowork keys off claude-desktop.
+  mock_cmd claude
+  mock_cmd codex
+  mock_cmd opencode
+  mock_cmd copilot
+  mock_cmd code
+  mock_cmd gemini
+  mock_cmd claude-desktop
+
+  run env PATH="$(td_test_host_path)" bash "$SCRIPTS_DIR/install.sh" \
+    --serena-only --dry-run </dev/null
+  [ "$status" -eq 0 ]
+
+  # Contiguous, ordered, byte-exact. All-"found" only appears in the detection
+  # block (verify prints "available"), so this pins the reporting site alone.
+  local expected
+  expected="[ok]    Claude Code ..... found
+[ok]    Codex CLI ....... found
+[ok]    OpenCode ........ found
+[ok]    Copilot CLI ..... found
+[ok]    VS Code ......... found
+[ok]    Cowork (Desktop)  found
+[ok]    Gemini CLI ...... found"
+  [[ "$output" == *"$expected"* ]]
+}
+
+@test "install.sh: detect_hosts reporting is byte-identical (partial, not-found dots)" {
+  mock_install_prereqs
+  # Only Claude and Gemini present; the middle five report "not found" — this
+  # exercises the dotted not-found lines and the two-space "Cowork (Desktop)".
+  mock_cmd claude
+  mock_cmd gemini
+
+  run env PATH="$(td_test_host_path)" bash "$SCRIPTS_DIR/install.sh" \
+    --serena-only --dry-run </dev/null
+  [ "$status" -eq 0 ]
+
+  # Mixed ok/warn contiguous block. Claude says "found" here vs "available" in
+  # the verify block, so the whole block only matches the detection site.
+  local expected
+  expected="[ok]    Claude Code ..... found
+[warn]  Codex CLI ....... not found
+[warn]  OpenCode ........ not found
+[warn]  Copilot CLI ..... not found
+[warn]  VS Code ......... not found
+[warn]  Cowork (Desktop)  not found
+[ok]    Gemini CLI ...... found"
+  [[ "$output" == *"$expected"* ]]
+}
+
 @test "install.sh: resolve_cowork_cfg derives the Cowork path from the registry" {
   mock_install_prereqs
   # A distinctive Claude Desktop path only the registry knows about.

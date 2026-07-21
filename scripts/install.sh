@@ -310,8 +310,29 @@ HAS_CLAUDE=false; HAS_CODEX=false; HAS_OPENCODE=false; HAS_COPILOT=false; HAS_VS
 HOSTS_FILTER=""   # set by --hosts flag; empty = prompt when multiple detected
 
 resolve_cowork_cfg() {
-  local mac_cfg="$HOME/Library/Application Support/Claude/claude_desktop_config.json"
-  local linux_cfg="$HOME/.config/Claude/claude_desktop_config.json"
+  # The two Claude Desktop config paths come from the canonical registry
+  # (config/hosts-mcp.json, host="claude-desktop"): macOS path first, Linux path
+  # second, matching the registry's documented and observable order. install.sh
+  # always runs from the repo, so it reads the repo copy; TD_HOSTS_MCP_REGISTRY
+  # overrides that only for tests and is unset in production (identical paths).
+  # Fall back to the literal pair when the registry yields anything other than
+  # exactly two paths (e.g. curl|sh of the bare script with no checkout), so
+  # behavior is preserved even without the registry.
+  local mac_cfg linux_cfg
+  local registry="${TD_HOSTS_MCP_REGISTRY:-$PROJECT_ROOT/config/hosts-mcp.json}"
+  local reg_paths=()
+  local _p
+  while IFS= read -r _p; do
+    [ -n "$_p" ] && reg_paths+=("$HOME/$_p")
+  done < <(td_host_config_paths "$registry" claude-desktop)
+
+  if [ "${#reg_paths[@]}" -eq 2 ]; then
+    mac_cfg="${reg_paths[0]}"
+    linux_cfg="${reg_paths[1]}"
+  else
+    mac_cfg="$HOME/Library/Application Support/Claude/claude_desktop_config.json"
+    linux_cfg="$HOME/.config/Claude/claude_desktop_config.json"
+  fi
 
   if [ -f "$mac_cfg" ]; then
     echo "$mac_cfg"

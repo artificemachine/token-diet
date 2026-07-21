@@ -41,7 +41,13 @@ done
 case "$sub" in
   --version) echo "cargo 1.97.1 (stub)"; exit 0 ;;
 esac
-fork_dir="$(dirname "$manifest")"
+# build uses --manifest-path; the test step now cd's into the fork and omits it,
+# so fall back to cwd to identify the fork.
+if [ -n "$manifest" ]; then
+  fork_dir="$(dirname "$manifest")"
+else
+  fork_dir="$(pwd)"
+fi
 fork_name="$(basename "$fork_dir")"
 case "$sub" in
   build)
@@ -50,6 +56,10 @@ case "$sub" in
     chmod +x "$fork_dir/target/release/$fork_name"
     exit 0 ;;
   test)
+    # Record the cwd the test step runs in, so a test can assert build.sh cd's
+    # into the fork rather than invoking from the repo root (13 tilth tests are
+    # cwd-dependent and fail when run from the wrong directory).
+    [ -n "${CARGO_TEST_CWD_LOG:-}" ] && pwd > "$CARGO_TEST_CWD_LOG/$fork_name"
     case " $FAIL_TEST_FORKS " in
       *" $fork_name "*) echo "test result: FAILED"; exit 101 ;;
     esac
@@ -80,4 +90,27 @@ CARGOSTUB
   # The old code printed "RTK tests passed" unconditionally after the test line.
   # A failing test run must not be reported as passed.
   [[ "$output" != *"RTK tests passed"* ]]
+}
+
+@test "build.sh runs each fork's tests from the fork's own directory" {
+  # 13 tilth lib tests are cwd-dependent (relative fixture paths). Run via
+  # `cargo test --manifest-path` from the repo root they fail; run from the fork
+  # dir they pass 611/611. build.sh (and release.sh) must cd into each fork for
+  # the test step so the gate reflects the fork's real health.
+  _setup_build_sandbox
+  export FAIL_TEST_FORKS=""
+  export CARGO_TEST_CWD_LOG="$TMP_HOME/cwdlog"
+  mkdir -p "$CARGO_TEST_CWD_LOG"
+
+  run bash "$ROOT/scripts/build.sh" --rtk --tilth --release
+  [ "$status" -eq 0 ]
+
+  # Compare by basename/parent to avoid /var vs /private/var symlink noise.
+  local rtk_cwd tilth_cwd
+  rtk_cwd="$(cat "$CARGO_TEST_CWD_LOG/rtk")"
+  tilth_cwd="$(cat "$CARGO_TEST_CWD_LOG/tilth")"
+  [ "$(basename "$rtk_cwd")" = "rtk" ]
+  [ "$(basename "$(dirname "$rtk_cwd")")" = "forks" ]
+  [ "$(basename "$tilth_cwd")" = "tilth" ]
+  [ "$(basename "$(dirname "$tilth_cwd")")" = "forks" ]
 }

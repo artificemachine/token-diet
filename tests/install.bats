@@ -1055,7 +1055,7 @@ PY
   mock_icm
   mock_cmd claude
   mock_cmd opencode
-  mock_gemini  # writes ~/.gemini/settings.json with empty mcpServers
+  mock_gemini  # writes $HOME/.gemini/settings.json with empty mcpServers
 
   run bash "$SCRIPTS_DIR/install.sh" --icm-only --with-context-hooks --hosts gemini
   [ "$status" -eq 0 ]
@@ -1635,24 +1635,211 @@ JSON
   [[ "$output" != *".codex/config.toml"* ]]
 }
 
-@test "uninstall.sh does NOT clean .claude.json or gemini (registry mismatch preserved)" {
-  # Registry lists .claude.json (claude-code) and .gemini/settings.json (gemini),
-  # but uninstall historically never cleaned either. Converging the path list
-  # must NOT start cleaning them.
-  echo '{"mcpServers":{"icm":{"command":"icm"}}}' > "$TMP_HOME/.claude.json"
+@test "uninstall.sh DOES clean .claude.json and gemini MCP keys (Phase 5 symmetry), preserving unrelated servers" {
+  # Behavior change (Phase 5 DECISION 2): install writes token-diet's MCP servers
+  # to $HOME/.claude.json (via `claude mcp add --scope user`) and to
+  # $HOME/.gemini/settings.json (via `gemini mcp add --scope user`). Uninstall must be
+  # symmetric and remove them. It must NOT touch a user's own unrelated servers.
+  echo '{"mcpServers":{"user-server":{"command":"x"},"tilth":{},"serena":{},"icm":{}}}' > "$TMP_HOME/.claude.json"
   mkdir -p "$TMP_HOME/.gemini"
-  echo '{"mcpServers":{"icm":{"command":"icm"}}}' > "$TMP_HOME/.gemini/settings.json"
+  echo '{"mcpServers":{"user-server":{"command":"y"},"tilth":{},"serena":{},"icm":{}}}' > "$TMP_HOME/.gemini/settings.json"
 
   run bash "$SCRIPTS_DIR/uninstall.sh" --force
   [ "$status" -eq 0 ]
 
-  # Both files must retain their icm entry — uninstall never touches them.
+  # token-diet's three servers gone from BOTH files; the user's own server stays.
   python3 - "$TMP_HOME/.claude.json" << 'PY'
 import json, sys
-assert "icm" in json.load(open(sys.argv[1])).get("mcpServers", {}), ".claude.json icm removed!"
+s = json.load(open(sys.argv[1])).get("mcpServers", {})
+for k in ("tilth", "serena", "icm"):
+    assert k not in s, f".claude.json still has {k}"
+assert "user-server" in s, "unrelated .claude.json server was removed!"
 PY
   python3 - "$TMP_HOME/.gemini/settings.json" << 'PY'
 import json, sys
-assert "icm" in json.load(open(sys.argv[1])).get("mcpServers", {}), "gemini icm removed!"
+s = json.load(open(sys.argv[1])).get("mcpServers", {})
+for k in ("tilth", "serena", "icm"):
+    assert k not in s, f"gemini still has {k}"
+assert "user-server" in s, "unrelated gemini server was removed!"
+PY
+}
+
+# ---------------------------------------------------------------------------
+# Phase 5 FINAL — install/uninstall symmetry (DECISION 2)
+#
+# ROUND-TRIP PROOF: for each host, capture a config that already holds unrelated
+# user content, run the real install path, run uninstall, and assert the config
+# is restored — token-diet's own blocks fully removed, every pre-existing user
+# key/value preserved. Deep-equality on the parsed structure is the proof that
+# uninstall removes EXACTLY what install writes (no more, no less). For the
+# direct-write hosts (opencode, codex, cowork/Claude-Desktop) install.sh mutates
+# the file itself, so this is a true install->uninstall round-trip. For the
+# external-CLI hosts (gemini, claude-code's $HOME/.claude.json) the real host CLI does
+# the write, so we plant the realistic post-install state (documented) and prove
+# uninstall removes exactly it while preserving unrelated servers.
+# ---------------------------------------------------------------------------
+
+@test "symmetry: opencode round-trip — install then uninstall restores the config exactly" {
+  mock_install_prereqs
+  mock_icm
+  mock_cmd opencode
+
+  local cfg="$TMP_HOME/.config/opencode/opencode.json"
+  mkdir -p "$(dirname "$cfg")"
+  mkdir -p "$TMP_HOME/.config/opencode/plugins"
+  # Pre-existing user content in EVERY container install touches: mcp, mode
+  # prompts, and the plugin array. Snapshot it, then require byte-for-value restore.
+  python3 -c "
+import json
+d = {
+  'mcp': {'user-tool': {'type': 'local', 'command': ['user'], 'enabled': True}},
+  'mode': {'build': {'prompt': 'USER BUILD PROMPT'}, 'plan': {'prompt': 'USER PLAN PROMPT'}},
+  'plugin': ['./plugins/user.ts'],
+}
+open('$cfg','w').write(json.dumps(d, indent=2) + '\n')
+open('$TMP_HOME/pre.json','w').write(json.dumps(d, sort_keys=True))
+"
+
+  run bash "$SCRIPTS_DIR/install.sh" --serena-only --icm-only --with-context-hooks --hosts opencode
+  [ "$status" -eq 0 ]
+
+  run bash "$SCRIPTS_DIR/uninstall.sh" --force
+  [ "$status" -eq 0 ]
+
+  python3 - "$cfg" "$TMP_HOME/pre.json" << 'PY'
+import json, sys
+after = json.load(open(sys.argv[1]))
+pre = json.loads(open(sys.argv[2]).read())
+assert after == pre, f"opencode not restored.\n after={json.dumps(after,indent=2,sort_keys=True)}\n pre={json.dumps(pre,indent=2,sort_keys=True)}"
+PY
+  # The token-diet plugin file must also be gone (install wrote it).
+  [ ! -f "$TMP_HOME/.config/opencode/plugins/token-diet-hooks.ts" ]
+}
+
+@test "symmetry: codex round-trip — uninstall removes every token-diet block, keeps user blocks" {
+  mock_install_prereqs
+  mock_icm
+  mock_cmd codex
+
+  # Pre-existing user MCP block. install APPENDS its blocks after it, so the
+  # regex removal (which stops at the next '[') can never eat user content.
+  cat > "$TMP_HOME/.codex/config.toml" << 'TOML'
+# user's own codex config
+[mcp_servers.user-tool]
+command = "user-cmd"
+args = ["--flag"]
+TOML
+
+  run bash "$SCRIPTS_DIR/install.sh" --serena-only --icm-only --hosts codex
+  [ "$status" -eq 0 ]
+  # sanity: install actually wrote token-diet's blocks
+  grep -Eq '^\[mcp_servers\.serena\]'     "$TMP_HOME/.codex/config.toml"
+  grep -Eq '^\[mcp_servers\.icm\]'        "$TMP_HOME/.codex/config.toml"
+  grep -Eq '^\[mcp_servers\.token-diet\]' "$TMP_HOME/.codex/config.toml"
+
+  run bash "$SCRIPTS_DIR/uninstall.sh" --force
+  [ "$status" -eq 0 ]
+
+  # All assertions in ONE python block (the decisive, set -e-caught last command):
+  # every token-diet block AND its orphan body lines gone; user block byte-intact.
+  python3 - "$TMP_HOME/.codex/config.toml" << 'PY'
+import re, sys
+text = open(sys.argv[1]).read()
+# No token-diet table headers survive.
+for name in ("tilth", "serena", "icm", "token-diet"):
+    assert not re.search(r'(?m)^\[mcp_servers\.%s\]' % re.escape(name), text), f"{name} header survived:\n{text}"
+# No orphaned token-diet body lines survive (the old regex left `["--from",...]`
+# and `["serve","--compact"]` arrays and stray "added by token-diet" comments).
+assert "start-mcp-server" not in text, f"orphan serena args survived:\n{text}"
+assert "serve" not in text or "compact" not in text, f"orphan icm args survived:\n{text}"
+assert "token-diet-mcp" not in text, f"token-diet command survived:\n{text}"
+assert "added by token-diet" not in text, f"token-diet comment survived:\n{text}"
+# User block intact.
+assert re.search(r'(?m)^\[mcp_servers\.user-tool\]', text), f"user block lost:\n{text}"
+assert re.search(r'(?m)^command = "user-cmd"', text), f"user command lost:\n{text}"
+assert re.search(r'(?m)^args = \["--flag"\]', text), f"user args lost:\n{text}"
+PY
+}
+
+@test "symmetry: cowork/Claude-Desktop round-trip — install then uninstall restores the config exactly" {
+  mock_install_prereqs
+  mock_cmd tilth   # cowork tilth registration is gated on check_command tilth
+
+  local cowork_dir
+  if [ "$(uname -s)" = "Darwin" ]; then
+    cowork_dir="$TMP_HOME/Library/Application Support/Claude"
+  else
+    cowork_dir="$TMP_HOME/.config/Claude"
+  fi
+  mkdir -p "$cowork_dir"
+  local cfg="$cowork_dir/claude_desktop_config.json"
+  python3 -c "
+import json
+d = {'mcpServers': {'user-server': {'command': 'keep-me'}}}
+open('$cfg','w').write(json.dumps(d, indent=2) + '\n')
+open('$TMP_HOME/pre.json','w').write(json.dumps(d, sort_keys=True))
+"
+
+  run bash "$SCRIPTS_DIR/install.sh" --serena-only --icm-only --hosts cowork
+  [ "$status" -eq 0 ]
+
+  run bash "$SCRIPTS_DIR/uninstall.sh" --force
+  [ "$status" -eq 0 ]
+
+  python3 - "$cfg" "$TMP_HOME/pre.json" << 'PY'
+import json, sys
+after = json.load(open(sys.argv[1]))
+pre = json.loads(open(sys.argv[2]).read())
+assert after == pre, f"cowork not restored.\n after={json.dumps(after,indent=2,sort_keys=True)}\n pre={json.dumps(pre,indent=2,sort_keys=True)}"
+PY
+}
+
+@test "symmetry: gemini — uninstall removes MCP keys, hooks, token-diet.md and GEMINI.md ref" {
+  # Plant the realistic post-install state the real `gemini mcp add` + context
+  # hooks + doc writer leave behind, plus unrelated user content that must survive.
+  mkdir -p "$TMP_HOME/.gemini"
+  local dcmd="$TMP_HOME/.local/bin/token-diet-hooks/docextract-pre-read.sh"
+  local ccmd="$TMP_HOME/.local/bin/token-diet-hooks/ctxwarn-post.sh"
+  python3 -c "
+import json
+d = {
+  'mcpServers': {'user-server': {'command': 'x'}, 'tilth': {}, 'serena': {}, 'icm': {}},
+  'hooks': {
+    'PreToolUse': [
+      {'matcher': '*', 'hooks': [{'type':'command','command':'echo user','timeout':5}]},
+      {'matcher': 'read_file', 'hooks': [{'type':'command','command':'$dcmd','timeout':15}]},
+    ],
+    'PostToolUse': [
+      {'matcher': '*', 'hooks': [{'type':'command','command':'$ccmd','timeout':15}]},
+    ],
+  },
+}
+open('$TMP_HOME/.gemini/settings.json','w').write(json.dumps(d, indent=2) + '\n')
+"
+  echo '# token-diet' > "$TMP_HOME/.gemini/token-diet.md"
+  printf 'user rules line\n@token-diet.md\n' > "$TMP_HOME/.gemini/GEMINI.md"
+
+  run bash "$SCRIPTS_DIR/uninstall.sh" --force
+  [ "$status" -eq 0 ]
+
+  [ ! -f "$TMP_HOME/.gemini/token-diet.md" ]
+
+  python3 - "$TMP_HOME/.gemini/settings.json" "$dcmd" "$ccmd" "$TMP_HOME/.gemini/GEMINI.md" << 'PY'
+import json, sys
+d = json.load(open(sys.argv[1]))
+dcmd, ccmd = sys.argv[2], sys.argv[3]
+gemini_md = open(sys.argv[4]).read()
+assert "@token-diet.md" not in gemini_md, "GEMINI.md still references @token-diet.md"
+assert "user rules line" in gemini_md, "GEMINI.md user content lost"
+s = d.get("mcpServers", {})
+for k in ("tilth", "serena", "icm"):
+    assert k not in s, f"gemini still has mcp {k}"
+assert "user-server" in s, "unrelated gemini server removed!"
+# token-diet hook entries gone; the user's PreToolUse/* hook survives.
+pre = d.get("hooks", {}).get("PreToolUse", [])
+post = d.get("hooks", {}).get("PostToolUse", [])
+assert not any(h.get("command") == dcmd for e in pre for h in e.get("hooks", [])), "docextract gemini hook not removed"
+assert not any(h.get("command") == ccmd for e in post for h in e.get("hooks", [])), "ctxwarn gemini hook not removed"
+assert any(h.get("command") == "echo user" for e in pre for h in e.get("hooks", [])), "user gemini hook removed!"
 PY
 }

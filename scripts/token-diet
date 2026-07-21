@@ -12,7 +12,7 @@
 
 set -euo pipefail
 
-readonly TD_VERSION="1.15.16"
+readonly TD_VERSION="1.15.17"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # --- Colors -------------------------------------------------------------------
@@ -175,15 +175,21 @@ try:
     for e in reg.get("home_configs", []):
         if e.get("format") != "json":
             continue
-        # Gemini has its own matcher below; a *settings.json path would otherwise
-        # be mis-attributed to claude-code by the substring rules.
-        if e.get("host") == "gemini":
+        # Gemini and VS Code have their own dedicated matchers below (gemini reads
+        # its config directly; vscode greps ~/.config/Code/User/settings.json).
+        # Both are attribute()d by path substring here, and VS Code's settings.json
+        # would be mis-attributed to claude-code — so skip them in the JSON scan,
+        # exactly as the registry _comment documents.
+        if e.get("host") in ("gemini", "vscode"):
             continue
         p = e.get("path")
         if p:
             paths.append(p)
-    # Legacy XDG OpenCode path, not yet represented in the registry.
-    paths.append(".config/opencode/opencode.json")
+    # XDG OpenCode path. The registry now records it (completeness invariant), but
+    # append defensively if a stale/partial registry omits it, de-duping so it is
+    # never scanned twice.
+    if ".config/opencode/opencode.json" not in paths:
+        paths.append(".config/opencode/opencode.json")
 except Exception:
     paths = [
         ".claude.json",

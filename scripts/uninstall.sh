@@ -20,12 +20,18 @@ INCLUDE_DOCKER=false
 # --- Host registry ------------------------------------------------------------
 # uninstall.sh runs from the repo (like install.sh), so it sources the shared
 # host library and reads config/hosts-mcp.json — the single source of truth for
-# where each host's config lives. This drives the MCP-removal PATH LIST for the
-# hosts whose registry entries match uninstall's historical targets exactly
-# (claude-desktop, codex). Hosts whose registry path set diverges from what
-# uninstall has always cleaned (claude-code's extra .claude.json, opencode's XDG
-# path, the VS Code home configs/template, gemini) stay explicit below; see the
-# comments at each site. The lib is optional: curl|sh installs that lack the
+# where each host's config lives. It drives the MCP-removal PATH LIST for the
+# hosts whose registry entries match uninstall's targets exactly (claude-desktop,
+# codex) via td_host_config_paths.
+#
+# Phase 5 FINAL (DECISION 2 — install/uninstall symmetry): uninstall now removes
+# EXACTLY what install writes, for EVERY host. The previously-diverging hosts
+# (claude-code's second path ~/.claude.json, opencode's XDG path, VS Code, and
+# gemini — added by install but never cleaned) are all cleaned below. Their path
+# lists stay EXPLICIT rather than registry-driven because each carries host-
+# specific cleanup beyond a flat path list (prompt-rule stripping, plugin de-
+# registration, TOML block removal, hook + doc + instruction-file removal); see
+# the comment at each site. The lib is optional: curl|sh installs that lack the
 # checkout fall back to the literal paths, preserving behavior.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
@@ -145,6 +151,36 @@ if changed:
         f.write("\n")
 PY
   ok "Removed mcp.$key from $cfg"
+}
+
+# remove_opencode_plugin <cfg_path> <relpath>
+# Removes <relpath> from the top-level "plugin" array in an OpenCode JSON config
+# (install_context_hooks registers "plugins/token-diet-hooks.ts" there). Leaves
+# all other plugins untouched and preserves the rest of the config.
+remove_opencode_plugin() {
+  local cfg="$1"
+  local relpath="$2"
+  [ -f "$cfg" ] || { miss "$cfg (plugin $relpath)"; return 0; }
+  if $DRY_RUN; then
+    dry "remove plugin $relpath from $cfg"
+    return 0
+  fi
+  python3 - "$cfg" "$relpath" << 'PY'
+import json, sys
+cfg_path, relpath = sys.argv[1], sys.argv[2]
+try:
+    with open(cfg_path) as f:
+        d = json.load(f)
+except Exception:
+    sys.exit(0)
+plugins = d.get("plugin")
+if isinstance(plugins, list) and relpath in plugins:
+    d["plugin"] = [p for p in plugins if p != relpath]
+    with open(cfg_path, "w") as f:
+        json.dump(d, f, indent=2)
+        f.write("\n")
+PY
+  ok "Removed plugin $relpath from $cfg"
 }
 
 # remove_json_key <cfg_path> <key>
@@ -343,15 +379,23 @@ main() {
     miss "cargo not found — skipping Rust binary removal"
   fi
 
-  # Kept explicit (NOT registry-driven): the registry lists TWO claude-code
-  # home_configs — .claude/settings.json AND .claude.json — but uninstall has
-  # only ever cleaned settings.json. Iterating the registry here would newly
-  # touch .claude.json (behavior expansion), so the path stays hardcoded.
+  # Symmetric with install (Phase 5 DECISION 2). The registry lists TWO
+  # claude-code home_configs and install writes to BOTH:
+  #   - ~/.claude.json         <- tilth/serena/icm via `claude mcp add --scope
+  #                               user` and `tilth install claude-code`
+  #   - ~/.claude/settings.json <- the token-diet MCP server (install_token_diet)
+  # Uninstall now cleans both (closing the 1-path/2-path asymmetry Iter 7 flagged).
+  # remove_json_key is key-scoped, so a key install never wrote to a given file is
+  # a harmless no-op and unrelated user servers are always preserved.
   echo ""
   echo -e "${BOLD}MCP registrations — Claude Code${NC}"
   remove_json_key "$HOME/.claude/settings.json" "tilth"
   remove_json_key "$HOME/.claude/settings.json" "serena"
   remove_json_key "$HOME/.claude/settings.json" "icm"
+  remove_json_key "$HOME/.claude/settings.json" "token-diet"
+  remove_json_key "$HOME/.claude.json" "tilth"
+  remove_json_key "$HOME/.claude.json" "serena"
+  remove_json_key "$HOME/.claude.json" "icm"
 
   # Both Claude Desktop paths (macOS first, Linux second) come from the registry
   # via resolve_claude_desktop_paths; the pair matches uninstall's historical
@@ -361,40 +405,62 @@ main() {
   remove_json_key "$CD_MAC" "tilth"
   remove_json_key "$CD_MAC" "serena"
   remove_json_key "$CD_MAC" "icm"
+  remove_json_key "$CD_MAC" "token-diet"
 
   echo ""
   echo -e "${BOLD}MCP registrations — Claude Desktop (Linux)${NC}"
   remove_json_key "$CD_LINUX" "tilth"
   remove_json_key "$CD_LINUX" "serena"
   remove_json_key "$CD_LINUX" "icm"
+  remove_json_key "$CD_LINUX" "token-diet"
 
-  # Kept explicit (NOT registry-driven): the registry's single opencode entry is
-  # the LEGACY .opencode.json, but install.sh writes to the XDG path
-  # .config/opencode/opencode.json — which uninstall must also clean (plus strip
-  # the prompt rules there). Registry-driving would drop the XDG path (behavior
-  # shrink). Path stays explicit until the registry records both opencode paths.
+  # Kept explicit (NOT registry-driven): the registry now records BOTH opencode
+  # paths (legacy .opencode.json + XDG .config/opencode/opencode.json), but
+  # opencode cleanup is more than a path list — it also strips the prompt rules
+  # and de-registers the plugin, both of which target only the XDG path install
+  # writes them to. Driving the mcp-key removal from the registry while the rule/
+  # plugin logic stays hardcoded would split one host's cleanup across two
+  # mechanisms, so the whole block stays explicit.
   echo ""
   echo -e "${BOLD}MCP registrations — OpenCode${NC}"
   remove_opencode_mcp_key "$HOME/.opencode.json" "tilth"
   remove_opencode_mcp_key "$HOME/.opencode.json" "serena"
   remove_opencode_mcp_key "$HOME/.opencode.json" "icm"
+  remove_opencode_mcp_key "$HOME/.opencode.json" "token-diet"
   remove_opencode_mcp_key "$HOME/.config/opencode/opencode.json" "tilth"
   remove_opencode_mcp_key "$HOME/.config/opencode/opencode.json" "serena"
   remove_opencode_mcp_key "$HOME/.config/opencode/opencode.json" "icm"
+  remove_opencode_mcp_key "$HOME/.config/opencode/opencode.json" "token-diet"
   strip_opencode_rules "$HOME/.config/opencode/opencode.json"
+  # Symmetric with install_context_hooks: it installs an OpenCode plugin file and
+  # registers its relative path in opencode.json's "plugin" array. Remove both so
+  # a user's other plugins survive and no dangling reference is left behind.
+  remove_opencode_plugin "$HOME/.config/opencode/opencode.json" "plugins/token-diet-hooks.ts"
+  remove_file "$HOME/.config/opencode/plugins/token-diet-hooks.ts"
 
-  # Kept explicit (NOT registry-driven): the registry's vscode entries are the
-  # PROJECT-scoped .vscode/mcp.json and .vscode/settings.json (project_configs),
-  # which uninstall never touches. What uninstall actually cleans is the HOME
-  # VS Code settings and the shared token-diet template — neither is in the
-  # registry. The two path sets are disjoint, so this stays hardcoded.
+  # Kept explicit (NOT registry-driven). VS Code has three distinct locations and
+  # only the home settings path is in the registry (project_configs .vscode/* are
+  # for detection only; the shared token-diet template is a token-diet-internal
+  # file, deliberately not a host config). install writes ONLY the template
+  # (install_serena/install_icm) and then instructs the user to copy it into their
+  # VS Code config. Uninstall therefore cleans the template (the file install
+  # wrote) AND, as a documented courtesy, strips the same three keys from
+  # ~/.config/Code/User/settings.json in case the user performed that manual copy —
+  # this is the one intentional "clean slightly more than install directly wrote"
+  # case. It is safe: remove_json_key is key-scoped (serena/tilth/icm only) and
+  # never touches unrelated servers. This is a superset of install's own writes by
+  # design, mirroring the manual step install documents.
   echo ""
   echo -e "${BOLD}MCP registrations — VS Code${NC}"
   remove_json_key "$HOME/.config/Code/User/settings.json" "tilth"
   remove_json_key "$HOME/.config/Code/User/settings.json" "serena"
   remove_json_key "$HOME/.config/Code/User/settings.json" "icm"
-  # ICM (and Serena/tilth) are written to the shared VS Code MCP template under
-  # the top-level "servers" key, not "mcpServers". Strip icm from it here.
+  # Serena, tilth AND icm are written to the shared VS Code MCP template under the
+  # top-level "servers" key (not "mcpServers"). install writes all three
+  # (install_serena writes serena+tilth, install_icm merges icm), so uninstall
+  # strips all three for symmetry (previously only icm was removed).
+  remove_vscode_template_server "$HOME/.config/token-diet/vscode-mcp.template.json" "serena"
+  remove_vscode_template_server "$HOME/.config/token-diet/vscode-mcp.template.json" "tilth"
   remove_vscode_template_server "$HOME/.config/token-diet/vscode-mcp.template.json" "icm"
 
   echo ""
@@ -403,29 +469,75 @@ main() {
   local codex_cfg="$CODEX_CFG_PATH"
   if [ -f "$codex_cfg" ]; then
     if $DRY_RUN; then
-      dry "remove [mcp_servers.{tilth,serena,icm}] blocks from $codex_cfg"
+      dry "remove [mcp_servers.{tilth,serena,icm,token-diet}] blocks from $codex_cfg"
     else
       python3 - "$codex_cfg" << 'PY'
 import sys, re
 path = sys.argv[1]
 with open(path) as f:
-    content = f.read()
-# Remove [mcp_servers.tilth], [mcp_servers.serena] and [mcp_servers.icm] blocks
-content = re.sub(r'\[mcp_servers\.(tilth|serena|icm)\][^\[]*', '', content, flags=re.DOTALL)
+    lines = f.read().splitlines(keepends=True)
+
+# Proper TOML-block removal (symmetric with install). The previous
+# `[^\[]*` regex stopped at the first '[' inside a block body, so an
+# `args = ["--from", ...]` line orphaned its array and the token-diet block was
+# never removed at all. Remove each token-diet table in full: its header, every
+# body line up to (but not including) the next TABLE header, and an immediately
+# preceding "added by token-diet" comment line. A table header is `[name]` on its
+# own line; an inline array literal (`["--from", ...]`) is NOT a header and stays
+# part of the body being removed. User tables are never entered, so their content
+# is preserved verbatim.
+header_re = re.compile(r'^\[[A-Za-z0-9_.\-]+\]$')            # any TOML table header
+td_re     = re.compile(r'^\[mcp_servers\.(tilth|serena|icm|token-diet)\]$')
+out, i = [], 0
+while i < len(lines):
+    if td_re.match(lines[i].strip()):
+        if out and "added by token-diet" in out[-1]:
+            out.pop()                                        # drop install's comment
+            if out and out[-1].strip() == "":
+                out.pop()                                    # and the blank before it
+        i += 1
+        while i < len(lines) and not header_re.match(lines[i].strip()):
+            i += 1
+        continue
+    out.append(lines[i])
+    i += 1
+
 with open(path, "w") as f:
-    f.write(content)
+    f.write("".join(out))
 PY
-      ok "Removed mcp_servers.{tilth,serena,icm} from $codex_cfg"
+      ok "Removed mcp_servers.{tilth,serena,icm,token-diet} from $codex_cfg"
     fi
   else
     miss "$codex_cfg"
   fi
+
+  # Symmetric with install (Phase 5 DECISION 2): install registers tilth/serena/
+  # icm for Gemini via `gemini mcp add --scope user`, which writes mcpServers
+  # entries into ~/.gemini/settings.json. Uninstall never cleaned any of them
+  # (Iter 7 gap). remove_json_key is key-scoped, so unrelated user servers stay.
+  echo ""
+  echo -e "${BOLD}MCP registrations — Gemini CLI${NC}"
+  remove_json_key "$HOME/.gemini/settings.json" "tilth"
+  remove_json_key "$HOME/.gemini/settings.json" "serena"
+  remove_json_key "$HOME/.gemini/settings.json" "icm"
 
   echo ""
   echo -e "${BOLD}Hooks and docs${NC}"
   remove_file "$HOME/.claude/hooks/rtk-rewrite.sh"
   remove_file "$HOME/.claude/token-diet.md"
   remove_file "$HOME/.codex/token-diet.md"
+  # Gemini: install writes ~/.gemini/token-diet.md (write_token-diet_md).
+  remove_file "$HOME/.gemini/token-diet.md"
+  # Cowork / Claude Desktop: install writes rtk-awareness.md (install_rtk),
+  # token-diet.md (write_token-diet_md) and awareness-docextract.md
+  # (install_context_hooks) into the Claude Desktop config directory. Clean both
+  # the macOS and Linux dirs for symmetry.
+  local _cd
+  for _cd in "$(dirname "$CD_MAC")" "$(dirname "$CD_LINUX")"; do
+    remove_file "$_cd/rtk-awareness.md"
+    remove_file "$_cd/token-diet.md"
+    remove_file "$_cd/awareness-docextract.md"
+  done
 
   echo ""
   echo -e "${BOLD}docextract / ctxwarn context hooks (--with-context-hooks)${NC}"
@@ -433,6 +545,11 @@ PY
   local ctxwarn_cmd="$HOME/.local/bin/token-diet-hooks/ctxwarn-post.sh"
   remove_hook_entry "$HOME/.claude/settings.json" "PreToolUse" "$docextract_cmd"
   remove_hook_entry "$HOME/.claude/settings.json" "PostToolUse" "$ctxwarn_cmd"
+  # Gemini CLI shares Claude Code's hooks JSON schema; install registers the same
+  # two shims (docextract under matcher "read_file", ctxwarn under "*") into
+  # ~/.gemini/settings.json. Remove them symmetrically (same command-string key).
+  remove_hook_entry "$HOME/.gemini/settings.json" "PreToolUse" "$docextract_cmd"
+  remove_hook_entry "$HOME/.gemini/settings.json" "PostToolUse" "$ctxwarn_cmd"
   if [ -d "$HOME/.local/bin/token-diet-hooks" ]; then
     if $DRY_RUN; then
       dry "rm -rf $HOME/.local/bin/token-diet-hooks"
@@ -450,6 +567,8 @@ PY
   echo -e "${BOLD}Instruction file references${NC}"
   remove_line_from_file "$HOME/.claude/CLAUDE.md"  "@token-diet.md"
   remove_line_from_file "$HOME/.codex/AGENTS.md"   "@token-diet.md"
+  # Gemini: install adds the @token-diet.md reference to ~/.gemini/GEMINI.md.
+  remove_line_from_file "$HOME/.gemini/GEMINI.md"  "@token-diet.md"
 
   echo ""
   echo -e "${BOLD}Config directories${NC}"

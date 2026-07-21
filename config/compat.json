@@ -1,8 +1,9 @@
 {
   "schema": 1,
   "tools": {
-    "rtk":   { "min": "0.23.0", "tested": "0.34.5" },
-    "tilth": { "min": "0.4.0",  "tested": "0.6.1"  },
-    "serena": { "min": "0.1.0", "tested": "0.1.5"  }
+    "rtk":    { "min": "0.23.0", "tested": "0.43.0" },
+    "tilth":  { "min": "0.4.0",  "tested": "0.9.0"  },
+    "serena": { "min": "0.1.0",  "tested": "1.5.4"  },
+    "icm":    { "min": "0.10.0", "tested": "0.10.57" }
   }
 }

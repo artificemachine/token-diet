@@ -1544,6 +1544,16 @@ install_token_diet() {
     ok "Compat data installed: $bin_dir/../config/compat.json"
   fi
 
+  # Canonical MCP-host registry. token-diet-dashboard reads
+  # $SCRIPT_DIR/../config/hosts-mcp.json at runtime; installed SCRIPT_DIR is
+  # $bin_dir, so it must land at $bin_dir/../config. Without it the dashboard's
+  # host detection has no data source (same decoupling class as compat.json).
+  if [ -f "$PROJECT_ROOT/config/hosts-mcp.json" ]; then
+    mkdir -p "$bin_dir/../config"
+    install -m644 "$PROJECT_ROOT/config/hosts-mcp.json" "$bin_dir/../config/hosts-mcp.json"
+    ok "Host registry installed: $bin_dir/../config/hosts-mcp.json"
+  fi
+
   if [ -f "$src_dash" ]; then
     install -m755 "$src_dash" "$bin_dir/token-diet-dashboard"
     ok "token-diet-dashboard installed: $bin_dir/token-diet-dashboard"

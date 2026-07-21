@@ -17,6 +17,59 @@ FORCE=false
 INCLUDE_DATA=false
 INCLUDE_DOCKER=false
 
+# --- Host registry ------------------------------------------------------------
+# uninstall.sh runs from the repo (like install.sh), so it sources the shared
+# host library and reads config/hosts-mcp.json — the single source of truth for
+# where each host's config lives. This drives the MCP-removal PATH LIST for the
+# hosts whose registry entries match uninstall's historical targets exactly
+# (claude-desktop, codex). Hosts whose registry path set diverges from what
+# uninstall has always cleaned (claude-code's extra .claude.json, opencode's XDG
+# path, the VS Code home configs/template, gemini) stay explicit below; see the
+# comments at each site. The lib is optional: curl|sh installs that lack the
+# checkout fall back to the literal paths, preserving behavior.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+if [ -f "$SCRIPT_DIR/lib/hosts.sh" ]; then
+  # shellcheck source=lib/hosts.sh
+  . "$SCRIPT_DIR/lib/hosts.sh"
+fi
+TD_HOSTS_MCP_REGISTRY="${TD_HOSTS_MCP_REGISTRY:-$PROJECT_ROOT/config/hosts-mcp.json}"
+
+# Default (fallback) paths — used verbatim when the registry/lib is unavailable
+# or yields an unexpected count. Registry order is macOS first, Linux second.
+CD_MAC="$HOME/Library/Application Support/Claude/claude_desktop_config.json"
+CD_LINUX="$HOME/.config/Claude/claude_desktop_config.json"
+CODEX_CFG_PATH="$HOME/.codex/config.toml"
+
+# resolve_claude_desktop_paths — source the two Claude Desktop config paths from
+# the registry (host="claude-desktop"). Mirrors install.sh's resolve_cowork_cfg:
+# only adopt the registry pair when it yields exactly two paths, else keep the
+# literal fallback so behavior is preserved without a checkout.
+resolve_claude_desktop_paths() {
+  command -v td_host_config_paths >/dev/null 2>&1 || return 0
+  local reg_paths=() _p
+  while IFS= read -r _p; do
+    [ -n "$_p" ] && reg_paths+=("$HOME/$_p")
+  done < <(td_host_config_paths "$TD_HOSTS_MCP_REGISTRY" claude-desktop)
+  if [ "${#reg_paths[@]}" -eq 2 ]; then
+    CD_MAC="${reg_paths[0]}"
+    CD_LINUX="${reg_paths[1]}"
+  fi
+}
+
+# resolve_codex_path — source the single Codex config path from the registry
+# (host="codex"). Adopt the registry path only when it yields exactly one entry.
+resolve_codex_path() {
+  command -v td_host_config_paths >/dev/null 2>&1 || return 0
+  local reg_paths=() _p
+  while IFS= read -r _p; do
+    [ -n "$_p" ] && reg_paths+=("$HOME/$_p")
+  done < <(td_host_config_paths "$TD_HOSTS_MCP_REGISTRY" codex)
+  if [ "${#reg_paths[@]}" -eq 1 ]; then
+    CODEX_CFG_PATH="${reg_paths[0]}"
+  fi
+}
+
 # --- Colors -------------------------------------------------------------------
 if [ -t 1 ]; then
   GREEN='\033[0;32m'; YELLOW='\033[1;33m'; RED='\033[0;31m'
@@ -236,6 +289,9 @@ confirm() {
 
 # --- Main ---------------------------------------------------------------------
 main() {
+  resolve_claude_desktop_paths
+  resolve_codex_path
+
   echo -e "\n${BOLD}token-diet uninstall${NC}\n"
 
   if $DRY_RUN; then
@@ -287,24 +343,36 @@ main() {
     miss "cargo not found — skipping Rust binary removal"
   fi
 
+  # Kept explicit (NOT registry-driven): the registry lists TWO claude-code
+  # home_configs — .claude/settings.json AND .claude.json — but uninstall has
+  # only ever cleaned settings.json. Iterating the registry here would newly
+  # touch .claude.json (behavior expansion), so the path stays hardcoded.
   echo ""
   echo -e "${BOLD}MCP registrations — Claude Code${NC}"
   remove_json_key "$HOME/.claude/settings.json" "tilth"
   remove_json_key "$HOME/.claude/settings.json" "serena"
   remove_json_key "$HOME/.claude/settings.json" "icm"
 
+  # Both Claude Desktop paths (macOS first, Linux second) come from the registry
+  # via resolve_claude_desktop_paths; the pair matches uninstall's historical
+  # targets exactly, so this is byte-identical with the production registry.
   echo ""
   echo -e "${BOLD}MCP registrations — Claude Desktop (macOS)${NC}"
-  remove_json_key "$HOME/Library/Application Support/Claude/claude_desktop_config.json" "tilth"
-  remove_json_key "$HOME/Library/Application Support/Claude/claude_desktop_config.json" "serena"
-  remove_json_key "$HOME/Library/Application Support/Claude/claude_desktop_config.json" "icm"
+  remove_json_key "$CD_MAC" "tilth"
+  remove_json_key "$CD_MAC" "serena"
+  remove_json_key "$CD_MAC" "icm"
 
   echo ""
   echo -e "${BOLD}MCP registrations — Claude Desktop (Linux)${NC}"
-  remove_json_key "$HOME/.config/Claude/claude_desktop_config.json" "tilth"
-  remove_json_key "$HOME/.config/Claude/claude_desktop_config.json" "serena"
-  remove_json_key "$HOME/.config/Claude/claude_desktop_config.json" "icm"
+  remove_json_key "$CD_LINUX" "tilth"
+  remove_json_key "$CD_LINUX" "serena"
+  remove_json_key "$CD_LINUX" "icm"
 
+  # Kept explicit (NOT registry-driven): the registry's single opencode entry is
+  # the LEGACY .opencode.json, but install.sh writes to the XDG path
+  # .config/opencode/opencode.json — which uninstall must also clean (plus strip
+  # the prompt rules there). Registry-driving would drop the XDG path (behavior
+  # shrink). Path stays explicit until the registry records both opencode paths.
   echo ""
   echo -e "${BOLD}MCP registrations — OpenCode${NC}"
   remove_opencode_mcp_key "$HOME/.opencode.json" "tilth"
@@ -315,6 +383,11 @@ main() {
   remove_opencode_mcp_key "$HOME/.config/opencode/opencode.json" "icm"
   strip_opencode_rules "$HOME/.config/opencode/opencode.json"
 
+  # Kept explicit (NOT registry-driven): the registry's vscode entries are the
+  # PROJECT-scoped .vscode/mcp.json and .vscode/settings.json (project_configs),
+  # which uninstall never touches. What uninstall actually cleans is the HOME
+  # VS Code settings and the shared token-diet template — neither is in the
+  # registry. The two path sets are disjoint, so this stays hardcoded.
   echo ""
   echo -e "${BOLD}MCP registrations — VS Code${NC}"
   remove_json_key "$HOME/.config/Code/User/settings.json" "tilth"
@@ -326,7 +399,8 @@ main() {
 
   echo ""
   echo -e "${BOLD}Codex TOML — MCP block removal${NC}"
-  local codex_cfg="$HOME/.codex/config.toml"
+  # Registry-driven (host="codex", single path) via resolve_codex_path.
+  local codex_cfg="$CODEX_CFG_PATH"
   if [ -f "$codex_cfg" ]; then
     if $DRY_RUN; then
       dry "remove [mcp_servers.{tilth,serena,icm}] blocks from $codex_cfg"

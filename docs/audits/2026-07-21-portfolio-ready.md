@@ -1,10 +1,10 @@
-# Job-Ready Audit — token-diet
+# Portfolio-Ready Audit — token-diet
 **Date:** 2026-07-21
 **Mode:** `--budget` (full 9 stages; Stages 5-8 condensed inline)
 **Repo:** github.com/artificemachine/token-diet (PUBLIC, MIT, default branch `main`)
 **Auditor:** Claude Code (Opus 4.8)
 
-Verdict cap for this run: **NEEDS POLISH** — `--budget` runs Stages 5-8 condensed, and a condensed pass cannot certify absence, so HIRE-READY is not reachable without a full run.
+Verdict cap for this run: **NEEDS POLISH** — `--budget` runs Stages 5-8 condensed, and a condensed pass cannot certify absence, so PUBLIC-READY is not reachable without a full run.
 
 ---
 
@@ -197,7 +197,7 @@ Execute nothing here without explicit per-operation approval.
 
 ---
 
-# Job-Ready Scorecard — token-diet
+# Portfolio-Ready Scorecard — token-diet
 **Date:** 2026-07-21
 
 | # | Stage | Verdict | Blockers |
@@ -213,7 +213,7 @@ Execute nothing here without explicit per-operation approval.
 
 ## Verdict: NEEDS POLISH
 
-No hard gate fails: no live secret, tests pass from a fresh clone, LICENSE present, quickstart works, no dependency CVEs, no security-stage failure. The verdict is **NEEDS POLISH**, not HIRE-READY, for two reasons: `--budget` ran Stages 5-8 condensed (a condensed pass cannot certify absence), and Stage 8 has open claim-drift findings. Re-run Stages 5-8 at full depth to reach for HIRE-READY.
+No hard gate fails: no live secret, tests pass from a fresh clone, LICENSE present, quickstart works, no dependency CVEs, no security-stage failure. The verdict is **NEEDS POLISH**, not PUBLIC-READY, for two reasons: `--budget` ran Stages 5-8 condensed (a condensed pass cannot certify absence), and Stage 8 has open claim-drift findings. Re-run Stages 5-8 at full depth to reach for PUBLIC-READY.
 
 ## Top 5 fixes by interview impact
 1. **Fix the GitHub description** — it's the first line every reviewer reads, and it currently violates the project's own no-combined-percentage rule. One-line edit, highest visibility. (Stage 1/8)
@@ -244,11 +244,11 @@ All fixable findings from the audit above were closed in this session:
 - 3 stale remote branches (LOW): merge status unverifiable (squash-merge trap, no PRs on record); deleting unconfirmed branches is destructive, left for human judgment.
 - RTK dead-code lint under `-D warnings` (release-gate warning): in the **pinned** RTK fork's own lint config, cwd-independent, release binary unaffected. Out of token-diet scope; fix belongs in `artificemachine/rtk`.
 
-## Revised verdict: NEEDS POLISH → substantively job-ready; label capped by audit depth only
+## Revised verdict: NEEDS POLISH → substantively portfolio-ready; label capped by audit depth only
 
-Every hard gate passes and **every MEDIUM finding is resolved**. The remaining open items are all LOW and either immutable (history) or out-of-repo (pinned fork lint). The only thing between this and a HIRE-READY *label* is that Stages 5-8 ran `[condensed]` under `--budget`: a condensed pass cannot certify absence. The repo itself has no open defect above LOW.
+Every hard gate passes and **every MEDIUM finding is resolved**. The remaining open items are all LOW and either immutable (history) or out-of-repo (pinned fork lint). The only thing between this and a PUBLIC-READY *label* is that Stages 5-8 ran `[condensed]` under `--budget`: a condensed pass cannot certify absence. The repo itself has no open defect above LOW.
 
-**To flip the label to HIRE-READY:** re-run Stages 5-8 at full depth (`/gauntlet`, `/arch-audit`, `/ci-gate`, `/bulletproof`). These re-certify; they do not change the repo, which is already fixed. Recommended as a focused fresh-session run rather than at the tail of this one.
+**To flip the label to PUBLIC-READY:** re-run Stages 5-8 at full depth (`/gauntlet`, `/arch-audit`, `/ci-gate`, `/bulletproof`). These re-certify; they do not change the repo, which is already fixed. Recommended as a focused fresh-session run rather than at the tail of this one.
 
 ---
 
@@ -293,7 +293,7 @@ Seven of eight stages PASS at full depth; every MEDIUM finding from the original
 1. **Config-path drift** is Phase 5 iterations 3-9. `PLAN-phase5-host-registry.md` explicitly warns against doing it in a long session (highest-blast-radius file; "this warning has survived four handoffs"). Attempting it at the tail of this session is how a silent desync becomes a silent break.
 2. **Default-install non-pinning** is a product/design decision: pinning changes update semantics for every user. That is the operator's call, not an autonomous fix.
 
-Neither is a "the software is broken" defect — both are robustness/maturity gaps in an otherwise senior-grade repo. HIRE-READY (LOW-only) is reachable, but only via a dedicated Phase 5 continuation session and an explicit decision on install pinning — not more tail-end edits.
+Neither is a "the software is broken" defect — both are robustness/maturity gaps in an otherwise senior-grade repo. PUBLIC-READY (LOW-only) is reachable, but only via a dedicated Phase 5 continuation session and an explicit decision on install pinning — not more tail-end edits.
 
 ---
 
@@ -305,11 +305,11 @@ Neither is a "the software is broken" defect — both are robustness/maturity ga
 
 ## Revised final verdict: NEEDS WORK (one accepted, deferred HIGH)
 
-With HIGH #2 fixed, the only open blocker is HIGH #1, which the operator has explicitly deferred to a dedicated Phase 5 session. Every other finding across all 8 stages is resolved or LOW. The repo is HIRE-READY in substance except for the one architectural refactor that cannot responsibly be done at the tail of this session — and that deferral is now a documented decision, not an oversight.
+With HIGH #2 fixed, the only open blocker is HIGH #1, which the operator has explicitly deferred to a dedicated Phase 5 session. Every other finding across all 8 stages is resolved or LOW. The repo is PUBLIC-READY in substance except for the one architectural refactor that cannot responsibly be done at the tail of this session — and that deferral is now a documented decision, not an oversight.
 
 ---
 
-# FINAL — HIRE-READY (2026-07-21, both HIGH findings closed)
+# FINAL — PUBLIC-READY (2026-07-21, both HIGH findings closed)
 
 After the operator lifted the deferral, HIGH #1 was closed across 6 iterations
 (#61-#66) and HIGH #2 was closed (#60). An **independent arch re-audit** (fresh
@@ -339,7 +339,7 @@ agent, code-evidence, not claims) confirms:
 | 7 | CI governance | PASS |
 | 8 | Claims vs reality | PASS |
 
-## Verdict: HIRE-READY
+## Verdict: PUBLIC-READY
 
 Every stage PASS at full depth; all remaining findings are LOW. The only open
 item is a pre-existing LOW nit: the JSON/TOML config removers rewrite in place

@@ -1,13 +1,13 @@
-# PLAN — token-diet to production-ready / job-ready
+# PLAN — token-diet to production-ready / portfolio-ready
 
-**Source:** `docs/audits/2026-07-20-job-ready.md` (verdict: NOT READY, 8 stages, 32 findings)
+**Source:** `docs/audits/2026-07-20-portfolio-ready.md` (verdict: NOT READY, 8 stages, 32 findings)
 **Created:** 2026-07-20
 **Status:** not started
 
 Every phase is independently shippable, has its own tests, and ends green.
 Designed to be resumable across sessions and executable with `/plan-implement`.
 
-Phases 1 to 4 get to **job-ready**. Phase 5 is what makes it genuinely
+Phases 1 to 4 get to **portfolio-ready**. Phase 5 is what makes it genuinely
 **production-ready** and is the strongest senior signal. Phase 6 is cosmetic.
 
 Do not reorder 1 and 2. Phase 1 closes a public-data gate; phase 2 fixes a

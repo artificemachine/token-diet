@@ -1,7 +1,7 @@
-# Job-Ready Scorecard — token-diet
+# Portfolio-Ready Scorecard — token-diet
 **Date:** 2026-07-20
 **Commit:** 2877862 (main)
-**Auditor:** /job-ready pipeline (audit-only, nothing modified or committed)
+**Auditor:** /portfolio-ready pipeline (audit-only, nothing modified or committed)
 
 | # | Stage | Verdict | Blockers |
 |---|-------|---------|----------|

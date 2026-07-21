@@ -1589,3 +1589,70 @@ JSON
   [[ "$output" == *"sentinel-cowork/"*"-desktop.json"* ]]
   [[ "$output" != *"Library/Application Support/Claude/claude_desktop_config.json"* ]]
 }
+
+# ---------------------------------------------------------------------------
+# Cycle 7.x — uninstall.sh: MCP-removal path list driven from hosts-mcp.json
+# (Phase 5 Iteration 7 — converge the last hard config-path-drift consumer)
+# ---------------------------------------------------------------------------
+
+@test "uninstall.sh derives Claude Desktop MCP-removal paths from the registry" {
+  # A registry whose claude-desktop macOS path only the registry knows about.
+  local reg="$TMP_HOME/hosts-mcp.json"
+  cat > "$reg" <<'JSON'
+{ "home_configs": [
+  { "path": ".claude/settings.json",                     "host": "claude-code",    "format": "json" },
+  { "path": "sentinel-desktop/mac.json",                 "host": "claude-desktop", "format": "json" },
+  { "path": ".config/Claude/claude_desktop_config.json", "host": "claude-desktop", "format": "json" },
+  { "path": ".codex/config.toml",                        "host": "codex",          "format": "text" }
+]}
+JSON
+  # Plant the sentinel desktop config so its removal prints a dry line.
+  mkdir -p "$TMP_HOME/sentinel-desktop"
+  echo '{"mcpServers":{"icm":{"command":"icm"}}}' > "$TMP_HOME/sentinel-desktop/mac.json"
+
+  TD_HOSTS_MCP_REGISTRY="$reg" run bash "$SCRIPTS_DIR/uninstall.sh" --dry-run --force
+  [ "$status" -eq 0 ]
+  # The macOS Claude Desktop removal must target the registry path, not the
+  # hardcoded Library/... default.
+  [[ "$output" == *"sentinel-desktop/mac.json"* ]]
+  [[ "$output" != *"Library/Application Support/Claude/claude_desktop_config.json"* ]]
+}
+
+@test "uninstall.sh derives the Codex MCP-removal path from the registry" {
+  local reg="$TMP_HOME/hosts-mcp.json"
+  cat > "$reg" <<'JSON'
+{ "home_configs": [
+  { "path": ".claude/settings.json", "host": "claude-code", "format": "json" },
+  { "path": "sentinel-codex/cfg.toml", "host": "codex", "format": "text" }
+]}
+JSON
+  mkdir -p "$TMP_HOME/sentinel-codex"
+  printf '[mcp_servers.icm]\ncommand = "icm"\n' > "$TMP_HOME/sentinel-codex/cfg.toml"
+
+  TD_HOSTS_MCP_REGISTRY="$reg" run bash "$SCRIPTS_DIR/uninstall.sh" --dry-run --force
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"sentinel-codex/cfg.toml"* ]]
+  [[ "$output" != *".codex/config.toml"* ]]
+}
+
+@test "uninstall.sh does NOT clean .claude.json or gemini (registry mismatch preserved)" {
+  # Registry lists .claude.json (claude-code) and .gemini/settings.json (gemini),
+  # but uninstall historically never cleaned either. Converging the path list
+  # must NOT start cleaning them.
+  echo '{"mcpServers":{"icm":{"command":"icm"}}}' > "$TMP_HOME/.claude.json"
+  mkdir -p "$TMP_HOME/.gemini"
+  echo '{"mcpServers":{"icm":{"command":"icm"}}}' > "$TMP_HOME/.gemini/settings.json"
+
+  run bash "$SCRIPTS_DIR/uninstall.sh" --force
+  [ "$status" -eq 0 ]
+
+  # Both files must retain their icm entry — uninstall never touches them.
+  python3 - "$TMP_HOME/.claude.json" << 'PY'
+import json, sys
+assert "icm" in json.load(open(sys.argv[1])).get("mcpServers", {}), ".claude.json icm removed!"
+PY
+  python3 - "$TMP_HOME/.gemini/settings.json" << 'PY'
+import json, sys
+assert "icm" in json.load(open(sys.argv[1])).get("mcpServers", {}), "gemini icm removed!"
+PY
+}

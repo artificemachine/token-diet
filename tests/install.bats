@@ -1369,6 +1369,50 @@ PY
 }
 
 # ---------------------------------------------------------------------------
+# Cycle 10b — the canonical MCP-host registry must survive installation
+#
+# token-diet-dashboard reads config/hosts-mcp.json at $SCRIPT_DIR/../config/.
+# Installed SCRIPT_DIR is $HOME/.local/bin, so the file must land at
+# $HOME/.local/config/hosts-mcp.json or host detection has no data source on
+# every installed system. Same decoupling-omission class as compat.json.
+# ---------------------------------------------------------------------------
+
+@test "install: hosts-mcp.json is copied so the installed dashboard has host data" {
+  mock_install_prereqs
+  mock_icm
+  mock_cmd claude
+
+  run bash "$SCRIPTS_DIR/install.sh" --icm-only
+  [ "$status" -eq 0 ]
+
+  # Dashboard reads $SCRIPT_DIR/../config/hosts-mcp.json; installed SCRIPT_DIR is
+  # $HOME/.local/bin, so the file must land at $HOME/.local/config/hosts-mcp.json.
+  [ -f "$TMP_HOME/.local/config/hosts-mcp.json" ]
+
+  # It must carry the six-host set, not be empty — prove the dashboard can read it.
+  run python3 -c "import json;print(len(json.load(open('$TMP_HOME/.local/config/hosts-mcp.json'))['all_hosts']))"
+  [ "$status" -eq 0 ]
+  [ "$output" = "6" ]
+
+  # The MCP-key dialect order must be present.
+  run python3 -c "import json;print(json.load(open('$TMP_HOME/.local/config/hosts-mcp.json'))['mcp_key_dialect'][0])"
+  [ "$output" = "mcpServers" ]
+}
+
+@test "uninstall: removes the installed hosts-mcp.json" {
+  mock_install_prereqs
+  mock_icm
+  mock_cmd claude
+  run bash "$SCRIPTS_DIR/install.sh" --icm-only
+  [ "$status" -eq 0 ]
+  [ -f "$TMP_HOME/.local/config/hosts-mcp.json" ]
+
+  run bash "$SCRIPTS_DIR/uninstall.sh" --force
+  [ "$status" -eq 0 ]
+  [ ! -f "$TMP_HOME/.local/config/hosts-mcp.json" ]
+}
+
+# ---------------------------------------------------------------------------
 # Cycle 11 — the default (network) install pins to the audited fork revisions
 #
 # The default install ran `cargo install --git <repo> --force` and

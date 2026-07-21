@@ -113,62 +113,85 @@ def _get_last_project():
         except: pass
     return pathlib.Path.cwd()
 
+def _host_registry_path():
+    """Locate the canonical MCP-host registry (config/hosts-mcp.json).
+
+    Dev checkout: <repo>/config/hosts-mcp.json (relative to this script).
+    Installed: $SCRIPT_DIR/../config/hosts-mcp.json → ~/.local/config/..., which
+    install.sh copies alongside the binary. Strict Installation Decoupling means
+    the installed dashboard must NOT read from the repo path — hence a per-
+    location fallback rather than one hardcoded path.
+    """
+    candidates = [
+        pathlib.Path(__file__).parent.parent / "config" / "hosts-mcp.json",
+        pathlib.Path.cwd() / "config" / "hosts-mcp.json",
+    ]
+    for p in candidates:
+        if p.exists():
+            return p
+    return candidates[0]
+
+
+def _load_host_registry():
+    """Read the canonical host registry. Loaded fresh (tiny file) so tests can
+    repoint _host_registry_path without stale caching."""
+    return json.loads(_host_registry_path().read_text())
+
+
 def _registered_hosts(tool):
+    reg = _load_host_registry()
+    dialect = reg["mcp_key_dialect"]
     found = []
     home = pathlib.Path.home()
-    candidates = [
-        (home / ".claude" / "settings.json", "claude-code"),
-        (home / ".claude.json", "claude-code"),
-        (home / "Library/Application Support/Claude/claude_desktop_config.json", "claude-desktop"),
-        (home / ".config/Claude/claude_desktop_config.json", "claude-desktop"),
-        (home / ".opencode.json", "opencode"),
-        (home / ".gemini" / "settings.json", "gemini"),
-        (home / ".codex" / "config.toml", "codex"),
-    ]
-    for path, label in candidates:
+    for entry in reg["home_configs"]:
+        path = home / entry["path"]
         if not path.exists(): continue
         try:
             content = path.read_text()
-            if path.suffix == ".json":
+            if entry["format"] == "json":
                 d = json.loads(content)
-                servers = d.get("mcpServers", {}) or d.get("mcp", {}) or d.get("servers", {})
-                if any(tool in k.lower() for k in servers): found.append(label)
+                servers = {}
+                for key in dialect:
+                    servers = d.get(key, {})
+                    if servers: break
+                if any(tool in k.lower() for k in servers): found.append(entry["host"])
             elif tool in content.lower():
-                found.append(label)
+                found.append(entry["host"])
         except: pass
 
-    # Walk up from last project to find .vscode/mcp.json
-    curr = _get_last_project()
-    while True:
-        vscode = curr / ".vscode" / "mcp.json"
-        if vscode.exists() and tool in vscode.read_text().lower():
-            found.append("vscode")
-            break
-        vset = curr / ".vscode" / "settings.json"
-        if vset.exists() and tool in vset.read_text().lower():
-            found.append("vscode")
-            break
-        if curr == home or curr == curr.parent: break
-        curr = curr.parent
+    # Walk up from last project to find project-scoped config (e.g. VS Code).
+    project_configs = reg.get("project_configs", [])
+    if project_configs:
+        curr = _get_last_project()
+        while True:
+            matched = False
+            for entry in project_configs:
+                p = curr / entry["path"]
+                if p.exists() and tool in p.read_text().lower():
+                    found.append(entry["host"])
+                    matched = True
+                    break
+            if matched: break
+            if curr == home or curr == curr.parent: break
+            curr = curr.parent
 
     return list(dict.fromkeys(found))
 
-_ALL_HOSTS = ["claude-code", "claude-desktop", "opencode", "codex", "vscode", "gemini"]
 
 def _missing_hosts(tool):
-    reg = _registered_hosts(tool)
-    missing = [h for h in _ALL_HOSTS if h not in reg]
+    reg = _load_host_registry()
+    all_hosts = reg["all_hosts"]
+    presence = reg["presence"]
+    registered = _registered_hosts(tool)
+    missing = [h for h in all_hosts if h not in registered]
     home = pathlib.Path.home()
     really_missing = []
     for m in missing:
-        exists = False
-        if m == "claude-code": exists = (home / ".claude").exists() or (home / ".claude.json").exists()
-        elif m == "claude-desktop": exists = (home / "Library/Application Support/Claude").exists() or (home / ".config/Claude").exists()
-        elif m == "opencode": exists = (home / ".opencode.json").exists()
-        elif m == "vscode": exists = (_get_last_project() / ".vscode").exists()
-        elif m == "gemini": exists = (home / ".gemini").exists()
-        elif m == "codex": exists = (home / ".codex").exists()
-        if exists: really_missing.append(m)
+        spec = presence.get(m)
+        if not spec: continue
+        base = home if spec.get("base", "home") == "home" else _get_last_project()
+        if any((base / rel).exists() for rel in spec["paths"]):
+            really_missing.append(m)
     return really_missing
 
 def _read_budget_file(path):

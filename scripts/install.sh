@@ -365,13 +365,28 @@ detect_hosts() {
   { [ -f "$COWORK_CFG" ] || check_command claude-desktop; } && HAS_COWORK=true
   check_command gemini && HAS_GEMINI=true
 
-  if $HAS_CLAUDE;   then ok "Claude Code ..... found"; else warn "Claude Code ..... not found"; fi
-  if $HAS_CODEX;    then ok "Codex CLI ....... found"; else warn "Codex CLI ....... not found"; fi
-  if $HAS_OPENCODE; then ok "OpenCode ........ found"; else warn "OpenCode ........ not found"; fi
-  if $HAS_COPILOT;  then ok "Copilot CLI ..... found"; else warn "Copilot CLI ..... not found"; fi
-  if $HAS_VSCODE;   then ok "VS Code ......... found"; else warn "VS Code ......... not found"; fi
-  if $HAS_COWORK;   then ok "Cowork (Desktop)  found"; else warn "Cowork (Desktop)  not found"; fi
-  if $HAS_GEMINI;   then ok "Gemini CLI ...... found"; else warn "Gemini CLI ...... not found"; fi
+  # Report detection status by looping the host registry (lib/hosts.sh) instead
+  # of seven hardcoded lines. Output must stay byte-identical: each label is
+  # padded with dots to a fixed column so the "found"/"not found" verbs align.
+  # The longest label, "Cowork (Desktop)" (16 chars), carries zero dots and its
+  # two surrounding spaces produce the observed "Cowork (Desktop)  found"; every
+  # shorter label gets (16 - len) dots. Labels contain spaces, so read them
+  # line-by-line, not word-split.
+  local _slug _label _dots _n _dslugs=() _dlabels=()
+  while IFS= read -r _slug;  do _dslugs+=("$_slug");   done < <(td_host_slugs)
+  while IFS= read -r _label; do _dlabels+=("$_label"); done < <(td_host_labels)
+  for i in "${!_dslugs[@]}"; do
+    _slug="${_dslugs[$i]}"
+    _label="${_dlabels[$i]}"
+    _n=$(( 16 - ${#_label} ))
+    _dots=""
+    while [ "$_n" -gt 0 ]; do _dots="${_dots}."; _n=$(( _n - 1 )); done
+    if [ "$(_host_is_set "$_slug")" = "true" ]; then
+      ok "$_label $_dots found"
+    else
+      warn "$_label $_dots not found"
+    fi
+  done
 
   if ! $HAS_CLAUDE && ! $HAS_CODEX && ! $HAS_OPENCODE && ! $HAS_COPILOT && ! $HAS_VSCODE && ! $HAS_COWORK && ! $HAS_GEMINI; then
     warn "No AI host detected. Tools installed but integrations skipped."

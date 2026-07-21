@@ -121,8 +121,12 @@ if $DO_TESTS; then
     record_warn "RTK clippy warnings — review before release"
   fi
 
+  # From the fork's own dir: fork tests use relative fixture paths and fail
+  # under `--manifest-path` from the repo root (tilth: 13 cwd-dependent tests
+  # fail from root, all pass from the fork dir). Running from root made the
+  # gate report phantom failures.
   info "Running RTK tests..."
-  if cargo test --manifest-path "$FORKS/rtk/Cargo.toml" 2>&1 | tee /tmp/rtk-test.log | tail -5; then
+  if ( cd "$FORKS/rtk" && cargo test 2>&1 ) | tee /tmp/rtk-test.log | tail -5; then
     if grep -q "FAILED\|error\[" /tmp/rtk-test.log; then
       record_warn "RTK test failures — check /tmp/rtk-test.log"
     else
@@ -142,7 +146,7 @@ if $DO_TESTS; then
   fi
 
   info "Running tilth tests..."
-  if cargo test --manifest-path "$FORKS/tilth/Cargo.toml" 2>&1 | tee /tmp/tilth-test.log | tail -5; then
+  if ( cd "$FORKS/tilth" && cargo test 2>&1 ) | tee /tmp/tilth-test.log | tail -5; then
     if grep -q "FAILED\|error\[" /tmp/tilth-test.log; then
       record_warn "tilth test failures — check /tmp/tilth-test.log"
     else

@@ -132,8 +132,11 @@ if $BUILD_RTK; then
 
   # Run tests. Non-fatal: a fork's failing tests must not abort the builds of
   # the forks after it. Report the real result rather than a blanket "passed".
+  # Run from the fork's own directory: many fork tests use relative fixture
+  # paths and fail when cargo is invoked with --manifest-path from the repo
+  # root (tilth: 13 cwd-dependent tests fail from root, 0 from the fork dir).
   info "Running RTK tests..."
-  if cargo test --manifest-path "$FORKS_DIR/rtk/Cargo.toml" 2>&1 | tail -5; then
+  if ( cd "$FORKS_DIR/rtk" && cargo test 2>&1 | tail -5 ); then
     ok "RTK tests passed"
   else
     warn "RTK tests failed (non-fatal for build) — review before release"
@@ -170,9 +173,9 @@ if $BUILD_TILTH; then
     fail "tilth binary not found at $BINARY"
   fi
 
-  # Run tests. Non-fatal (see RTK block).
+  # Run tests. Non-fatal, from the fork's own dir (see RTK block).
   info "Running tilth tests..."
-  if cargo test --manifest-path "$FORKS_DIR/tilth/Cargo.toml" 2>&1 | tail -5; then
+  if ( cd "$FORKS_DIR/tilth" && cargo test 2>&1 | tail -5 ); then
     ok "tilth tests passed"
   else
     warn "tilth tests failed (non-fatal for build) — review before release"
@@ -214,10 +217,10 @@ if $BUILD_ICM; then
     fail "ICM binary not found at $BINARY"
   fi
 
-  # Run tests (icm-cli crate, matching the feature flags we shipped). Non-fatal
-  # (see RTK block).
+  # Run tests (icm-cli crate, matching the feature flags we shipped). Non-fatal,
+  # from the crate's own dir (see RTK block).
   info "Running ICM tests..."
-  if cargo test $ICM_FEATURE_FLAGS --manifest-path "$FORKS_DIR/icm/crates/icm-cli/Cargo.toml" 2>&1 | tail -5; then
+  if ( cd "$FORKS_DIR/icm/crates/icm-cli" && cargo test $ICM_FEATURE_FLAGS 2>&1 | tail -5 ); then
     ok "ICM tests passed"
   else
     warn "ICM tests failed (non-fatal for build) — review before release"

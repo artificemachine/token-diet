@@ -1489,6 +1489,16 @@ install_token_diet() {
     ok "Shell libs installed: $shell_lib_count file(s) in $bin_dir/lib/"
   fi
 
+  # Version-compat gate data. token-diet reads $SCRIPT_DIR/../config/compat.json;
+  # installed SCRIPT_DIR is $bin_dir, so this must land at $bin_dir/../config.
+  # Without it _compat_min falls back to "0.0.0" and the entire gate is a dead
+  # no-op on every installed system — it only ever worked from the dev checkout.
+  if [ -f "$PROJECT_ROOT/config/compat.json" ]; then
+    mkdir -p "$bin_dir/../config"
+    install -m644 "$PROJECT_ROOT/config/compat.json" "$bin_dir/../config/compat.json"
+    ok "Compat data installed: $bin_dir/../config/compat.json"
+  fi
+
   if [ -f "$src_dash" ]; then
     install -m755 "$src_dash" "$bin_dir/token-diet-dashboard"
     ok "token-diet-dashboard installed: $bin_dir/token-diet-dashboard"

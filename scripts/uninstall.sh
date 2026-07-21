@@ -260,6 +260,8 @@ main() {
   else
     miss "$HOME/.local/bin/lib"
   fi
+  # Version-compat data the installer copies to ~/.local/config/compat.json.
+  remove_file "$HOME/.local/config/compat.json"
   # Symlinks the installer leaves in ~/.local/bin (→ ~/.cargo/bin/<tool>).
   # The install step creates these for rtk, tilth and icm but earlier uninstall
   # versions only ran `cargo uninstall`, orphaning the symlinks. Remove them here.

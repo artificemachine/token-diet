@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="430" viewBox="0 0 760 430" xml:space="preserve" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="14.5">
+  <defs>
+    <clipPath id="round"><rect width="760" height="430" rx="10"/></clipPath>
+  </defs>
+  <g clip-path="url(#round)">
+    <rect width="760" height="430" fill="#1e1e2e"/>
+    <rect width="760" height="40" fill="#181825"/>
+    <circle cx="24" cy="20" r="6" fill="#f38ba8"/>
+    <circle cx="46" cy="20" r="6" fill="#f9e2af"/>
+    <circle cx="68" cy="20" r="6" fill="#a6e3a1"/>
+    <text x="380" y="25" fill="#6c7086" text-anchor="middle" font-size="13">token-diet gain</text>
+
+    <text x="24" y="72"><tspan fill="#a6e3a1">$</tspan><tspan fill="#cdd6f4"> token-diet gain</tspan></text>
+
+    <text x="24" y="112" fill="#89b4fa">RTK — command output compression (tracked)</text>
+    <text x="24" y="132" fill="#45475a">──────────────────────────────────────────────────</text>
+    <text x="40" y="156"><tspan fill="#bac2de">Commands filtered:</tspan><tspan fill="#cdd6f4">     200194</tspan></text>
+    <text x="40" y="178"><tspan fill="#bac2de">Tokens in:</tspan><tspan fill="#cdd6f4">             110.2M</tspan></text>
+    <text x="40" y="200"><tspan fill="#bac2de">Tokens saved:</tspan><tspan fill="#a6e3a1">          92.5M  (83.9%)</tspan></text>
+    <text x="40" y="222"><tspan fill="#bac2de">Exec time:</tspan><tspan fill="#cdd6f4">             157h 2m</tspan></text>
+    <text x="40" y="244"><tspan fill="#bac2de">Efficiency:  </tspan><tspan fill="#a6e3a1">████████████████</tspan><tspan fill="#45475a">░░░░</tspan><tspan fill="#a6e3a1">  83.9%</tspan></text>
+    <text x="40" y="266"><tspan fill="#a6e3a1">✓  RTK 0.43.0 — active</tspan></text>
+
+    <text x="24" y="306" fill="#89b4fa">tilth — AST-aware code reading (tree-sitter)</text>
+    <text x="24" y="326" fill="#45475a">──────────────────────────────────────────────────</text>
+    <text x="40" y="350"><tspan fill="#bac2de">MCP hosts:  </tspan><tspan fill="#cdd6f4">claude-code,claude-desktop,opencode,codex,gemini</tspan></text>
+    <text x="40" y="372"><tspan fill="#a6e3a1">✓  tilth 0.9.0 — active</tspan></text>
+
+    <text x="24" y="410" fill="#6c7086" font-size="12.5">83.9% is one machine's measured history over 200k commands, not a marketing figure.</text>
+  </g>
+</svg>

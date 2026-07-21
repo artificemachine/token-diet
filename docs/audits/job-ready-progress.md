@@ -44,3 +44,8 @@
 - verdict: no hard-gate fails; capped NEEDS POLISH by --budget condensed + Stage 8 drift
 - blockers: 0
 - evidence: full report docs/audits/2026-07-21-job-ready.md
+
+## POST-FIX (2026-07-21): all MEDIUM findings resolved
+- description fixed, SVG demo added (#55), v1.15.9 released, test counts fixed (#54), audit home-path scrubbed
+- remaining: LOW only (immutable history, unverifiable stale branches, pinned-fork RTK lint)
+- label still capped NEEDS POLISH by [condensed] stages 5-8; full skill reruns needed to certify HIRE-READY

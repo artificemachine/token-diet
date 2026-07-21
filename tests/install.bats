@@ -1321,3 +1321,49 @@ PY
   [[ "$output" != *"No such file"* ]]
   [[ "$output" != *"hosts.sh"* ]]
 }
+
+# ---------------------------------------------------------------------------
+# Cycle 10 — the version-compat gate must survive installation
+#
+# scripts/token-diet reads config/compat.json at $SCRIPT_DIR/../config/. When
+# installed to $HOME/.local/bin, that resolves to $HOME/.local/config/compat.json,
+# which the installer never created — so _compat_min always returned "0.0.0"
+# and the whole compat gate was a dead no-op on every installed system. Same
+# decoupling-omission class as cmd_extract (v1.14.0) and the release.sh crash.
+# ---------------------------------------------------------------------------
+
+@test "install: compat.json is copied so the installed compat gate is not dead" {
+  mock_install_prereqs
+  mock_icm
+  mock_cmd claude
+
+  run bash "$SCRIPTS_DIR/install.sh" --icm-only
+  [ "$status" -eq 0 ]
+
+  # token-diet reads $SCRIPT_DIR/../config/compat.json; installed SCRIPT_DIR is
+  # $HOME/.local/bin, so the file must land at $HOME/.local/config/compat.json.
+  [ -f "$TMP_HOME/.local/config/compat.json" ]
+
+  # And it must carry a real floor, not be empty — prove the gate can read it.
+  run python3 -c "import json;print(json.load(open('$TMP_HOME/.local/config/compat.json'))['tools']['rtk']['min'])"
+  [ "$status" -eq 0 ]
+  [ "$output" != "0.0.0" ]
+  [ -n "$output" ]
+
+  # ICM is the fourth tool and must be gated too (was absent).
+  run python3 -c "import json;print('icm' in json.load(open('$TMP_HOME/.local/config/compat.json'))['tools'])"
+  [ "$output" = "True" ]
+}
+
+@test "uninstall: removes the installed compat.json" {
+  mock_install_prereqs
+  mock_icm
+  mock_cmd claude
+  run bash "$SCRIPTS_DIR/install.sh" --icm-only
+  [ "$status" -eq 0 ]
+  [ -f "$TMP_HOME/.local/config/compat.json" ]
+
+  run bash "$SCRIPTS_DIR/uninstall.sh" --force
+  [ "$status" -eq 0 ]
+  [ ! -f "$TMP_HOME/.local/config/compat.json" ]
+}

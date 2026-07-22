@@ -1799,10 +1799,82 @@ MOCK
   # open(p,"w") truncates before serializing, so a mid-write failure leaves a
   # zero-byte config. All config mutation goes through tdconfig (atomic write,
   # fsync, os.replace, mode preserved, backup taken).
-  run grep -nE 'open\([^)]*, *"w"\)' "$SCRIPTS_DIR/install.sh"
+  #
+  # The regex requires a non-identifier char before `open` so it flags a raw
+  # truncating open(...) but NOT the atomic path's own os.fdopen(fd,"w") writer
+  # (install.sh and token-diet now inline the same atomic helper as uninstall.sh).
+  run grep -nE '(^|[^A-Za-z0-9_.])open\([^)]*, *"w"\)' "$SCRIPTS_DIR/install.sh"
   [ "$status" -ne 0 ]
-  run grep -nE 'open\([^)]*, *"w"\)' "$SCRIPTS_DIR/token-diet"
+  run grep -nE '(^|[^A-Za-z0-9_.])open\([^)]*, *"w"\)' "$SCRIPTS_DIR/token-diet"
   [ "$status" -ne 0 ]
+}
+
+@test "no non-atomic .write_text()/.write_bytes() config writes remain" {
+  # pathlib's Path.write_text()/write_bytes() truncate the target before the new
+  # content lands, exactly like open(p,"w"): a crash or full disk mid-write
+  # leaves a zero-byte / half-written config the user did not ask for. Every
+  # config write in these three scripts now goes through the inline atomic_write
+  # helper (mkstemp in the same dir → f.write → fsync → chmod preserve →
+  # os.replace) or tdconfig's atomic_write_* — neither uses .write_text().
+  local f
+  for f in install.sh uninstall.sh token-diet; do
+    run grep -nE '\.write_(text|bytes)\(' "$SCRIPTS_DIR/$f"
+    [ "$status" -ne 0 ]
+  done
+}
+
+@test "the .write_text() guard fires on a reintroduced raw write" {
+  # Negative control — a guard that cannot fail is worthless. Plant a raw
+  # Path.write_text() into a copy and assert the regex flags it; then plant the
+  # atomic os.fdopen(fd,"w")/f.write() form and assert the regex does NOT flag
+  # it. If either assertion breaks, the guard has stopped discriminating.
+  local work; work="$(mktemp -d)"
+
+  cp "$SCRIPTS_DIR/token-diet" "$work/planted"
+  printf '%s\n' '    p.write_text(json.dumps(data, indent=2) + "\n")' >> "$work/planted"
+  run grep -nE '\.write_(text|bytes)\(' "$work/planted"
+  [ "$status" -eq 0 ]
+
+  cp "$SCRIPTS_DIR/token-diet" "$work/atomic"
+  printf '%s\n' '        with os.fdopen(fd, "w") as f:' >> "$work/atomic"
+  printf '%s\n' '            f.write(text)' >> "$work/atomic"
+  run grep -nE '\.write_(text|bytes)\(' "$work/atomic"
+  [ "$status" -ne 0 ]
+
+  rm -rf "$work"
+}
+
+@test "budget hubs add: atomic write is byte-identical (indent=2, NO trailing newline)" {
+  # Site token-diet:1122 was converted from path.write_text() to the inline
+  # atomic_write helper. The serialized bytes must be UNCHANGED: json.dumps with
+  # indent=2 and NO trailing newline (unlike every other JSON site, which append
+  # "\n"). This pins the byte-identical contract the conversion had to preserve.
+  # A path outside $HOME avoids the orthogonal home-relativization step so the
+  # assertion pins purely the serialized bytes of the atomic write.
+  run "$SCRIPTS_DIR/token-diet" budget hubs add "/opt/myprojects"
+  [ "$status" -eq 0 ]
+  local cfg="$TMP_HOME/.config/token-diet/config.json"
+  [ -f "$cfg" ]
+  run cat "$cfg"
+  [ "$output" = '{
+  "project_hubs": [
+    "/opt/myprojects"
+  ]
+}' ]
+  # Byte-identical proof: the pre-fix write_text had no trailing newline.
+  [ "$(tail -c1 "$cfg" | wc -l | tr -d ' ')" = "0" ]
+}
+
+@test "icm warmup: atomic write is byte-identical ([embeddings] enabled=true, no prior config)" {
+  # Site token-diet:2500 converted to the atomic helper. With no pre-existing icm
+  # config, the exact bytes must remain "[embeddings]\nenabled = true\n".
+  mock_icm
+  run "$SCRIPTS_DIR/token-diet" icm warmup
+  local cfg="$TMP_HOME/.config/icm/config.toml"
+  [ -f "$cfg" ]
+  run cat "$cfg"
+  [ "$output" = '[embeddings]
+enabled = true' ]
 }
 
 @test "no raw truncating open(cfg,\"w\") remains in uninstall.sh removers" {

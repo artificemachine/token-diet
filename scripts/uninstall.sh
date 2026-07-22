@@ -464,6 +464,12 @@ main() {
   remove_file "$HOME/.local/bin/rtk"
   remove_file "$HOME/.local/bin/tilth"
   remove_file "$HOME/.local/bin/icm"
+  # Serena launcher wrapper the installer generates at ~/.local/bin/serena
+  # (install.sh install_serena, uvx- or docker-runtime). It is NOT a cargo
+  # symlink like the three above, so `cargo uninstall` never touches it — earlier
+  # uninstall versions removed rtk/tilth/icm but left this behind (install/
+  # uninstall asymmetry). Remove it here for symmetry with what install writes.
+  remove_file "$HOME/.local/bin/serena"
 
   echo ""
   echo -e "${BOLD}Rust binaries (cargo uninstall)${NC}"

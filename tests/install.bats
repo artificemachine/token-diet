@@ -1525,6 +1525,22 @@ PY
   [[ "$output" == *"--rev $icm_rev"* ]]
 }
 
+@test "install: tilth cargo install disambiguates the package name (repo also has a fuzz crate)" {
+  # The tilth repo carries a fuzz/ package (tilth-fuzz) alongside the tilth
+  # binary crate. `cargo install --git <repo>` searches the ENTIRE cloned repo
+  # for any Cargo.toml with a [[bin]], so an unqualified install is ambiguous
+  # and cargo refuses: "multiple packages with binaries found: tilth,
+  # tilth-fuzz". Reproduced live against a real network install on this
+  # machine. The package name must be passed explicitly, same as icm-cli.
+  local tilth_rev
+  tilth_rev="$(git -C "$SCRIPTS_DIR/.." rev-parse 'HEAD:forks/tilth')"
+
+  run bash "$SCRIPTS_DIR/install.sh" --dry-run
+  [ "$status" -eq 0 ]
+
+  [[ "$output" == *"cargo install --git https://github.com/artificemachine/tilth --rev $tilth_rev tilth --force"* ]]
+}
+
 @test "install: default serena launcher pins the uvx git ref" {
   local serena_rev
   serena_rev="$(git -C "$SCRIPTS_DIR/.." rev-parse 'HEAD:forks/serena')"

@@ -686,17 +686,21 @@ install_tilth() {
   else
     if [ -n "$TILTH_REV" ]; then
       if [ "${DRY_RUN:-false}" = "true" ]; then
-        dryrun "cargo install --git $TILTH_REPO --rev $TILTH_REV --force"
+        dryrun "cargo install --git $TILTH_REPO --rev $TILTH_REV tilth --force"
       else
-        cargo install --git "$TILTH_REPO" --rev "$TILTH_REV" --force 2>&1 | show_output
+        # The tilth repo also carries a fuzz/ package (tilth-fuzz); cargo install
+        # --git searches the whole cloned repo for any Cargo.toml with a [[bin]],
+        # so an unqualified install is ambiguous between the two. Pin the package
+        # name explicitly, same as the icm-cli install below.
+        cargo install --git "$TILTH_REPO" --rev "$TILTH_REV" tilth --force 2>&1 | show_output
         ok "tilth installed (pinned $TILTH_REV): $(tilth --version 2>/dev/null)"
       fi
     else
       warn "tilth: no pinned rev (not a git checkout) — installing from upstream HEAD"
       if [ "${DRY_RUN:-false}" = "true" ]; then
-        dryrun "cargo install --git $TILTH_REPO --force"
+        dryrun "cargo install --git $TILTH_REPO tilth --force"
       else
-        cargo install --git "$TILTH_REPO" --force 2>&1 | show_output
+        cargo install --git "$TILTH_REPO" tilth --force 2>&1 | show_output
         ok "tilth installed: $(tilth --version 2>/dev/null)"
       fi
     fi

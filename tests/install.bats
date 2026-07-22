@@ -124,18 +124,28 @@ MOCK
 
   mock_cmd code       # HAS_VSCODE
   mock_cmd opencode   # HAS_OPENCODE
-  # HAS_COWORK: COWORK_CFG must exist. Plant both platform paths.
-  mkdir -p "$TMP_HOME/Library/Application Support/Claude" "$TMP_HOME/.config/Claude"
-  echo '{}' > "$TMP_HOME/Library/Application Support/Claude/claude_desktop_config.json"
-  echo '{}' > "$TMP_HOME/.config/Claude/claude_desktop_config.json"
+  # HAS_COWORK: COWORK_CFG must exist. resolve_cowork_cfg() checks the macOS
+  # path's existence before the Linux path REGARDLESS of uname, so planting
+  # both (as an earlier version of this test did) makes install.sh pick the
+  # macOS path on every OS while a naive uname-based read assertion still
+  # switches to the Linux path on Linux — a mismatch that only surfaces in
+  # Linux CI. Plant only the OS-appropriate path, matching the existing
+  # "malformed cowork config" test's pattern above.
+  local cowork_dir
+  if [ "$(uname -s)" = "Darwin" ]; then
+    cowork_dir="$TMP_HOME/Library/Application Support/Claude"
+  else
+    cowork_dir="$TMP_HOME/.config/Claude"
+  fi
+  mkdir -p "$cowork_dir"
+  echo '{}' > "$cowork_dir/claude_desktop_config.json"
 
   run bash "$SCRIPTS_DIR/install.sh" --serena-only --hosts opencode,vscode,cowork
   [ "$status" -eq 0 ]
 
   local vscode="$TMP_HOME/.config/token-diet/vscode-mcp.template.json"
   local opencode="$TMP_HOME/.config/opencode/opencode.json"
-  local cowork="$TMP_HOME/Library/Application Support/Claude/claude_desktop_config.json"
-  [ "$(uname -s)" = "Darwin" ] || cowork="$TMP_HOME/.config/Claude/claude_desktop_config.json"
+  local cowork="$cowork_dir/claude_desktop_config.json"
 
   [ -f "$vscode" ]
   [ -f "$opencode" ]

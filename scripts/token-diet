@@ -12,7 +12,7 @@
 
 set -euo pipefail
 
-readonly TD_VERSION="1.15.18"
+readonly TD_VERSION="1.15.19"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # --- Colors -------------------------------------------------------------------
@@ -715,7 +715,26 @@ cmd_clean() {
   local json; json=$(rtk gain --daily --format json 2>/dev/null)
   if [ -n "$json" ]; then
     python3 - "$arch" "$json" << 'PY'
-import json, sys, pathlib
+import json, os, sys, pathlib, tempfile
+def atomic_write(path, text):
+    d = os.path.dirname(path) or "."
+    fd, tmp = tempfile.mkstemp(dir=d, prefix=".td-", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w") as f:
+            f.write(text)
+            f.flush()
+            os.fsync(f.fileno())
+        try:
+            os.chmod(tmp, os.stat(path).st_mode & 0o7777)
+        except OSError:
+            pass
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
 arch_p = pathlib.Path(sys.argv[1]); live_data = json.loads(sys.argv[2])
 live = live_data["summary"]
 live_daily = live_data.get("daily", [])
@@ -748,7 +767,7 @@ for d in live_daily:
         arch_daily[date] = d
 
 data["daily"] = sorted(arch_daily.values(), key=lambda x: x["date"])[-30:]
-arch_p.write_text(json.dumps(data, indent=2) + "\n")
+atomic_write(str(arch_p), json.dumps(data, indent=2) + "\n")
 PY
     echo "  ✓ Totals and daily history carried forward to archived_stats.json"
   fi
@@ -1045,9 +1064,28 @@ ensure_global_budget() {
     local _baseline
     _baseline="$(_get_rtk_total)"
     python3 - "$global" "$_baseline" << 'PY'
-import json, sys, pathlib, datetime
+import json, os, sys, pathlib, datetime, tempfile
+def atomic_write(path, text):
+    d = os.path.dirname(path) or "."
+    fd, tmp = tempfile.mkstemp(dir=d, prefix=".td-", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w") as f:
+            f.write(text)
+            f.flush()
+            os.fsync(f.fileno())
+        try:
+            os.chmod(tmp, os.stat(path).st_mode & 0o7777)
+        except OSError:
+            pass
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
 p = pathlib.Path(sys.argv[1])
-p.write_text(json.dumps({
+atomic_write(str(p), json.dumps({
     "warn": 1500000, "hard": 0,
     "installed_at": datetime.date.today().isoformat(),
     "baseline_tokens": int(sys.argv[2]),
@@ -1110,7 +1148,26 @@ PY
         # Convert to relative to home if possible
         new_hub="${new_hub/#$HOME/~}"
         python3 - "$cfg_file" "$new_hub" << 'PY'
-import json, sys, pathlib
+import json, os, sys, pathlib, tempfile
+def atomic_write(path, text):
+    d = os.path.dirname(path) or "."
+    fd, tmp = tempfile.mkstemp(dir=d, prefix=".td-", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w") as f:
+            f.write(text)
+            f.flush()
+            os.fsync(f.fileno())
+        try:
+            os.chmod(tmp, os.stat(path).st_mode & 0o7777)
+        except OSError:
+            pass
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
 path = pathlib.Path(sys.argv[1])
 new_h = sys.argv[2]
 try: data = json.loads(path.read_text())
@@ -1119,7 +1176,7 @@ hubs = data.get("project_hubs", [])
 if new_h not in hubs:
     hubs.append(new_h)
     data["project_hubs"] = hubs
-    path.write_text(json.dumps(data, indent=2))
+    atomic_write(str(path), json.dumps(data, indent=2))
     print(f"Added hub: {new_h}")
 else:
     print(f"Hub already exists: {new_h}")
@@ -2482,7 +2539,26 @@ cmd_icm() {
       fi
       mkdir -p "$(dirname "$icm_cfg")"
       python3 - "$icm_cfg" << 'PY'
-import sys, re, pathlib
+import os, sys, re, pathlib, tempfile
+def atomic_write(path, text):
+    d = os.path.dirname(path) or "."
+    fd, tmp = tempfile.mkstemp(dir=d, prefix=".td-", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w") as f:
+            f.write(text)
+            f.flush()
+            os.fsync(f.fileno())
+        try:
+            os.chmod(tmp, os.stat(path).st_mode & 0o7777)
+        except OSError:
+            pass
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
 p = pathlib.Path(sys.argv[1])
 text = p.read_text() if p.exists() else ""
 # Flip enabled=true strictly inside the [embeddings] table.
@@ -2497,7 +2573,7 @@ if m:
 else:
     prefix = text.rstrip() + "\n\n" if text.strip() else ""
     text = prefix + "[embeddings]\nenabled = true\n"
-p.write_text(text)
+atomic_write(str(p), text)
 PY
       echo "  Embeddings enabled in $icm_cfg"
       echo "  Fetching model (first run may take a few minutes)..."

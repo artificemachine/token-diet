@@ -830,13 +830,18 @@ WRAP
   if $HAS_CLAUDE; then
     if [ "${DRY_RUN:-false}" = "true" ]; then
       $LOCAL_MODE \
-        && dryrun "claude mcp add --scope user serena -- docker run ... token-diet/serena:latest --context=claude-code" \
+        && dryrun "claude mcp add --scope user serena -- docker run ... -v .:/workspace:ro token-diet/serena:latest --context=claude-code" \
         || dryrun "claude mcp add --scope user serena -- uvx --from ${SERENA_SRC} serena start-mcp-server --context=claude-code --open-web-dashboard false --project-from-cwd"
     elif claude mcp get serena &>/dev/null; then
       ok "Serena MCP: Claude Code (already configured)"
     elif $LOCAL_MODE; then
+      # MCP stdio servers exec argv directly (no shell), so a literal
+      # "$(pwd)" arg here never expands — it was passed to docker unresolved.
+      # Use "." instead: docker resolves relative -v paths against its own
+      # invocation cwd, which is inherited from Claude Code's spawn (the
+      # project directory), same fix already used in the Codex block below.
       claude mcp add --scope user serena -- \
-        docker run --rm -i -v "\$(pwd):/workspace:ro" --network none \
+        docker run --rm -i -v ".:/workspace:ro" --network none \
         token-diet/serena:latest --context=claude-code --open-web-dashboard false --project /workspace \
         2>/dev/null \
         && ok "Serena MCP: Claude Code (Docker)" \
@@ -893,12 +898,17 @@ TOML
       dryrun "Write VS Code MCP template to $vscode_template"
     else
       mkdir -p "$(dirname "$vscode_template")"
-      cat > "$vscode_template" << 'JSON'
+      # Use the pinned SERENA_SRC (git+<repo>@<rev>) so the VS Code template
+      # matches the audited fork revision, not floating upstream HEAD. Falls back
+      # to the bare git+<repo> ref only outside a git checkout (SERENA_REV empty),
+      # matching SERENA_SRC's own ${SERENA_REV:+@...} behavior. Heredoc is now
+      # unquoted so ${SERENA_SRC} expands; the JSON body has no other $ or `.
+      cat > "$vscode_template" << JSON
 {
   "servers": {
     "serena": {
       "command": "uvx",
-      "args": ["--from", "git+https://github.com/artificemachine/serena", "serena", "start-mcp-server", "--context=ide", "--open-web-dashboard", "false", "--project-from-cwd"]
+      "args": ["--from", "${SERENA_SRC}", "serena", "start-mcp-server", "--context=ide", "--open-web-dashboard", "false", "--project-from-cwd"]
     },
     "tilth": {
       "command": "tilth",
@@ -964,18 +974,22 @@ except tdconfig.ConfigError as _e:
 PYEOF
       ok "Serena + tilth MCP: OpenCode local ($oc_cfg)"
     else
-      TD_LIB_DIR="$SCRIPT_DIR/lib" python3 - "$oc_cfg" "${SERENA_REPO}" <<'PYEOF'
+      TD_LIB_DIR="$SCRIPT_DIR/lib" python3 - "$oc_cfg" "${SERENA_SRC}" <<'PYEOF'
 import os, sys
 sys.path.insert(0, os.environ["TD_LIB_DIR"])
 import tdconfig
 
-cfg, repo = sys.argv[1], sys.argv[2]
+# serena_src is the pinned SERENA_SRC (git+<repo>@<rev>), so the registration
+# matches the audited fork revision instead of floating to upstream HEAD. It
+# already carries the git+ prefix and the @<rev> pin (bare git+<repo> only
+# outside a git checkout), so pass it through verbatim.
+cfg, serena_src = sys.argv[1], sys.argv[2]
 
 def mutate(data):
     data.setdefault("mcp", {})
     data["mcp"]["serena"] = {
         "type": "local",
-        "command": ["uvx", "--from", "git+" + repo, "serena", "start-mcp-server",
+        "command": ["uvx", "--from", serena_src, "serena", "start-mcp-server",
                     "--context=ide", "--open-web-dashboard", "false", "--project-from-cwd"],
         "enabled": True
     }
@@ -1015,9 +1029,13 @@ cfg = sys.argv[1]
 
 def mutate(data):
     data.setdefault("mcpServers", {})
+    # "." not "$(pwd)": MCP stdio configs are exec'd as argv directly, no
+    # shell, so "$(pwd)" would never expand. Docker resolves a relative -v
+    # path against its own invocation cwd instead — same fix as the Codex
+    # and Claude Code / Gemini CLI registrations above.
     data["mcpServers"]["serena"] = {
         "command": "docker",
-        "args": ["run", "--rm", "-i", "-v", "$(pwd):/workspace:ro",
+        "args": ["run", "--rm", "-i", "-v", ".:/workspace:ro",
                  "--network", "none", "token-diet/serena:latest",
                  "--context=claude-code", "--open-web-dashboard", "false", "--project", "/workspace"]
     }
@@ -1030,18 +1048,20 @@ except tdconfig.ConfigError as _e:
     sys.exit(3)
 PYEOF
       else
-        TD_LIB_DIR="$SCRIPT_DIR/lib" python3 - "$COWORK_CFG" "${SERENA_REPO}" <<'PYEOF'
+        TD_LIB_DIR="$SCRIPT_DIR/lib" python3 - "$COWORK_CFG" "${SERENA_SRC}" <<'PYEOF'
 import os, sys
 sys.path.insert(0, os.environ["TD_LIB_DIR"])
 import tdconfig
 
-cfg, repo = sys.argv[1], sys.argv[2]
+# serena_src is the pinned SERENA_SRC (git+<repo>@<rev>) — pass through verbatim
+# so Cowork registers the audited fork revision, not floating upstream HEAD.
+cfg, serena_src = sys.argv[1], sys.argv[2]
 
 def mutate(data):
     data.setdefault("mcpServers", {})
     data["mcpServers"]["serena"] = {
         "command": "uvx",
-        "args": ["--from", "git+" + repo, "serena", "start-mcp-server",
+        "args": ["--from", serena_src, "serena", "start-mcp-server",
                  "--context=claude-code", "--open-web-dashboard", "false", "--project-from-cwd"]
     }
 
@@ -1085,12 +1105,14 @@ PYEOF
   if $HAS_GEMINI; then
     if [ "${DRY_RUN:-false}" = "true" ]; then
       $LOCAL_MODE \
-        && dryrun "gemini mcp add --scope user serena docker run ... token-diet/serena:latest" \
+        && dryrun "gemini mcp add --scope user serena docker run ... -v .:/workspace:ro token-diet/serena:latest" \
         || dryrun "gemini mcp add --scope user serena uvx --from ${SERENA_SRC} serena start-mcp-server"
     elif gemini mcp list 2>/dev/null | grep -q '"serena"'; then
       ok "Serena MCP: Gemini CLI (already configured)"
     elif $LOCAL_MODE; then
-      gemini mcp add --scope user serena docker run --rm -i -v "\$(pwd):/workspace:ro" --network none \
+      # Same argv-not-shell issue as the Claude Code Docker block above: "."
+      # instead of "$(pwd)" resolves correctly with no shell involved.
+      gemini mcp add --scope user serena docker run --rm -i -v ".:/workspace:ro" --network none \
         token-diet/serena:latest --context=gemini-cli --open-web-dashboard false --project /workspace \
         2>/dev/null \
         && ok "Serena MCP: Gemini CLI (Docker)" \
@@ -1202,7 +1224,26 @@ install_icm() {
     else
       mkdir -p "$(dirname "$icm_cfg")"
       python3 - "$icm_cfg" <<'PYEOF'
-import sys, re, pathlib
+import os, sys, re, pathlib, tempfile
+def atomic_write(path, text):
+    d = os.path.dirname(path) or "."
+    fd, tmp = tempfile.mkstemp(dir=d, prefix=".td-", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w") as f:
+            f.write(text)
+            f.flush()
+            os.fsync(f.fileno())
+        try:
+            os.chmod(tmp, os.stat(path).st_mode & 0o7777)
+        except OSError:
+            pass
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
 p = pathlib.Path(sys.argv[1])
 text = p.read_text() if p.exists() else ""
 # Set enabled=false strictly inside the [embeddings] table — the config has many
@@ -1218,7 +1259,7 @@ if m:
 else:
     prefix = text.rstrip() + "\n\n" if text.strip() else ""
     text = prefix + "[embeddings]\nenabled = false\n"
-p.write_text(text)
+atomic_write(str(p), text)
 PYEOF
       ok "ICM semantic search is OFF until warmup ($icm_cfg)"
       info "  Enable cross-tool semantic recall (one-time ~270 MB model download):"
@@ -1273,7 +1314,26 @@ TOML
     else
       mkdir -p "$(dirname "$vscode_template")"
       python3 - "$vscode_template" <<'PYEOF'
-import json, sys, pathlib
+import json, os, sys, pathlib, tempfile
+def atomic_write(path, text):
+    d = os.path.dirname(path) or "."
+    fd, tmp = tempfile.mkstemp(dir=d, prefix=".td-", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w") as f:
+            f.write(text)
+            f.flush()
+            os.fsync(f.fileno())
+        try:
+            os.chmod(tmp, os.stat(path).st_mode & 0o7777)
+        except OSError:
+            pass
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
 p = pathlib.Path(sys.argv[1])
 try:
     data = json.loads(p.read_text())
@@ -1287,7 +1347,7 @@ except (json.JSONDecodeError, ValueError) as _e:
     sys.exit(3)
 data.setdefault("servers", {})
 data["servers"]["icm"] = {"command": "icm", "args": ["serve", "--compact"]}
-p.write_text(json.dumps(data, indent=2) + "\n")
+atomic_write(str(p), json.dumps(data, indent=2) + "\n")
 PYEOF
       ok "ICM MCP: VS Code template ($vscode_template)"
     fi
@@ -1360,7 +1420,11 @@ PYEOF
     ok "ICM: Copilot CLI uses VS Code MCP config (shared)"
   fi
 
-  # Gemini CLI — gemini mcp add --scope user writes to ~/.gemini/config/mcp_config.json
+  # Gemini CLI — `gemini mcp add --scope user` writes mcpServers entries into
+  # ~/.gemini/settings.json (empirically verified against gemini v0.49.0: the CLI
+  # reports "added to user settings" and the key lands in settings.json, NOT a
+  # separate config/mcp_config.json). uninstall.sh cleans that same file, so the
+  # install/uninstall pair is symmetric.
   if $HAS_GEMINI; then
     if [ "${DRY_RUN:-false}" = "true" ]; then
       dryrun "gemini mcp add --scope user icm icm serve --compact"
@@ -1602,12 +1666,31 @@ install_token_diet() {
     # Register MCP server
     if command -v codex &>/dev/null; then
       python3 - "$HOME/.codex/config.toml" << 'PYEOF'
-import pathlib, sys, re
+import os, pathlib, sys, re, tempfile
+def atomic_write(path, text):
+    d = os.path.dirname(path) or "."
+    fd, tmp = tempfile.mkstemp(dir=d, prefix=".td-", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w") as f:
+            f.write(text)
+            f.flush()
+            os.fsync(f.fileno())
+        try:
+            os.chmod(tmp, os.stat(path).st_mode & 0o7777)
+        except OSError:
+            pass
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
 cfg = pathlib.Path(sys.argv[1])
 if cfg.exists():
     text = cfg.read_text()
     if '[mcp_servers.token-diet]' not in text:
-        cfg.write_text(text + '\n[mcp_servers.token-diet]\ncommand = "token-diet-mcp"\n')
+        atomic_write(str(cfg), text + '\n[mcp_servers.token-diet]\ncommand = "token-diet-mcp"\n')
 PYEOF
     fi
 
@@ -1758,7 +1841,26 @@ merge_hook_entry() {
   local cfg="$1" event="$2" matcher="$3" command="$4" timeout="${5:-15}"
   [ -f "$cfg" ] || return 0
   python3 - "$cfg" "$event" "$matcher" "$command" "$timeout" << 'PYEOF'
-import json, sys, pathlib
+import json, os, sys, pathlib, tempfile
+def atomic_write(path, text):
+    d = os.path.dirname(path) or "."
+    fd, tmp = tempfile.mkstemp(dir=d, prefix=".td-", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w") as f:
+            f.write(text)
+            f.flush()
+            os.fsync(f.fileno())
+        try:
+            os.chmod(tmp, os.stat(path).st_mode & 0o7777)
+        except OSError:
+            pass
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
 
 cfg_path, event, matcher, command, timeout = sys.argv[1:6]
 p = pathlib.Path(cfg_path)
@@ -1781,7 +1883,7 @@ entries.append({
     "hooks": [{"type": "command", "command": command, "timeout": int(timeout)}],
 })
 
-p.write_text(json.dumps(data, indent=2) + "\n")
+atomic_write(str(p), json.dumps(data, indent=2) + "\n")
 PYEOF
 }
 

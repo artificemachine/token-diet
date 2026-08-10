@@ -1580,6 +1580,143 @@ EOF
 }
 
 # --- token-diet dashboard command ----------------------------------------------------
+install_rtk_mcp() {
+  header "rtk-mcp (rtk CLI as MCP tools)"
+
+  local src_dir="$SCRIPT_DIR/rtk-mcp"
+  if [ ! -d "$src_dir" ]; then
+    warn "scripts/rtk-mcp not found — skipping rtk-mcp install"
+    return 0
+  fi
+
+  # Resolve the binary path we'll register with each host. pip install -e puts
+  # the console script on PATH; we capture the absolute path so the MCP config
+  # blocks reference the exact interpreter+entry-point rather than relying on
+  # the host's PATH lookup at launch (which varies by host).
+  local rtk_mcp_bin
+  rtk_mcp_bin="$(command -v rtk-mcp 2>/dev/null || true)"
+
+  if [ "${DRY_RUN:-false}" = "true" ]; then
+    dryrun "pip install -e $src_dir"
+    dryrun "register rtk-mcp MCP server across detected hosts"
+  else
+    info "Installing rtk-mcp (editable) from $src_dir..."
+    if pip install -e "$src_dir" 2>&1 | show_output; then
+      rtk_mcp_bin="$(command -v rtk-mcp 2>/dev/null || echo "rtk-mcp")"
+      ok "rtk-mcp installed: $rtk_mcp_bin"
+    else
+      warn "rtk-mcp pip install failed — skipping host registration"
+      return 0
+    fi
+  fi
+
+  export RTK_MCP_BIN="$rtk_mcp_bin"
+
+  # Codex — append [mcp_servers.rtk-mcp] block to config.toml
+  if $HAS_CODEX && [ -f "$HOME/.codex/config.toml" ]; then
+    if grep -q '\[mcp_servers\.rtk-mcp\]' "$HOME/.codex/config.toml"; then
+      ok "rtk-mcp MCP: codex (already configured)"
+    else
+      python3 - "$HOME/.codex/config.toml" << 'PYEOF'
+import os, pathlib, sys, tempfile
+def atomic_write(path, text):
+    d = os.path.dirname(path) or "."
+    fd, tmp = tempfile.mkstemp(dir=d, prefix=".td-", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w") as f:
+            f.write(text); f.flush(); os.fsync(f.fileno())
+        try:
+            os.chmod(tmp, os.stat(path).st_mode & 0o7777)
+        except OSError:
+            pass
+        os.replace(tmp, path)
+    except BaseException:
+        try: os.unlink(tmp)
+        except OSError: pass
+        raise
+cfg = pathlib.Path(sys.argv[1])
+if cfg.exists():
+    text = cfg.read_text()
+    if '[mcp_servers.rtk-mcp]' not in text:
+        atomic_write(str(cfg), text + f'\n[mcp_servers.rtk-mcp]\ncommand = "{os.environ["RTK_MCP_BIN"]}"\nargs = []\n')
+PYEOF
+      td_record_mutation "$HOME/.codex/config.toml"
+      ok "rtk-mcp MCP: codex"
+    fi
+  fi
+
+  # Claude / Cowork / OpenCode — use tdconfig (atomic JSON merge with backup)
+  # OpenCode 1.x uses "mcp" key with shape {type:local, command:[array]};
+  # Claude/Cowork use "mcpServers" with shape {command:string, args:[]}.
+  if $HAS_CLAUDE || $HAS_COWORK || $HAS_OPENCODE; then
+    for cfg in \
+        "$HOME/.claude/settings.json" \
+        "$HOME/Library/Application Support/Claude/claude_desktop_config.json" \
+        "$HOME/.config/Claude/claude_desktop_config.json" \
+        "$COWORK_CFG" \
+        "$HOME/.config/opencode/opencode.json" \
+        "$HOME/.opencode.json"; do
+      [ -f "$cfg" ] || continue
+      case "$cfg" in
+        *opencode/opencode.json|*opencode.json)
+          TD_LIB_DIR="$SCRIPT_DIR/lib" python3 - "$cfg" << 'PYEOF'
+import os, sys
+sys.path.insert(0, os.environ["TD_LIB_DIR"])
+import tdconfig
+cfg = sys.argv[1]
+try:
+    tdconfig.update_json(
+        cfg,
+        lambda d: d.setdefault("mcp", {}).update(
+            {"rtk-mcp": {"type": "local", "command": [os.environ["RTK_MCP_BIN"]], "enabled": True}}
+        ),
+    )
+except tdconfig.ConfigError as e:
+    print(f"skipped: {e}", file=sys.stderr); sys.exit(1)
+PYEOF
+          td_record_mutation "$cfg"
+          ok "rtk-mcp MCP: $cfg (opencode dialect)"
+          ;;
+        *)
+          TD_LIB_DIR="$SCRIPT_DIR/lib" python3 - "$cfg" << 'PYEOF'
+import os, sys
+sys.path.insert(0, os.environ["TD_LIB_DIR"])
+import tdconfig
+cfg = sys.argv[1]
+try:
+    tdconfig.update_json(
+        cfg,
+        lambda d: d.setdefault("mcpServers", {}).update(
+            {"rtk-mcp": {"command": os.environ["RTK_MCP_BIN"], "args": []}}
+        ),
+    )
+except tdconfig.ConfigError as e:
+    print(f"skipped: {e}", file=sys.stderr); sys.exit(1)
+PYEOF
+          td_record_mutation "$cfg"
+          ok "rtk-mcp MCP: $cfg"
+          ;;
+      esac
+    done
+  fi
+
+  # Gemini CLI — uses `gemini mcp add --scope user`
+  if $HAS_GEMINI; then
+    if [ "${DRY_RUN:-false}" = "true" ]; then
+      dryrun "gemini mcp add --scope user rtk-mcp -- $rtk_mcp_bin"
+    elif gemini mcp list 2>/dev/null | grep -q '"rtk-mcp"'; then
+      ok "rtk-mcp MCP: gemini (already configured)"
+    else
+      gemini mcp add --scope user rtk-mcp -- "$rtk_mcp_bin" 2>/dev/null \
+        && ok "rtk-mcp MCP: gemini" \
+        || warn "rtk-mcp MCP: gemini setup failed"
+    fi
+  fi
+
+  unset RTK_MCP_BIN
+}
+
+# --- token-diet dashboard command ----------------------------------------------------
 install_token_diet() {
   local bin_dir="$HOME/.local/bin"
   local src_bin="$SCRIPT_DIR/token-diet"
@@ -2262,6 +2399,7 @@ main() {
   $do_tilth  && install_tilth
   $do_serena && install_serena
   $do_icm    && install_icm
+  install_rtk_mcp
 
   # Overlap fix
   if $do_dedup && $do_tilth && $do_serena; then

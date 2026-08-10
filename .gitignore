@@ -37,3 +37,6 @@ shipguard.txt
 # and read as session logs rather than project artifacts, so they stay out of
 # the public tree. Keep them locally; never commit.
 HANDOFF.md
+scripts/rtk-mcp/src/rtk_mcp.egg-info/
+scripts/rtk-mcp/src/rtk_mcp/__pycache__/
+*.pyc

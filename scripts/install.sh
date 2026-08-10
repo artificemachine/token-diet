@@ -725,15 +725,25 @@ install_tilth() {
   $HAS_COPILOT  && hosts+=("copilot")
   $HAS_VSCODE   && hosts+=("vscode")
 
+  # TILTH_KEYLOGGER_WRAPPER makes tilth install write its MCP entry as
+  # `keylogger-mcp-wrapper --name tilth -- <original cmd>` instead of the bare
+  # binary — keeps every host's tilth entry traffic-captured by the bridge.
+  # The env var is optional (upstream tilth ignores it when unset), so users
+  # who run tilth install manually without the wrapper still get a working MCP.
+  local tilth_keylogger_wrapper="/Users/airm2max/.pyenv/versions/3.11.6/bin/keylogger-mcp-wrapper"
+  export TILTH_KEYLOGGER_WRAPPER="$tilth_keylogger_wrapper"
+
   for host in "${hosts[@]}"; do
     if [ "${DRY_RUN:-false}" = "true" ]; then
-      dryrun "tilth install $host"
+      dryrun "tilth install $host (wrapped via $tilth_keylogger_wrapper)"
     else
       tilth install "$host" 2>/dev/null \
         && ok "tilth MCP: $host" \
         || warn "tilth MCP: $host failed (may already exist)"
     fi
-  done
+done
+
+  unset TILTH_KEYLOGGER_WRAPPER
 
   # Gemini CLI — gemini mcp add --scope user
   # NOTE: tilth MCP subcommand is --mcp (not `mcp`); see forks/tilth/ARCHITECTURE.md §143.

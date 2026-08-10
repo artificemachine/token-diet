@@ -1617,7 +1617,7 @@ install_rtk_mcp() {
     if grep -q '\[mcp_servers\.rtk-mcp\]' "$HOME/.codex/config.toml"; then
       ok "rtk-mcp MCP: codex (already configured)"
     else
-      python3 - "$HOME/.codex/config.toml" << 'PYEOF'
+      if ! python3 - "$HOME/.codex/config.toml" << 'PYEOF'
 import os, pathlib, sys, tempfile
 def atomic_write(path, text):
     d = os.path.dirname(path) or "."
@@ -1640,14 +1640,20 @@ if cfg.exists():
     if '[mcp_servers.rtk-mcp]' not in text:
         atomic_write(str(cfg), text + f'\n[mcp_servers.rtk-mcp]\ncommand = "{os.environ["RTK_MCP_BIN"]}"\nargs = []\n')
 PYEOF
-      td_record_mutation "$HOME/.codex/config.toml"
-      ok "rtk-mcp MCP: codex"
+      then
+        warn "rtk-mcp MCP: codex (see message above)"
+      else
+        td_record_mutation "$HOME/.codex/config.toml"
+        ok "rtk-mcp MCP: codex"
+      fi
     fi
   fi
 
   # Claude / Cowork / OpenCode — use tdconfig (atomic JSON merge with backup)
   # OpenCode 1.x uses "mcp" key with shape {type:local, command:[array]};
   # Claude/Cowork use "mcpServers" with shape {command:string, args:[]}.
+  # Each Python heredoc is wrapped in `if ! ... then ... else ... fi` so a malformed
+  # config (ConfigError) skips the host without killing the script under `set -e`.
   if $HAS_CLAUDE || $HAS_COWORK || $HAS_OPENCODE; then
     for cfg in \
         "$HOME/.claude/settings.json" \
@@ -1659,7 +1665,7 @@ PYEOF
       [ -f "$cfg" ] || continue
       case "$cfg" in
         *opencode/opencode.json|*opencode.json)
-          TD_LIB_DIR="$SCRIPT_DIR/lib" python3 - "$cfg" << 'PYEOF'
+          if ! TD_LIB_DIR="$SCRIPT_DIR/lib" python3 - "$cfg" << 'PYEOF'
 import os, sys
 sys.path.insert(0, os.environ["TD_LIB_DIR"])
 import tdconfig
@@ -1674,11 +1680,15 @@ try:
 except tdconfig.ConfigError as e:
     print(f"skipped: {e}", file=sys.stderr); sys.exit(1)
 PYEOF
-          td_record_mutation "$cfg"
-          ok "rtk-mcp MCP: $cfg (opencode dialect)"
+          then
+            warn "rtk-mcp MCP: $cfg (opencode dialect)"
+          else
+            td_record_mutation "$cfg"
+            ok "rtk-mcp MCP: $cfg (opencode dialect)"
+          fi
           ;;
         *)
-          TD_LIB_DIR="$SCRIPT_DIR/lib" python3 - "$cfg" << 'PYEOF'
+          if ! TD_LIB_DIR="$SCRIPT_DIR/lib" python3 - "$cfg" << 'PYEOF'
 import os, sys
 sys.path.insert(0, os.environ["TD_LIB_DIR"])
 import tdconfig
@@ -1693,8 +1703,12 @@ try:
 except tdconfig.ConfigError as e:
     print(f"skipped: {e}", file=sys.stderr); sys.exit(1)
 PYEOF
-          td_record_mutation "$cfg"
-          ok "rtk-mcp MCP: $cfg"
+          then
+            warn "rtk-mcp MCP: $cfg (see message above)"
+          else
+            td_record_mutation "$cfg"
+            ok "rtk-mcp MCP: $cfg"
+          fi
           ;;
       esac
     done

@@ -501,9 +501,11 @@ main() {
   remove_json_key "$HOME/.claude/settings.json" "serena"
   remove_json_key "$HOME/.claude/settings.json" "icm"
   remove_json_key "$HOME/.claude/settings.json" "token-diet"
+remove_json_key "$HOME/.claude/settings.json" "rtk-mcp"
   remove_json_key "$HOME/.claude.json" "tilth"
   remove_json_key "$HOME/.claude.json" "serena"
   remove_json_key "$HOME/.claude.json" "icm"
+remove_json_key "$HOME/.claude.json" "rtk-mcp"
 
   # Both Claude Desktop paths (macOS first, Linux second) come from the registry
   # via resolve_claude_desktop_paths; the pair matches uninstall's historical
@@ -514,6 +516,7 @@ main() {
   remove_json_key "$CD_MAC" "serena"
   remove_json_key "$CD_MAC" "icm"
   remove_json_key "$CD_MAC" "token-diet"
+remove_json_key "$CD_MAC" "rtk-mcp"
 
   echo ""
   echo -e "${BOLD}MCP registrations — Claude Desktop (Linux)${NC}"
@@ -521,6 +524,7 @@ main() {
   remove_json_key "$CD_LINUX" "serena"
   remove_json_key "$CD_LINUX" "icm"
   remove_json_key "$CD_LINUX" "token-diet"
+remove_json_key "$CD_LINUX" "rtk-mcp"
 
   # Kept explicit (NOT registry-driven): the registry now records BOTH opencode
   # paths (legacy .opencode.json + XDG .config/opencode/opencode.json), but
@@ -535,10 +539,12 @@ main() {
   remove_opencode_mcp_key "$HOME/.opencode.json" "serena"
   remove_opencode_mcp_key "$HOME/.opencode.json" "icm"
   remove_opencode_mcp_key "$HOME/.opencode.json" "token-diet"
+remove_opencode_mcp_key "$HOME/.opencode.json" "rtk-mcp"
   remove_opencode_mcp_key "$HOME/.config/opencode/opencode.json" "tilth"
   remove_opencode_mcp_key "$HOME/.config/opencode/opencode.json" "serena"
   remove_opencode_mcp_key "$HOME/.config/opencode/opencode.json" "icm"
   remove_opencode_mcp_key "$HOME/.config/opencode/opencode.json" "token-diet"
+remove_opencode_mcp_key "$HOME/.config/opencode/opencode.json" "rtk-mcp"
   strip_opencode_rules "$HOME/.config/opencode/opencode.json"
   # Symmetric with install_context_hooks: it installs an OpenCode plugin file and
   # registers its relative path in opencode.json's "plugin" array. Remove both so
@@ -577,7 +583,7 @@ main() {
   local codex_cfg="$CODEX_CFG_PATH"
   if [ -f "$codex_cfg" ]; then
     if $DRY_RUN; then
-      dry "remove [mcp_servers.{tilth,serena,icm,token-diet}] blocks from $codex_cfg"
+      dry "remove [mcp_servers.{tilth,serena,icm,token-diet,rtk-mcp}] blocks from $codex_cfg"
     else
       python3 - "$codex_cfg" << 'PY'
 import os, re, sys, tempfile
@@ -614,7 +620,7 @@ with open(path) as f:
 # part of the body being removed. User tables are never entered, so their content
 # is preserved verbatim.
 header_re = re.compile(r'^\[[A-Za-z0-9_.\-]+\]$')            # any TOML table header
-td_re     = re.compile(r'^\[mcp_servers\.(tilth|serena|icm|token-diet)\]$')
+td_re     = re.compile(r'^\[mcp_servers\.(tilth|serena|icm|token-diet|rtk-mcp)\]$')
 out, i = [], 0
 while i < len(lines):
     if td_re.match(lines[i].strip()):
@@ -631,7 +637,7 @@ while i < len(lines):
 
 atomic_write(path, "".join(out))
 PY
-      ok "Removed mcp_servers.{tilth,serena,icm,token-diet} from $codex_cfg"
+      ok "Removed mcp_servers.{tilth,serena,icm,token-diet,rtk-mcp} from $codex_cfg"
     fi
   else
     miss "$codex_cfg"
@@ -646,6 +652,7 @@ PY
   remove_json_key "$HOME/.gemini/settings.json" "tilth"
   remove_json_key "$HOME/.gemini/settings.json" "serena"
   remove_json_key "$HOME/.gemini/settings.json" "icm"
+  remove_json_key "$HOME/.gemini/settings.json" "rtk-mcp"
 
   echo ""
   echo -e "${BOLD}Hooks and docs${NC}"

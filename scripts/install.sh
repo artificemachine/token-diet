@@ -771,6 +771,17 @@ done
 install_serena() {
   header "Serena (IDE-like symbol navigation)"
 
+  # SERENA_KEYLOGGER_WRAPPER makes install write serena + tilth MCP entries as
+  # `keylogger-mcp-wrapper --name X -- <original cmd>` instead of the bare
+  # binary — keeps every host's entries traffic-captured by the bridge (same
+  # pattern as TILTH_KEYLOGGER_WRAPPER in install_tilth). The env var is
+  # optional: unset → bare commands (upstream-compatible).
+  local serena_keylogger_wrapper
+  serena_keylogger_wrapper="$(command -v keylogger-mcp-wrapper 2>/dev/null || true)"
+  if [ -n "$serena_keylogger_wrapper" ]; then
+    export SERENA_KEYLOGGER_WRAPPER="$serena_keylogger_wrapper"
+  fi
+
   # Strict Installation Decoupling (CLAUDE.md): the MCP config must NEVER depend
   # on the local repo path. We always expose a bare `serena` command at the
   # XDG-stable launcher path ~/.local/bin/serena, regardless of whether the
@@ -963,6 +974,23 @@ import tdconfig
 
 cfg, project_root = sys.argv[1], sys.argv[2]
 
+# SERENA_KEYLOGGER_WRAPPER (exported by install.sh when the keylogger-mcp-wrapper
+# binary exists) makes install write MCP entries as
+#   {type: local, command: <wrapper>, args: [--name, X, --, <inner...>]}
+# instead of the bare unwrapped command — keeps every host's serena/tilth entry
+# traffic-captured by the langfuse-bridge. Unset → bare command (backward compat).
+WRAPPER = os.environ.get("SERENA_KEYLOGGER_WRAPPER", "")
+
+def mcp_entry(name, inner_cmd):
+    if WRAPPER:
+        return {
+            "type": "local",
+            "command": WRAPPER,
+            "args": ["--name", name, "--"] + inner_cmd,
+            "enabled": True,
+        }
+    return {"type": "local", "command": inner_cmd, "enabled": True}
+
 def mutate(data):
     data.setdefault("mcp", {})
     # Strict Installation Decoupling (CLAUDE.md §"Strict Installation Decoupling"):
@@ -970,17 +998,12 @@ def mutate(data):
     # install_serena() and install_tilth() functions above already provision
     # bare commands at XDG-stable paths (~/.local/bin/serena, ~/.local/bin/tilth).
     # We register the bare names + their MCP subcommand arguments only.
-    data["mcp"]["serena"] = {
-        "type": "local",
-        "command": ["serena", "start-mcp-server",
-                    "--context=ide", "--open-web-dashboard", "false", "--project-from-cwd"],
-        "enabled": True,
-    }
-    data["mcp"]["tilth"] = {
-        "type": "local",
-        "command": ["tilth", "--mcp"],
-        "enabled": True,
-    }
+    data["mcp"]["serena"] = mcp_entry(
+        "serena",
+        ["serena", "start-mcp-server",
+         "--context=ide", "--open-web-dashboard", "false", "--project-from-cwd"],
+    )
+    data["mcp"]["tilth"] = mcp_entry("tilth", ["tilth", "--mcp"])
 
 try:
     tdconfig.update_json(cfg, mutate)
@@ -1002,19 +1025,27 @@ import tdconfig
 # outside a git checkout), so pass it through verbatim.
 cfg, serena_src = sys.argv[1], sys.argv[2]
 
+# Same SERENA_KEYLOGGER_WRAPPER support as the local-mode block above.
+WRAPPER = os.environ.get("SERENA_KEYLOGGER_WRAPPER", "")
+
+def mcp_entry(name, inner_cmd):
+    if WRAPPER:
+        return {
+            "type": "local",
+            "command": WRAPPER,
+            "args": ["--name", name, "--"] + inner_cmd,
+            "enabled": True,
+        }
+    return {"type": "local", "command": inner_cmd, "enabled": True}
+
 def mutate(data):
     data.setdefault("mcp", {})
-    data["mcp"]["serena"] = {
-        "type": "local",
-        "command": ["uvx", "--from", serena_src, "serena", "start-mcp-server",
-                    "--context=ide", "--open-web-dashboard", "false", "--project-from-cwd"],
-        "enabled": True
-    }
-    data["mcp"]["tilth"] = {
-        "type": "local",
-        "command": ["tilth", "--mcp"],
-        "enabled": True
-    }
+    data["mcp"]["serena"] = mcp_entry(
+        "serena",
+        ["uvx", "--from", serena_src, "serena", "start-mcp-server",
+         "--context=ide", "--open-web-dashboard", "false", "--project-from-cwd"],
+    )
+    data["mcp"]["tilth"] = mcp_entry("tilth", ["tilth", "--mcp"])
 
 try:
     tdconfig.update_json(cfg, mutate)
@@ -1159,6 +1190,8 @@ PYEOF
       "$serena_cfg"
     ok "Serena: disabled built-in web dashboard ($serena_cfg)"
   fi
+
+  unset SERENA_KEYLOGGER_WRAPPER
 }
 
 # --- ICM ----------------------------------------------------------------------

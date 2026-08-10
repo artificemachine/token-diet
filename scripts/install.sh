@@ -730,8 +730,11 @@ install_tilth() {
   # binary — keeps every host's tilth entry traffic-captured by the bridge.
   # The env var is optional (upstream tilth ignores it when unset), so users
   # who run tilth install manually without the wrapper still get a working MCP.
-  local tilth_keylogger_wrapper="/Users/airm2max/.pyenv/versions/3.11.6/bin/keylogger-mcp-wrapper"
-  export TILTH_KEYLOGGER_WRAPPER="$tilth_keylogger_wrapper"
+  local tilth_keylogger_wrapper
+  tilth_keylogger_wrapper="$(command -v keylogger-mcp-wrapper 2>/dev/null || true)"
+  if [ -n "$tilth_keylogger_wrapper" ]; then
+    export TILTH_KEYLOGGER_WRAPPER="$tilth_keylogger_wrapper"
+  fi
 
   for host in "${hosts[@]}"; do
     if [ "${DRY_RUN:-false}" = "true" ]; then

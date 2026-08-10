@@ -64,7 +64,7 @@ def _make_tool(cmd: str) -> None:
     # expose ``cmd`` as a required argument to the tool (causing pydantic
     # validation errors at call time). Keep the closure's own clean signature
     # so FastMCP introspection sees only ``args``.
-    def rtk_tool(args: Annotated[list[str], f"Arguments to pass to `rtk {cmd}`"]) -> str:
+    def rtk_tool(args: list[str]) -> str:
         return _run_rtk(cmd, list(args))
 
     rtk_tool.__name__ = tool_name

@@ -58,19 +58,20 @@ def _make_tool(cmd: str) -> None:
     """Register ``rtk_<cmd>`` as an MCP tool that shells out to ``rtk <cmd>``."""
     tool_name = "rtk_" + cmd.replace("-", "_")
     desc = f"Run `rtk {cmd}` (token-compressed wrapper). {_help_for(cmd)}"
-    captured_cmd = cmd
 
-    @mcp.tool(name=tool_name, description=desc)
-    @functools.wraps(_run_rtk)
-    def rtk_tool(
-        args: Annotated[list[str], f"Arguments to pass to `rtk {captured_cmd}`"],
-    ) -> str:
-        return _run_rtk(captured_cmd, args)
+    # NOTE: do NOT use functools.wraps(_run_rtk) here — it would copy _run_rtk's
+    # ``(cmd, args)`` signature onto the inner closure, and FastMCP would then
+    # expose ``cmd`` as a required argument to the tool (causing pydantic
+    # validation errors at call time). Keep the closure's own clean signature
+    # so FastMCP introspection sees only ``args``.
+    def rtk_tool(args: Annotated[list[str], f"Arguments to pass to `rtk {cmd}`"]) -> str:
+        return _run_rtk(cmd, list(args))
 
-    # Re-attach the wrapped function's metadata to the dynamic closure so
-    # FastMCP introspection picks up the right name.
     rtk_tool.__name__ = tool_name
     rtk_tool.__qualname__ = tool_name
+    rtk_tool.__doc__ = desc
+
+    mcp.tool(name=tool_name, description=desc)(rtk_tool)
 
 
 # Register one MCP tool per rtk subcommand. Tokens-cheap so we don't memoize;

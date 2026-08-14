@@ -570,7 +570,17 @@ function Install-Serena {
     # Build the serena command/args depending on mode
     if ($Local) {
         $serenaCmdName = "docker"
-        $serenaArgsBase = @("run", "--rm", "-i", "-v", "`$(pwd):/workspace:ro", "--network", "none", "token-diet/serena:latest")
+        # The serena Docker image ships intentionally WITHOUT an ENTRYPOINT
+        # (see docker/Dockerfile.serena, v1.11.4): the container command must
+        # start with `serena start-mcp-server`, supplied here once. Host
+        # registrations may pass an explicit `start-mcp-server` downstream of
+        # this base without doubling it (no site appends its own copy).
+        # "." not "`$(pwd)": MCP stdio hosts exec the configured argv directly
+        # with no shell, so the `$(pwd)` literal never expanded and docker
+        # received it verbatim (install.sh v1.15.19 fix, ported). Docker
+        # resolves a relative -v path against its own invocation cwd, which
+        # the host's spawn of the MCP subprocess inherits.
+        $serenaArgsBase = @("run", "--rm", "-i", "-v", ".:/workspace:ro", "--network", "none", "token-diet/serena:latest", "serena", "start-mcp-server")
     } else {
         $serenaCmdName = "uvx"
         $serenaArgsBase = @("--from", "git+$SERENA_REPO", "serena", "start-mcp-server")
@@ -611,7 +621,7 @@ function Install-Serena {
 # Serena MCP server (added by token-diet, Docker mode)
 [mcp_servers.serena]
 command = "docker"
-args = ["run", "--rm", "-i", "-v", ".:/workspace:ro", "--network", "none", "token-diet/serena:latest", "--context=codex", "--open-web-dashboard", "false", "--project", "/workspace"]
+args = ["run", "--rm", "-i", "-v", ".:/workspace:ro", "--network", "none", "token-diet/serena:latest", "serena", "start-mcp-server", "--context=codex", "--open-web-dashboard", "false", "--project", "/workspace"]
 "@
                 } else {
                     $tomlBlock = @"
@@ -669,8 +679,10 @@ args = ["--from", "git+$SERENA_REPO", "serena", "start-mcp-server", "--context=c
                 if ($Local) {
                     $serenaEntry = [PSCustomObject]@{
                         command = "docker"
-                        args    = @("run", "--rm", "-i", "-v", "`$(pwd):/workspace:ro", "--network", "none",
-                                    "token-diet/serena:latest", "--context=claude-code", "--open-web-dashboard", "false", "--project", "/workspace")
+                        # "." not "`$(pwd)": no shell expands it in MCP stdio
+                        # argv; see $serenaArgsBase above (v1.15.19 port).
+                        args    = @("run", "--rm", "-i", "-v", ".:/workspace:ro", "--network", "none",
+                                    "token-diet/serena:latest", "serena", "start-mcp-server", "--context=claude-code", "--open-web-dashboard", "false", "--project", "/workspace")
                     }
                 } else {
                     $serenaEntry = [PSCustomObject]@{
@@ -713,8 +725,10 @@ args = ["--from", "git+$SERENA_REPO", "serena", "start-mcp-server", "--context=c
                 if ($Local) {
                     $serenaEntry = [PSCustomObject]@{
                         command = "docker"
-                        args    = @("run", "--rm", "-i", "-v", "`$(pwd):/workspace:ro", "--network", "none",
-                                    "token-diet/serena:latest", "--context=ide", "--open-web-dashboard", "false", "--project", "/workspace")
+                        # "." not "`$(pwd)": no shell expands it in MCP stdio
+                        # argv; see $serenaArgsBase above (v1.15.19 port).
+                        args    = @("run", "--rm", "-i", "-v", ".:/workspace:ro", "--network", "none",
+                                    "token-diet/serena:latest", "serena", "start-mcp-server", "--context=ide", "--open-web-dashboard", "false", "--project", "/workspace")
                     }
                 } else {
                     $serenaEntry = [PSCustomObject]@{

@@ -1,0 +1,23 @@
+{
+  "date": "2026-07-22",
+  "project": "token-diet",
+  "stages": [
+    {"n": 1, "name": "First impression", "verdict": "NEEDS WORK", "blockers": 0, "provenance": "ran-full"},
+    {"n": 2, "name": "Git history & releases", "verdict": "PASS", "blockers": 0, "provenance": "ran-full"},
+    {"n": 3, "name": "README + docs", "verdict": "NEEDS WORK", "blockers": 0, "provenance": "ran-full"},
+    {"n": 4, "name": "Fresh clone + deps", "verdict": "PASS", "blockers": 0, "provenance": "ran-full"},
+    {"n": 5, "name": "Gauntlet (hardening)", "verdict": "NEEDS WORK", "blockers": 2, "provenance": "ran-full"},
+    {"n": 6, "name": "Architecture", "verdict": "NEEDS HARDENING", "blockers": 0, "provenance": "ran-full"},
+    {"n": 7, "name": "CI/CD governance", "verdict": "NEEDS WORK", "blockers": 0, "provenance": "ran-full"},
+    {"n": "7b", "name": "Deployment & installability", "verdict": "NEEDS HELP", "blockers": 0, "provenance": "ran-full"},
+    {"n": 8, "name": "Claims vs reality", "verdict": "NEEDS WORK", "blockers": 0, "provenance": "ran-full"}
+  ],
+  "verdict": "NOT READY",
+  "top_fixes": [
+    "compliance/security-audit.md falsely claims RTK/Serena telemetry is 'stripped' when it's dormant-but-present code — rewrite to 'disabled by default'",
+    "docs/branch-protection.md contradicts live GitHub state (claims unprotected, main is actually fully protected)",
+    "Dashboard alert-banner feature is completely dead (server never populates keys the frontend reads)",
+    "Personal home path + internal LAN hostname permanently exposed across 26 commits / 6 files in public git history",
+    "release.yml ships GitHub releases off a bare tag push with zero test-workflow gating"
+  ]
+}

@@ -1966,6 +1966,24 @@ enabled = true' ]
   grep -qi 'tags' "$doc"
 }
 
+@test "release.yml gates release creation on the tagged commit's Tests check-run" {
+  # 2026-08-17: a bare tag push published a GitHub release with zero
+  # test-gating -- release.yml only checked that the tag matched TD_VERSION,
+  # never whether the Tests workflow had actually passed on that commit.
+  local wf="$SCRIPTS_DIR/../.github/workflows/release.yml"
+  [ -f "$wf" ]
+  grep -q 'check-runs' "$wf"
+  grep -q 'bats + pytest' "$wf"
+  grep -q 'GITHUB_SHA' "$wf"
+
+  local verify_line create_line
+  verify_line="$(grep -n 'check-runs' "$wf" | head -1 | cut -d: -f1)"
+  create_line="$(grep -n 'Create release if missing' "$wf" | head -1 | cut -d: -f1)"
+  [ -n "$verify_line" ]
+  [ -n "$create_line" ]
+  [ "$verify_line" -lt "$create_line" ]
+}
+
 # ---------------------------------------------------------------------------
 # Phase 5 Iteration 2 — the host registry, consumed by ONE site
 #

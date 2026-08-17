@@ -48,6 +48,23 @@ jobs:
             exit 1
           fi
 
+      - name: Verify Tests passed for this commit
+        # A tag push previously published a release with zero test-gating:
+        # this step only checked the tag against TD_VERSION, never whether
+        # the Tests workflow (test.yml, runs on every push to main) actually
+        # passed on the commit being tagged. Fail closed if it hasn't.
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          conclusion="$(gh api "repos/${{ github.repository }}/commits/${GITHUB_SHA}/check-runs" \
+            --jq '[.check_runs[] | select(.name=="bats + pytest")] | sort_by(.started_at) | last | .conclusion // "not found"')"
+          echo "bats + pytest check-run for ${GITHUB_SHA}: ${conclusion}"
+          if [ "$conclusion" != "success" ]; then
+            echo "::error::Tests check-run for ${GITHUB_SHA} is '${conclusion}', not 'success'. Wait for the Tests workflow to finish and pass on this commit, then push the tag again (or re-run this workflow)."
+            exit 1
+          fi
+
       - name: Create release if missing
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

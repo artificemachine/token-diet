@@ -9,7 +9,7 @@ Pre-deployment security review for the RTK + tilth + Serena stack.
 | Check | Command | Pass? |
 |---|---|---|
 | No known vulnerabilities | `cargo audit --file forks/rtk/Cargo.lock` | ✅ 0 vulnerabilities (164 deps scanned, 2026-04-01) |
-| No telemetry/analytics | `grep -r "telemetry\|analytics\|ping" forks/rtk/src/` | ✅ `analytics` = local token savings only (`rtk gain`); outbound telemetry stripped in fork (comment in `core/config.rs`) |
+| No telemetry/analytics | `grep -r "telemetry\|analytics\|ping" forks/rtk/src/` | ⚠️ **Present but inert in a token-diet build.** `analytics` = local token savings only (`rtk gain`). Telemetry is **not** stripped: `forks/rtk/src/core/telemetry.rs` implements a documented usage ping with a real `ureq::post` (see `forks/rtk/docs/TELEMETRY.md`). Three independent gates keep it off here: (1) the endpoint comes from `option_env!("RTK_TELEMETRY_URL")` at compile time, and `install.sh` never sets it, so `TELEMETRY_URL` is `None` and the call is unreachable dead code; (2) `RTK_TELEMETRY_DISABLED=1` env opt-out; (3) `TelemetryConfig` defaults to `enabled=false`/`consent_given=None`, and `rtk init -g` never prompts non-interactively. Corrected 2026-08-19 — the prior "stripped" claim described a since-reverted upstream state. |
 | No hardcoded URLs | `grep -rn "http:/\|https:/" forks/rtk/src/ --include="*.rs"` | ✅ All URL matches are in test assertions or docstring examples — not production code |
 | No unwrap in production | `grep -rn "\.unwrap()" forks/rtk/src/ --include="*.rs"` (exclude tests) | ✅ All `.unwrap()` in `lazy_static!` regex init (established RTK pattern — panics on startup, not silently); remainder in `#[cfg(test)]` blocks |
 | No unsafe blocks | `grep -rn "unsafe" forks/rtk/src/ --include="*.rs"` | ✅ No `unsafe { }` blocks — matches are comments and a log message |
@@ -35,7 +35,7 @@ Pre-deployment security review for the RTK + tilth + Serena stack.
 | Check | Command | Pass? |
 |---|---|---|
 | No known vulnerabilities | `pip-audit -r forks/serena/requirements.txt` | ✅ No known vulnerabilities (`uv export` + pip-audit, 2026-04-01; pywebview dev version skipped — not on PyPI) |
-| No telemetry/phoning home | `grep -rn "requests\.\|urllib\|http" forks/serena/src/` | ✅ All `http` matches are URL strings in LSP server config (download URLs used only during install, not at runtime) |
+| No telemetry/phoning home | `grep -rn "requests\.\|urllib\|http" forks/serena/src/` | ⚠️ **Serena phones home by default.** `forks/serena/src/serena/agent.py` `_send_usage_info()` sends a `requests.get` to `https://oraios-software.de/serena_usage.php` on **every agent start** (params: OS, version, backend, dashboard flag, context — no file or code content). It is opt-**out**: the only vars it honours are `SERENA_USAGE_REPORTING=false`, `CI`, and `GITHUB_ACTIONS`. token-diet sets `SERENA_USAGE_REPORTING=false` in the Docker image, compose file, and the uvx launcher; Docker mode is additionally covered by `--network none`. Corrected 2026-08-19 — the prior claim that all `http` matches were install-time LSP downloads was false, and the `SERENA_NO_TELEMETRY=1` previously set by token-diet is read nowhere in Serena's source (it was a no-op). |
 | cmd_tools.py review | Review shell execution for injection risks | ⬜ Not verified in this pass |
 | LSP server downloads | Verify no auto-download at runtime (pre-install in Docker) | ⬜ Verified structurally — Docker image pre-installs servers; not smoke-tested |
 | File write scoping | Verify writes limited to project + .serena/ | ⬜ Not verified in this pass |
@@ -74,7 +74,7 @@ Pre-deployment security review for the RTK + tilth + Serena stack.
 
 | Check | Status |
 |---|---|
-| RTK: no outbound connections | ✅ No network crates in source; outbound telemetry stripped |
+| RTK: no outbound connections | ⚠️ Reachable: none. `ureq` **is** a compiled dependency (`forks/rtk/Cargo.toml`) and `telemetry.rs`/`telemetry_cmd.rs` contain real `ureq::post` calls, but token-diet never sets `RTK_TELEMETRY_URL` at build time, so both call sites compile to unreachable dead code in the shipped binary. Not "no network crates" — corrected 2026-08-19. |
 | tilth: no outbound connections | ✅ No network crates found in source |
 | Serena Docker: `network_mode: none` | ✅ Confirmed in compose.yml |
 | ICM: no outbound connections (`--local` build) | ✅ `--no-default-features --features tui` omits `fastembed`; binary cannot fetch a model. ⚠️ Online/default build downloads ~270 MB from HF Hub on `token-diet icm warmup` — disabled by default via `[embeddings] enabled=false` in the ICM config file |

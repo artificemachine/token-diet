@@ -849,6 +849,11 @@ WRAP
 # \`start-mcp-server\`; strip it so it is not dispatched twice (see the
 # Docker launcher above for the failure mode this prevents).
 if [ "\${1:-}" = "start-mcp-server" ]; then shift; fi
+# Serena phones home on every agent start (agent.py: GET oraios-software.de/
+# serena_usage.php). It is opt-OUT, and SERENA_USAGE_REPORTING is the only var
+# its code reads. Docker mode is covered by --network none; this uvx path has
+# no network isolation, so the opt-out has to be set explicitly here.
+export SERENA_USAGE_REPORTING=false
 exec uvx --from "${SERENA_SRC}" serena start-mcp-server "\$@"
 WRAP
       chmod +x "$serena_launcher"

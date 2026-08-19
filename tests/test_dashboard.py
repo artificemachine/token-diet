@@ -22,6 +22,58 @@ def test_collect_returns_required_keys(dashboard_mod):
         assert "version" in result
         assert "alerts" in result
 
+# --- Alert banner data (loops + leaks) -------------------------------------
+# The dashboard's alert-banner JS reads d.loops.loops[] and d.leaks.leaks[],
+# but collect() never populated either key, so both banners were permanently
+# dead. These pin the backend/frontend contract the JS already expects.
+
+FAKE_GAIN = """RTK Token Savings (Global Scope)
+
+By Command
+────────────────────────────────────────────────────────────────────────
+  #  Command                   Count   Saved    Avg%    Time  Impact
+────────────────────────────────────────────────────────────────────────
+ 1.  rtk read                   2811  141.2M   34.6%     5ms  ██████████
+ 2.  rtk cat src/main.rs           4   80.0K   50.0%    12ms  ██░░░░░░░░
+ 3.  rtk grep                      1   22.2K   22.9%   290ms  ░░░░░░░░░░
+────────────────────────────────────────────────────────────────────────
+"""
+
+def test_loops_stats_flags_commands_at_or_above_threshold(dashboard_mod):
+    """loops_stats() returns the shape the alert JS reads: {'loops': [{cmd,count}]}."""
+    result = dashboard_mod.loops_stats(FAKE_GAIN)
+    cmds = {l["cmd"]: l for l in result["loops"]}
+    assert "rtk read" in cmds
+    assert cmds["rtk read"]["count"] == 2811
+    # count 1 is below the >=3 loop threshold
+    assert "rtk grep" not in cmds
+
+def test_loops_stats_returns_empty_when_no_history(dashboard_mod):
+    assert dashboard_mod.loops_stats("") == {"loops": []}
+
+def test_leaks_stats_detects_repeated_file_reads(dashboard_mod):
+    """leaks_stats() returns the shape the alert JS reads: {'leaks': [{file,count}]}."""
+    result = dashboard_mod.leaks_stats(FAKE_GAIN)
+    files = {l["file"]: l for l in result["leaks"]}
+    assert "src/main.rs" in files
+    assert files["src/main.rs"]["count"] == 4
+
+def test_leaks_stats_returns_empty_when_no_history(dashboard_mod):
+    assert dashboard_mod.leaks_stats("") == {"leaks": []}
+
+def test_collect_populates_loops_and_leaks_keys(dashboard_mod):
+    """Regression: collect() must emit the keys the alert banner reads."""
+    dashboard_mod._CACHE["data"] = None
+    dashboard_mod._CACHE["expires"] = 0
+    with patch.object(dashboard_mod, "_get_rtk_daily", return_value=None), \
+         patch.object(dashboard_mod, "_get_rtk_total", return_value=0), \
+         patch.object(dashboard_mod, "run", return_value=FAKE_GAIN):
+        result = dashboard_mod.collect()
+    assert "loops" in result, "alert banner reads d.loops — collect() must set it"
+    assert "leaks" in result, "alert banner reads d.leaks — collect() must set it"
+    assert "loops" in result["loops"]
+    assert "leaks" in result["leaks"]
+
 def test_rtk_stats_parses_json(dashboard_mod):
     """rtk_stats() parses the summary and daily fields from data dict."""
     fake_data = {

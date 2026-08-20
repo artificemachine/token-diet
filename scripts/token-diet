@@ -12,7 +12,7 @@
 
 set -euo pipefail
 
-readonly TD_VERSION="1.15.26"
+readonly TD_VERSION="1.15.27"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # --- Colors -------------------------------------------------------------------
@@ -1996,10 +1996,15 @@ cmd_repair() {
 import json, sys
 try:
     d = json.load(open(sys.argv[1]))
-    servers = d.get("mcpServers", {})
+    # OpenCode uses "mcp"; every other host uses "mcpServers". cmd_doctor
+    # already reads both — repair must too, or it reports nothing to fix on
+    # exactly the configs doctor flags.
+    servers = d.get("mcpServers") or d.get("mcp") or {}
     key = next((k for k in servers if sys.argv[2].lower() in k.lower()), None)
     if key is None: sys.exit(1)
-    print(servers[key].get("command", ""))
+    cmd = servers[key].get("command", "")
+    # OpenCode's "command" is an argv array; the binary is element 0.
+    print(cmd[0] if isinstance(cmd, list) and cmd else (cmd if isinstance(cmd, str) else ""))
 except Exception:
     sys.exit(1)
 PY
@@ -2030,11 +2035,19 @@ import tdconfig
 cfg_path, tool_name, new_cmd = sys.argv[1], sys.argv[2], sys.argv[3]
 
 def mutate(d):
-    servers = d.get("mcpServers", {})
+    # Match the dialect the read side resolved: OpenCode "mcp" vs "mcpServers".
+    servers = d.get("mcpServers") or d.get("mcp") or {}
     key = next((k for k in servers if tool_name.lower() in k.lower()), None)
     if key is None:
         return False          # nothing to change; skip the write entirely
-    servers[key]["command"] = new_cmd
+    existing = servers[key].get("command")
+    if isinstance(existing, list) and existing:
+        # Preserve the rest of the argv (e.g. ["tilth", "--mcp"]); swap only
+        # the binary. Rewriting it to a bare string would break OpenCode,
+        # whose >=1.18 schema requires command to be an array.
+        servers[key]["command"] = [new_cmd] + existing[1:]
+    else:
+        servers[key]["command"] = new_cmd
 
 # This was already atomic via os.replace, but hand-rolled: no fsync, no mode
 # preservation, no backup, and an unhandled json.load raising a raw traceback
@@ -2058,7 +2071,12 @@ PY
   local cc_global="$HOME/.claude.json"
   local cd_mac="$HOME/Library/Application Support/Claude/claude_desktop_config.json"
   local cd_linux="$HOME/.config/Claude/claude_desktop_config.json"
+  # OpenCode: prefer XDG path if it exists, fall back to legacy. Must match
+  # cmd_doctor's resolution exactly — repair previously only looked at the
+  # legacy path, so on an XDG-layout install (what install.sh writes) doctor
+  # would report a broken OpenCode entry that repair then silently skipped.
   local oc_cfg="$HOME/.opencode.json"
+  [ -f "$HOME/.config/opencode/opencode.json" ] && oc_cfg="$HOME/.config/opencode/opencode.json"
 
   local _mcp_tool
   for _mcp_tool in tilth serena icm; do

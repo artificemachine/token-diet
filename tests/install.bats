@@ -658,6 +658,36 @@ PY
   ! grep -q 'SERENA_NO_TELEMETRY=1' "$root/docker/compose.yml"
 }
 
+@test "install: serena launcher is rewritten even if the existing path is a dangling symlink" {
+  # Earlier installs symlinked the launcher into a venv inside the checkout.
+  # If that checkout is later moved, re-cloned, or removed, the symlink dangles
+  # -- and `cat > dangling-symlink` fails with ENOENT, so install.sh died with a
+  # bare "No such file or directory" from bash and no diagnosis. Upgrading over
+  # any venv-mode install hit this.
+  mock_install_prereqs
+  mock_cmd opencode
+  echo '{}' > "$TMP_HOME/.opencode.json"
+  cat > "$TMP_BIN/uvx" << 'MOCK'
+#!/usr/bin/env bash
+exit 0
+MOCK
+  chmod +x "$TMP_BIN/uvx"
+
+  mkdir -p "$TMP_HOME/.local/bin"
+  ln -s "$TMP_HOME/definitely/not/here/serena" "$TMP_HOME/.local/bin/serena"
+  [ -L "$TMP_HOME/.local/bin/serena" ]
+  [ ! -e "$TMP_HOME/.local/bin/serena" ]   # dangling
+
+  run bash "$SCRIPTS_DIR/install.sh" --serena-only --hosts opencode
+  [ "$status" -eq 0 ]
+
+  # Replaced by a real launcher, not left as a broken link.
+  [ ! -L "$TMP_HOME/.local/bin/serena" ]
+  [ -f "$TMP_HOME/.local/bin/serena" ]
+  [ -x "$TMP_HOME/.local/bin/serena" ]
+  grep -q 'token-diet Serena launcher' "$TMP_HOME/.local/bin/serena"
+}
+
 @test "serena telemetry: generated uvx launcher carries the opt-out" {
   mock_install_prereqs
   mock_cmd opencode

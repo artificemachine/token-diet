@@ -51,7 +51,10 @@ COPY --from=builder /usr/local/bin/tsc /usr/local/bin/tsc
 LABEL org.opencontainers.image.version="1.5.4.dev0"
 
 ENV PATH="/opt/serena-venv/bin:$PATH"
-ENV SERENA_NO_TELEMETRY=1
+# SERENA_USAGE_REPORTING is the only opt-out Serena's code reads (agent.py
+# _send_usage_info). The previous SERENA_NO_TELEMETRY=1 appears nowhere in
+# Serena's source and was a no-op; `network_mode: none` was doing all the work.
+ENV SERENA_USAGE_REPORTING=false
 
 # Non-root user
 RUN useradd -m -s /bin/bash serena

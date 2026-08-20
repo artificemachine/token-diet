@@ -89,6 +89,41 @@ warn() { echo -e "  ${YELLOW}!${NC}  $*"; }
 dry()  { echo -e "  ${DIM}[dry-run]${NC}  $*"; }
 miss() { echo -e "  ${DIM}–${NC}  $*  (not found, skipping)"; }
 
+# --- Partial-failure reporting ------------------------------------------------
+# Mirrors install.sh's TD_MUTATED/_td_on_error contract. This matters MORE here
+# than in install.sh: uninstall is the rollback path, so it runs when something
+# has already gone wrong. Dying at host five under `set -e` with no trap left
+# the user with five hosts half-cleaned and no record of which.
+TD_REMOVED=()
+
+td_record_removal() {
+  TD_REMOVED+=("$1")
+}
+
+_td_on_error() {
+  local exit_code=$1 line=$2
+  echo "" >&2
+  printf '%b\n' "${RED:-}[uninstall] FAILED at line ${line} (exit ${exit_code})${NC:-}" >&2
+
+  if [ "${#TD_REMOVED[@]}" -gt 0 ]; then
+    echo "" >&2
+    echo "Already removed or modified before the failure:" >&2
+    local f
+    for f in "${TD_REMOVED[@]}"; do
+      echo "  - $f" >&2
+    done
+  else
+    echo "Nothing had been removed before the failure." >&2
+  fi
+
+  echo "" >&2
+  echo "Re-running uninstall.sh is safe: every removal step is idempotent." >&2
+  echo "To restore a config from its backup:  cp <file>.bak-token-diet-<ts> <file>" >&2
+  exit "$exit_code"
+}
+
+trap '_td_on_error $? $LINENO' ERR
+
 # --- Argument parsing ---------------------------------------------------------
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -151,9 +186,24 @@ def atomic_write(path, text):
         except OSError:
             pass
         raise
+def td_load(p):
+    """Load JSON, or back the file up and skip this host. Uninstall must never
+    abort the whole run because one unrelated host config is malformed."""
+    try:
+        with open(p) as f:
+            return json.load(f)
+    except FileNotFoundError:
+        sys.exit(0)
+    except (json.JSONDecodeError, ValueError) as e:
+        import shutil, time
+        b = p + ".corrupt-" + time.strftime("%Y%m%d-%H%M%S")
+        shutil.copy2(p, b)
+        print("[token-diet] SKIP: " + p + " is malformed JSON (" + str(e)
+              + "); backed up to " + b + ". Left untouched.", file=sys.stderr)
+        sys.exit(0)
+
 cfg_path, key = sys.argv[1], sys.argv[2]
-with open(cfg_path) as f:
-    d = json.load(f)
+d = td_load(cfg_path)
 changed = False
 if "mcp" in d and key in d["mcp"]:
     del d["mcp"][key]
@@ -203,12 +253,22 @@ def atomic_write(path, text):
         except OSError:
             pass
         raise
+def td_load(p):
+    try:
+        with open(p) as f:
+            return json.load(f)
+    except FileNotFoundError:
+        sys.exit(0)
+    except (json.JSONDecodeError, ValueError) as e:
+        import shutil, time
+        b = p + ".corrupt-" + time.strftime("%Y%m%d-%H%M%S")
+        shutil.copy2(p, b)
+        print("[token-diet] SKIP: " + p + " is malformed JSON (" + str(e)
+              + "); backed up to " + b + ". Left untouched.", file=sys.stderr)
+        sys.exit(0)
+
 cfg_path, relpath = sys.argv[1], sys.argv[2]
-try:
-    with open(cfg_path) as f:
-        d = json.load(f)
-except Exception:
-    sys.exit(0)
+d = td_load(cfg_path)
 plugins = d.get("plugin")
 if isinstance(plugins, list) and relpath in plugins:
     d["plugin"] = [p for p in plugins if p != relpath]
@@ -248,9 +308,22 @@ def atomic_write(path, text):
         except OSError:
             pass
         raise
+def td_load(p):
+    try:
+        with open(p) as f:
+            return json.load(f)
+    except FileNotFoundError:
+        sys.exit(0)
+    except (json.JSONDecodeError, ValueError) as e:
+        import shutil, time
+        b = p + ".corrupt-" + time.strftime("%Y%m%d-%H%M%S")
+        shutil.copy2(p, b)
+        print("[token-diet] SKIP: " + p + " is malformed JSON (" + str(e)
+              + "); backed up to " + b + ". Left untouched.", file=sys.stderr)
+        sys.exit(0)
+
 cfg_path, key = sys.argv[1], sys.argv[2]
-with open(cfg_path) as f:
-    d = json.load(f)
+d = td_load(cfg_path)
 if "mcpServers" in d and key in d["mcpServers"]:
     del d["mcpServers"][key]
     atomic_write(cfg_path, json.dumps(d, indent=2) + "\n")
@@ -290,9 +363,22 @@ def atomic_write(path, text):
         except OSError:
             pass
         raise
+def td_load(p):
+    try:
+        with open(p) as f:
+            return json.load(f)
+    except FileNotFoundError:
+        sys.exit(0)
+    except (json.JSONDecodeError, ValueError) as e:
+        import shutil, time
+        b = p + ".corrupt-" + time.strftime("%Y%m%d-%H%M%S")
+        shutil.copy2(p, b)
+        print("[token-diet] SKIP: " + p + " is malformed JSON (" + str(e)
+              + "); backed up to " + b + ". Left untouched.", file=sys.stderr)
+        sys.exit(0)
+
 cfg_path, key = sys.argv[1], sys.argv[2]
-with open(cfg_path) as f:
-    d = json.load(f)
+d = td_load(cfg_path)
 if "servers" in d and key in d["servers"]:
     del d["servers"][key]
     atomic_write(cfg_path, json.dumps(d, indent=2) + "\n")
@@ -334,10 +420,21 @@ cfg_path = sys.argv[1]
 BEGIN = "<!-- token-diet:begin -->"
 END   = "<!-- token-diet:end -->"
 pattern = re.compile(r"\n*" + re.escape(BEGIN) + r".*?" + re.escape(END) + r"\n*", re.DOTALL)
-try:
-    with open(cfg_path) as f: data = json.load(f)
-except (json.JSONDecodeError, ValueError):
-    sys.exit(0)
+def td_load(p):
+    try:
+        with open(p) as f:
+            return json.load(f)
+    except FileNotFoundError:
+        sys.exit(0)
+    except (json.JSONDecodeError, ValueError) as e:
+        import shutil, time
+        b = p + ".corrupt-" + time.strftime("%Y%m%d-%H%M%S")
+        shutil.copy2(p, b)
+        print("[token-diet] SKIP: " + p + " is malformed JSON (" + str(e)
+              + "); backed up to " + b + ". Left untouched.", file=sys.stderr)
+        sys.exit(0)
+
+data = td_load(cfg_path)
 changed = False
 for mode_name in ("build", "plan"):
     prompt = data.get("mode", {}).get(mode_name, {}).get("prompt", "")
@@ -400,12 +497,22 @@ def atomic_write(path, text):
         except OSError:
             pass
         raise
+def td_load(p):
+    try:
+        with open(p) as f:
+            return json.load(f)
+    except FileNotFoundError:
+        sys.exit(0)
+    except (json.JSONDecodeError, ValueError) as e:
+        import shutil, time
+        b = p + ".corrupt-" + time.strftime("%Y%m%d-%H%M%S")
+        shutil.copy2(p, b)
+        print("[token-diet] SKIP: " + p + " is malformed JSON (" + str(e)
+              + "); backed up to " + b + ". Left untouched.", file=sys.stderr)
+        sys.exit(0)
+
 cfg_path, event, command = sys.argv[1], sys.argv[2], sys.argv[3]
-try:
-    with open(cfg_path) as f:
-        d = json.load(f)
-except Exception:
-    sys.exit(0)
+d = td_load(cfg_path)
 hooks = d.get("hooks", {})
 entries = hooks.get(event, [])
 kept = [e for e in entries if not any(h.get("command") == command for h in e.get("hooks", []))]

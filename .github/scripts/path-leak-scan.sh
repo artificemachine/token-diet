@@ -22,12 +22,18 @@ if [ "${1:-}" != "--full-tree" ] && [ -z "$BASE_SHA" ]; then
   exit 1
 fi
 
-# Files that legitimately reference example/home paths. The scanner itself and
-# the changelog are exempt; everything else (code, config, .vscode) is scanned.
-# tests/path-leak.bats is exempt for the same reason the scanner itself is:
-# its fixtures deliberately contain planted home paths, because a guard that is
-# only ever observed passing has not been observed working.
-SKIP_PATTERNS='(^CHANGELOG\.md$|\.github/scripts/path-leak-scan\.sh$|^tests/path-leak\.bats$)'
+# Files that legitimately reference example/home paths. Only the scanner itself
+# and its own fixtures are exempt: both deliberately contain planted home paths,
+# because a guard that is only ever observed passing has not been observed
+# working. Everything else — code, config, .vscode, AND CHANGELOG.md — is
+# scanned.
+#
+# CHANGELOG.md was exempt until 2026-08-19. That exemption is precisely how a
+# real home path reached a public file with a green CI run: a changelog entry
+# describing a path redaction quoted the path it was redacting, and the scanner
+# skipped the one file it was written into. A changelog is shipped content; if
+# an entry needs to reference a path, redact the username in the entry.
+SKIP_PATTERNS='(\.github/scripts/path-leak-scan\.sh$|^tests/path-leak\.bats$)'
 
 # Patterns that indicate a hardcoded local-machine reference.
 # Note: \\+ tolerates JSON-escaped Windows paths (C:\\Users\\) as well as raw.

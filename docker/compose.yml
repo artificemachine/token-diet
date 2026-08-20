@@ -14,7 +14,9 @@ services:
     volumes:
       - "${PROJECT_DIR:-.}:/workspace:ro"
     environment:
-      - SERENA_NO_TELEMETRY=1
+      # The only opt-out Serena's code actually reads (agent.py
+      # _send_usage_info). SERENA_NO_TELEMETRY was a no-op.
+      - SERENA_USAGE_REPORTING=false
     # MCP communicates via stdio
     stdin_open: true
     tty: true

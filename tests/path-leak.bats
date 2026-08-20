@@ -81,8 +81,24 @@ _track() {
   [ "$status" -eq 0 ]
 }
 
-@test "full-tree: skips CHANGELOG.md and the scanner itself" {
+@test "full-tree: scans CHANGELOG.md — it is not exempt" {
+  # CHANGELOG.md used to be skipped wholesale so entries could quote a
+  # third-party path. That exemption is exactly how a real home path reached
+  # a public file with a green CI run (2026-08-17): the entry describing a
+  # redaction quoted the very path it was redacting, and nothing caught it.
+  # A changelog is shipped content like any other file.
   _track CHANGELOG.md "- fixed path /Users/somebody/thing in a past release"
+  run bash "$SCANNER" --full-tree
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"CHANGELOG.md"* ]]
+}
+
+@test "full-tree: still skips the scanner and its own fixtures" {
+  # These two must stay exempt: both deliberately contain planted paths, and a
+  # guard that only ever passes has not been observed working.
+  mkdir -p .github/scripts tests
+  _track .github/scripts/path-leak-scan.sh '/Users/somebody/.local/bin/x'
+  _track tests/path-leak.bats '/Users/somebody/.local/bin/x'
   run bash "$SCANNER" --full-tree
   [ "$status" -eq 0 ]
 }

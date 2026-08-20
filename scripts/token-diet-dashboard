@@ -7,6 +7,7 @@ import http.server
 import json
 import os
 import pathlib
+import re
 import subprocess
 import sys
 import threading
@@ -336,6 +337,64 @@ def _get_version():
     except: pass
     return "1.10.0"
 
+# --- Alert banner data ------------------------------------------------------
+# Per-command history is only available in `rtk gain`'s TEXT output; the JSON
+# formatter emits `summary` alone (no `commands` key), which is why the earlier
+# "-H --format json" approach silently produced nothing. Parse the same "By
+# Command" table the `token-diet loops` / `token-diet leaks` CLI parses, so the
+# dashboard and the CLI cannot disagree.
+_GAIN_ROW = re.compile(
+    r'^\s*\d+\.\s+(.+?)\s{2,}(\d+)\s+([\d.]+[KM]?)\s+([\d.]+)%', re.MULTILINE)
+_FILE_READ = re.compile(
+    r'\b(?:rtk\s+)?(?:cat|head|tail|tilth\s+read|tilth_read)\s+(\S+\.\w+)')
+
+LOOP_THRESHOLD = 3   # same threshold as `token-diet loops`
+LEAK_THRESHOLD = 2   # same threshold as `token-diet leaks`
+
+def _parse_saved(s):
+    s = s.strip()
+    try:
+        if s.endswith("K"): return int(float(s[:-1]) * 1_000)
+        if s.endswith("M"): return int(float(s[:-1]) * 1_000_000)
+        return int(float(s))
+    except ValueError:
+        return 0
+
+def _gain_rows(raw):
+    """Yield (cmd, count, total_input) for each row of the 'By Command' table."""
+    for m in _GAIN_ROW.finditer(raw or ""):
+        saved = _parse_saved(m.group(3))
+        try:
+            pct = float(m.group(4))
+        except ValueError:
+            pct = 0.0
+        total_input = int(saved / (pct / 100)) if pct > 0 else saved
+        yield m.group(1).rstrip(), int(m.group(2)), saved, total_input
+
+def loops_stats(raw=None):
+    """Commands repeated >= LOOP_THRESHOLD times — agent loop patterns."""
+    if raw is None:
+        raw = run(["rtk", "gain"], timeout=10)
+    loops = [
+        {"cmd": cmd, "count": count, "wasted": max(total_input - saved, 0)}
+        for cmd, count, saved, total_input in _gain_rows(raw)
+        if count >= LOOP_THRESHOLD
+    ]
+    loops.sort(key=lambda x: x["count"], reverse=True)
+    return {"loops": loops}
+
+def leaks_stats(raw=None):
+    """Files read >= LEAK_THRESHOLD times — redundant context spend."""
+    if raw is None:
+        raw = run(["rtk", "gain"], timeout=10)
+    leaks = []
+    for cmd, count, _saved, total_input in _gain_rows(raw):
+        fm = _FILE_READ.search(cmd)
+        if fm and count >= LEAK_THRESHOLD:
+            leaks.append({"file": fm.group(1), "count": count, "tokens": total_input})
+    leaks.sort(key=lambda x: x["count"], reverse=True)
+    return {"leaks": leaks}
+
 def collect():
     now = time.time()
     if _CACHE["data"] and now < _CACHE["expires"]:
@@ -380,9 +439,17 @@ def collect():
     
     combined_daily = sorted(daily_map.values(), key=lambda x: x["date"])
 
+    # One `rtk gain` call feeds both detectors — they parse the same table.
+    gain_raw = run(["rtk", "gain"], timeout=10)
+    loops = loops_stats(gain_raw)
+    leaks = leaks_stats(gain_raw)
+
     alerts = []
-    # (OMITTING DUPLICATE ALERT LOGIC FOR BREVITY - it was already there)
-    
+    if loops["loops"]:
+        alerts.append({"kind": "loops", "count": len(loops["loops"])})
+    if leaks["leaks"]:
+        alerts.append({"kind": "leaks", "count": len(leaks["leaks"])})
+
     budget = budget_stats(total_input)
     active_file = str(pathlib.Path.home() / budget["file"].replace("~/", "")) if budget else None
 
@@ -406,11 +473,10 @@ def collect():
         "projection": projection_stats({"daily": combined_daily}),
         "missing_hosts": {"tilth": _missing_hosts("tilth"), "serena": _missing_hosts("serena"), "icm": _missing_hosts("icm")},
         "alerts": alerts,
+        "loops": loops,
+        "leaks": leaks,
         "cached_at": datetime.datetime.now().strftime("%H:%M:%S")
     }
-    _CACHE["data"] = data
-    _CACHE["expires"] = now + _CACHE_TTL
-    return data
     _CACHE["data"] = data
     _CACHE["expires"] = now + _CACHE_TTL
     return data

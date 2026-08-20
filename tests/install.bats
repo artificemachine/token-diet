@@ -637,6 +637,87 @@ PY
   [ "$status" -eq 0 ]
 }
 
+# --- Serena telemetry opt-out ------------------------------------------------
+# forks/serena/src/serena/agent.py:730 GETs https://oraios-software.de/serena_usage.php
+# on every agent start. It is OPT-OUT, and the only env var it honours is
+# SERENA_USAGE_REPORTING=false. token-diet previously set SERENA_NO_TELEMETRY=1,
+# which appears nowhere in Serena's source — a no-op. Docker mode was saved by
+# `--network none`; the default uvx mode had no protection at all.
+
+@test "serena telemetry: uvx launcher template sets the opt-out Serena actually reads" {
+  grep -q 'SERENA_USAGE_REPORTING=false' "$SCRIPTS_DIR/install.sh"
+}
+
+@test "serena telemetry: docker image sets the real opt-out, not the no-op var" {
+  local root="$SCRIPTS_DIR/.."
+  # The var Serena's code actually checks must be present...
+  grep -q 'SERENA_USAGE_REPORTING' "$root/docker/Dockerfile.serena"
+  grep -q 'SERENA_USAGE_REPORTING' "$root/docker/compose.yml"
+  # ...and the var it never reads must not be the sole defence.
+  ! grep -q 'SERENA_NO_TELEMETRY=1' "$root/docker/Dockerfile.serena"
+  ! grep -q 'SERENA_NO_TELEMETRY=1' "$root/docker/compose.yml"
+}
+
+@test "serena telemetry: generated uvx launcher carries the opt-out" {
+  mock_install_prereqs
+  mock_cmd opencode
+  echo '{}' > "$TMP_HOME/.opencode.json"
+  # Mock uvx so the online-mode prefetch check succeeds without network.
+  cat > "$TMP_BIN/uvx" << 'MOCK'
+#!/usr/bin/env bash
+exit 0
+MOCK
+  chmod +x "$TMP_BIN/uvx"
+
+  run bash "$SCRIPTS_DIR/install.sh" --serena-only --hosts opencode
+  [ "$status" -eq 0 ]
+  [ -x "$TMP_HOME/.local/bin/serena" ]
+  grep -q 'SERENA_USAGE_REPORTING=false' "$TMP_HOME/.local/bin/serena"
+}
+
+@test "compliance: security-audit.md does not claim telemetry is stripped" {
+  local doc="$SCRIPTS_DIR/../compliance/security-audit.md"
+  # RTK's telemetry.rs and the ureq dependency are both present in the fork.
+  # "stripped" was false; the accurate claim is "present but inert by default".
+  ! grep -qi 'telemetry stripped' "$doc"
+  ! grep -qi 'outbound telemetry stripped' "$doc"
+}
+
+# --- uninstall.sh failure reporting -----------------------------------------
+# uninstall.sh is the ROLLBACK path: it is what a user runs when something has
+# already gone wrong. It mutates configs across seven hosts under `set -e` with
+# no ERR trap, and 3 of its 6 embedded json.load sites had no exception handling
+# at all — so one malformed host config killed it mid-run with a raw Python
+# traceback and no record of what had already been removed.
+
+@test "uninstall: installs an ERR trap so a mid-run failure reports what was mutated" {
+  grep -qE "^trap '.*' ERR" "$SCRIPTS_DIR/uninstall.sh"
+}
+
+@test "uninstall: malformed config does not produce a raw Python traceback" {
+  mkdir -p "$TMP_HOME/.claude"
+  printf '{"broken json\n' > "$TMP_HOME/.claude/settings.json"
+
+  run bash "$SCRIPTS_DIR/uninstall.sh" --force
+
+  # The failure must be reported in token-diet's own voice, never as a bare
+  # interpreter stack trace leaking out of an embedded heredoc.
+  ! grep -q "Traceback (most recent call last)" <<< "$output"
+  ! grep -q "json.decoder.JSONDecodeError" <<< "$output"
+}
+
+@test "uninstall: malformed config is preserved and backed up, not silently skipped" {
+  mkdir -p "$TMP_HOME/.claude"
+  printf '{"broken json\n' > "$TMP_HOME/.claude/settings.json"
+
+  run bash "$SCRIPTS_DIR/uninstall.sh" --force
+
+  # Original content untouched...
+  grep -q "broken json" "$TMP_HOME/.claude/settings.json"
+  # ...and a timestamped copy exists so the user can recover it.
+  ls "$TMP_HOME/.claude/settings.json".corrupt-* >/dev/null 2>&1
+}
+
 # ---------------------------------------------------------------------------
 # Cycle 6.2 — modifier-only flags must not suppress install (v1.6.1, issue #38)
 # ---------------------------------------------------------------------------

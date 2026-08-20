@@ -1353,6 +1353,37 @@ assert len(d['findings']) > 0
 # Cycle 15.3 — repair: stale MCP command repair
 # ---------------------------------------------------------------------------
 
+@test "repair: repairs an OpenCode config at the XDG path, not just the legacy one" {
+  # cmd_doctor prefers the XDG config (.config/opencode/opencode.json under
+  # $HOME) over the legacy dotfile, but cmd_repair only ever looked at the
+  # legacy path — so on any XDG-layout install (the default install.sh writes)
+  # `token-diet repair` silently did nothing for OpenCode while `doctor`
+  # correctly reported the problem. A repair that cannot reach the file the
+  # doctor diagnoses is not a repair.
+  mock_rtk_with_init_show healthy
+  mock_cmd tilth
+  mock_cmd uvx
+
+  mkdir -p "$TMP_HOME/.config/opencode"
+  cat > "$TMP_HOME/.config/opencode/opencode.json" <<'JSON'
+{"mcp": {"tilth": {"type": "local", "command": ["/nonexistent/tilth", "--mcp"]}}}
+JSON
+
+  run "$SCRIPTS_DIR/token-diet" repair
+  [ "$status" -eq 0 ]
+
+  local updated
+  updated=$(python3 -c "
+import json
+d = json.load(open('$TMP_HOME/.config/opencode/opencode.json'))
+e = d.get('mcp', {}).get('tilth', {})
+c = e.get('command')
+print(c[0] if isinstance(c, list) else (c or ''))
+")
+  [[ "$updated" != "/nonexistent/tilth" ]]
+  [[ "$updated" != "" ]]
+}
+
 @test "repair: updates stale tilth command path in claude-code config" {
   mock_rtk_with_init_show healthy
   mock_cmd tilth

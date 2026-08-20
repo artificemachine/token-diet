@@ -1,14 +1,25 @@
 # Branch protection for `main`
 
-As of 2026-07-20, `main` has **no branch protection**. The API returns
-`Branch not protected`. Three CI gates run on every PR and none of them can
-block a merge:
+**Status: ACTIVE.** `main` is protected. Verified against the live API on
+2026-08-20 — the settings below are what the repository actually returns, not
+a proposal.
 
 | Check | Job name (the required-check "context") | Currently |
 |---|---|---|
-| Tests | `bats + pytest` | reports only |
-| Secret scan | `gitleaks` | reports only |
-| Path leak guard | `Path Leak Guard` | reports only |
+| Tests | `bats + pytest` | **required** |
+| Secret scan | `gitleaks` | **required** |
+| Path leak guard | `Path Leak Guard` | **required** |
+
+Verify at any time with:
+
+```bash
+gh api repos/artificemachine/token-diet/branches/main/protection
+```
+
+> This file previously described `main` as unprotected, which had been false
+> for some time — the protection was applied but the doc was never updated.
+> An audit on 2026-07-22 flagged the contradiction; it was corrected on
+> 2026-08-20 after reading the live API.
 
 That is a claim/reality gap: the repo presents as gated and is not. A red run
 merges exactly as easily as a green one.
@@ -30,13 +41,18 @@ The accompanying `branch-protection.json`:
     "strict": true,
     "contexts": ["bats + pytest", "gitleaks", "Path Leak Guard"]
   },
-  "enforce_admins": false,
+  "enforce_admins": true,
   "required_pull_request_reviews": null,
   "restrictions": null,
   "allow_force_pushes": false,
   "allow_deletions": false
 }
 ```
+
+This block matches the live API response as of 2026-08-20. It previously read
+`"enforce_admins": false`, contradicting the section immediately below, which
+argues `true` is the correct value — the prose was updated when the decision
+changed but the JSON was not.
 
 ## Why these specific settings
 

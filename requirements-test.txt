@@ -9,5 +9,5 @@
 # Install: pip install -r requirements-test.txt
 
 pytest==9.1.1
-tiktoken==0.13.0
+tiktoken==0.14.0
 pdfplumber==0.11.10

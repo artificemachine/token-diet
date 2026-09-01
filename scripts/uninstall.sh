@@ -3,12 +3,26 @@
 #
 # Usage:
 #   bash uninstall.sh [--dry-run] [--force] [--include-data] [--include-docker]
+#                     [--only LIST | --skip LIST]
 #
 # Flags:
 #   --dry-run        Preview what would be removed without making changes
 #   --force          Skip confirmation prompts
 #   --include-data   Also remove ~/.serena/memories (off by default)
 #   --include-docker Also remove token-diet/serena Docker image
+#   --only LIST      Remove ONLY these components (comma-separated)
+#   --skip LIST      Remove everything EXCEPT these components
+#
+# Components: rtk, rtk-mcp, tilth, serena, icm, token-diet
+#   Default is every component. `rtk` and `rtk-mcp` are separate: rtk is the
+#   binary and shell hooks that do the output compression, rtk-mcp is the MCP
+#   tool schema loaded into every session. `--only rtk-mcp` drops the schema and
+#   keeps the compression.
+#
+# Examples:
+#   bash uninstall.sh --only rtk-mcp            # reclaim MCP context, keep RTK
+#   bash uninstall.sh --only serena,tilth       # drop two tools
+#   bash uninstall.sh --skip icm                # remove all but ICM
 
 set -euo pipefail
 
@@ -16,6 +30,16 @@ DRY_RUN=false
 FORCE=false
 INCLUDE_DATA=false
 INCLUDE_DOCKER=false
+ONLY=""
+SKIP=""
+
+# Selectable components. `rtk` (binary + shell hooks, the actual output
+# compression) and `rtk-mcp` (a large MCP tool schema loaded into every session)
+# are deliberately separate so the schema can be dropped without losing the
+# compression. `token-diet` covers the CLI plus shared infrastructure
+# (the local bin lib dir, compat.json, hosts-mcp.json) not tied to one tool.
+TD_ALL_COMPONENTS="rtk rtk-mcp tilth serena icm token-diet"
+COMPONENTS="$TD_ALL_COMPONENTS"
 
 # --- Host registry ------------------------------------------------------------
 # uninstall.sh runs from the repo (like install.sh), so it sources the shared
@@ -131,16 +155,86 @@ while [[ $# -gt 0 ]]; do
     --force)          FORCE=true ;;
     --include-data)   INCLUDE_DATA=true ;;
     --include-docker) INCLUDE_DOCKER=true ;;
+    --only)           shift; ONLY="${1:-}" ;;
+    --only=*)         ONLY="${1#*=}" ;;
+    --skip)           shift; SKIP="${1:-}" ;;
+    --skip=*)         SKIP="${1#*=}" ;;
     *) echo "Unknown option: $1" >&2; exit 1 ;;
   esac
   shift
 done
+
+# --- Component selection ------------------------------------------------------
+# Resolve --only/--skip into COMPONENTS before any removal runs. An invalid
+# selection must abort before the first mutation, not half way through.
+
+# td_known_component <name> — true when <name> is a selectable component.
+td_known_component() {
+  case " $TD_ALL_COMPONENTS " in *" $1 "*) return 0 ;; *) return 1 ;; esac
+}
+
+# td_validate_selection <flag> <csv> — abort naming the first unknown component.
+td_validate_selection() {
+  local flag="$1" csv="$2" name
+  [ -n "$csv" ] || { echo "$flag requires a comma-separated component list" >&2; exit 1; }
+  local IFS=','
+  for name in $csv; do
+    name="$(echo "$name" | tr -d '[:space:]')"
+    [ -n "$name" ] || continue
+    if ! td_known_component "$name"; then
+      echo "Unknown component: $name" >&2
+      echo "Valid components: $TD_ALL_COMPONENTS" >&2
+      exit 1
+    fi
+  done
+}
+
+if [ -n "$ONLY" ] && [ -n "$SKIP" ]; then
+  echo "--only and --skip are mutually exclusive" >&2
+  exit 1
+fi
+
+if [ -n "$ONLY" ]; then
+  td_validate_selection --only "$ONLY"
+  COMPONENTS="$(echo "$ONLY" | tr ',' ' ' | tr -s ' ')"
+elif [ -n "$SKIP" ]; then
+  td_validate_selection --skip "$SKIP"
+  COMPONENTS=""
+  for _c in $TD_ALL_COMPONENTS; do
+    case ",$SKIP," in *",$_c,"*) continue ;; esac
+    COMPONENTS="$COMPONENTS $_c"
+  done
+  unset _c
+fi
+
+# td_component_of <path-or-key> — map a removal target to its component.
+# rtk-mcp is matched before rtk so the MCP schema and the compression binary
+# never collapse into the same component. Anything unrecognised belongs to
+# token-diet: shared infrastructure the CLI owns.
+td_component_of() {
+  case "$1" in
+    *rtk-mcp*)     echo "rtk-mcp" ;;
+    *rtk*)         echo "rtk" ;;
+    *tilth*)       echo "tilth" ;;
+    *serena*)      echo "serena" ;;
+    *icm*)         echo "icm" ;;
+    *)             echo "token-diet" ;;
+  esac
+}
+
+# td_selected <path-or-key> — true when this target's component is in scope.
+td_selected() {
+  local comp
+  comp="$(td_component_of "$1")"
+  case " $COMPONENTS " in *" $comp "*) return 0 ;; *) return 1 ;; esac
+}
 
 # --- Helpers ------------------------------------------------------------------
 
 # remove_file <path>
 remove_file() {
   local path="$1"
+  td_selected "$path" || return 0
   if [ ! -e "$path" ]; then
     miss "$path"
     return 0
@@ -160,6 +254,7 @@ remove_file() {
 remove_opencode_mcp_key() {
   local cfg="$1"
   local key="$2"
+  td_selected "$key" || return 0
   [ -f "$cfg" ] || { miss "$cfg (mcp.$key)"; return 0; }
   if $DRY_RUN; then
     dry "remove mcp.$key from $cfg"
@@ -227,6 +322,8 @@ PY
 remove_opencode_plugin() {
   local cfg="$1"
   local relpath="$2"
+  # The hooks plugin ships with the token-diet CLI, not with any single tool.
+  td_selected "token-diet" || return 0
   [ -f "$cfg" ] || { miss "$cfg (plugin $relpath)"; return 0; }
   if $DRY_RUN; then
     dry "remove plugin $relpath from $cfg"
@@ -282,6 +379,7 @@ PY
 remove_json_key() {
   local cfg="$1"
   local key="$2"
+  td_selected "$key" || return 0
   [ -f "$cfg" ] || { miss "$cfg (mcpServers.$key)"; return 0; }
   if $DRY_RUN; then
     dry "remove mcpServers.$key from $cfg"
@@ -337,6 +435,7 @@ PY
 remove_vscode_template_server() {
   local cfg="$1"
   local key="$2"
+  td_selected "$key" || return 0
   [ -f "$cfg" ] || { miss "$cfg (servers.$key)"; return 0; }
   if $DRY_RUN; then
     dry "remove servers.$key from $cfg"
@@ -390,6 +489,9 @@ PY
 # Removes the token-diet begin/end block from mode.build.prompt and mode.plan.prompt.
 strip_opencode_rules() {
   local cfg="$1"
+  # The injected rules block describes the whole stack and is written by the
+  # token-diet CLI install step, so it survives a single-tool removal.
+  td_selected "token-diet" || return 0
   [ -f "$cfg" ] || { miss "$cfg (mode.*.prompt token-diet block)"; return 0; }
   if $DRY_RUN; then
     dry "strip token-diet block from mode.build.prompt + mode.plan.prompt in $cfg"
@@ -452,6 +554,8 @@ PY
 remove_line_from_file() {
   local file="$1"
   local pattern="$2"
+  # The pattern names the doc being unlinked (e.g. '@token-diet.md').
+  td_selected "$pattern" || return 0
   [ -f "$file" ] || { miss "$file ($pattern)"; return 0; }
   if $DRY_RUN; then
     dry "remove '$pattern' from $file"
@@ -471,6 +575,9 @@ remove_hook_entry() {
   local cfg="$1"
   local event="$2"
   local command="$3"
+  # The hook command path names its owner (rtk-rewrite.sh -> rtk,
+  # token-diet-hooks/* -> token-diet), so the component falls out of the path.
+  td_selected "$command" || return 0
   [ -f "$cfg" ] || { miss "$cfg (hooks.$event)"; return 0; }
   if $DRY_RUN; then
     dry "remove hooks.$event entries matching $command from $cfg"
@@ -551,7 +658,8 @@ main() {
   remove_file "$HOME/.local/bin/token-diet"
   remove_file "$HOME/.local/bin/token-diet-dashboard"
   remove_file "$HOME/.local/bin/token-diet-mcp"
-  if [ -d "$HOME/.local/bin/lib" ]; then
+  # Shared shell libs belong to the token-diet component, not to any one tool.
+  if td_selected "token-diet" && [ -d "$HOME/.local/bin/lib" ]; then
     if $DRY_RUN; then
       dry "rm -rf $HOME/.local/bin/lib"
     else
@@ -581,15 +689,17 @@ main() {
   echo ""
   echo -e "${BOLD}Rust binaries (cargo uninstall)${NC}"
   if command -v cargo &>/dev/null; then
-    if $DRY_RUN; then
-      dry "cargo uninstall rtk"
-      dry "cargo uninstall tilth"
-      dry "cargo uninstall icm"
-    else
-      cargo uninstall rtk  2>/dev/null && ok "cargo uninstall rtk"  || miss "rtk (not installed)"
-      cargo uninstall tilth 2>/dev/null && ok "cargo uninstall tilth" || miss "tilth (not installed)"
-      cargo uninstall icm  2>/dev/null && ok "cargo uninstall icm"  || miss "icm (not installed)"
-    fi
+    for _crate in rtk tilth icm; do
+      td_selected "$_crate" || continue
+      if $DRY_RUN; then
+        dry "cargo uninstall $_crate"
+      else
+        cargo uninstall "$_crate" 2>/dev/null \
+          && ok "cargo uninstall $_crate" \
+          || miss "$_crate (not installed)"
+      fi
+    done
+    unset _crate
   else
     miss "cargo not found — skipping Rust binary removal"
   fi
@@ -690,9 +800,9 @@ remove_opencode_mcp_key "$HOME/.config/opencode/opencode.json" "rtk-mcp"
   local codex_cfg="$CODEX_CFG_PATH"
   if [ -f "$codex_cfg" ]; then
     if $DRY_RUN; then
-      dry "remove [mcp_servers.{tilth,serena,icm,token-diet,rtk-mcp}] blocks from $codex_cfg"
+      dry "remove [mcp_servers.{$(echo "$COMPONENTS" | tr ' ' ',')}] blocks from $codex_cfg"
     else
-      python3 - "$codex_cfg" << 'PY'
+      python3 - "$codex_cfg" "$COMPONENTS" << 'PY'
 import os, re, sys, tempfile
 def atomic_write(path, text):
     d = os.path.dirname(path) or "."
@@ -727,7 +837,18 @@ with open(path) as f:
 # part of the body being removed. User tables are never entered, so their content
 # is preserved verbatim.
 header_re = re.compile(r'^\[[A-Za-z0-9_.\-]+\]$')            # any TOML table header
-td_re     = re.compile(r'^\[mcp_servers\.(tilth|serena|icm|token-diet|rtk-mcp)\]$')
+# Only the selected components (argv[2], space-separated) are removed, so a
+# --only/--skip run leaves the deselected tables in place. rtk-mcp must be
+# alternated before rtk or the shorter name would shadow it.
+_selected = sorted(sys.argv[2].split(), key=len, reverse=True)
+# The trailing (\.[^\]]+)? also matches a server's SUB-tables, e.g.
+# [mcp_servers.tilth.tools.tilth_read] or [mcp_servers.icm.env]. Without it the
+# parent table is removed and its children are orphaned: the body loop stops at
+# the child header (a table header in its own right), leaving config that
+# references a server no longer defined. Observed live on a --only tilth run.
+td_re     = re.compile(
+    r'^\[mcp_servers\.(' + '|'.join(re.escape(c) for c in _selected) + r')(\.[^\]]+)?\]$'
+)
 out, i = [], 0
 while i < len(lines):
     if td_re.match(lines[i].strip()):
@@ -744,7 +865,7 @@ while i < len(lines):
 
 atomic_write(path, "".join(out))
 PY
-      ok "Removed mcp_servers.{tilth,serena,icm,token-diet,rtk-mcp} from $codex_cfg"
+      ok "Removed mcp_servers.{$(echo "$COMPONENTS" | tr ' ' ',')} from $codex_cfg"
     fi
   else
     miss "$codex_cfg"
@@ -790,7 +911,7 @@ PY
   # ~/.gemini/settings.json. Remove them symmetrically (same command-string key).
   remove_hook_entry "$HOME/.gemini/settings.json" "PreToolUse" "$docextract_cmd"
   remove_hook_entry "$HOME/.gemini/settings.json" "PostToolUse" "$ctxwarn_cmd"
-  if [ -d "$HOME/.local/bin/token-diet-hooks" ]; then
+  if td_selected "token-diet" && [ -d "$HOME/.local/bin/token-diet-hooks" ]; then
     if $DRY_RUN; then
       dry "rm -rf $HOME/.local/bin/token-diet-hooks"
     else
@@ -812,7 +933,7 @@ PY
 
   echo ""
   echo -e "${BOLD}Config directories${NC}"
-  if [ -d "$HOME/.config/token-diet" ]; then
+  if td_selected "token-diet" && [ -d "$HOME/.config/token-diet" ]; then
     if $DRY_RUN; then
       dry "rm -rf $HOME/.config/token-diet"
     else

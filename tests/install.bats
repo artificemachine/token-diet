@@ -2191,3 +2191,217 @@ assert not any(h.get("command") == ccmd for e in post for h in e.get("hooks", []
 assert any(h.get("command") == "echo user" for e in pre for h in e.get("hooks", [])), "user gemini hook removed!"
 PY
 }
+
+# ---------------------------------------------------------------------------
+# Cycle 12 — uninstall.sh: per-component selection (--only / --skip)
+#
+# The uninstaller was all-or-nothing: every run removed all four tools plus the
+# token-diet CLI. Sections are organised by host/artifact, not by tool, so tool
+# names are hardcoded at each call site. These tests pin the selection contract
+# before the gating helper is introduced.
+#
+# `rtk` and `rtk-mcp` are deliberately SEPARATE components: the rtk binary and
+# its shell hooks do the output compression, while rtk-mcp is a large MCP tool
+# schema loaded into every session. Dropping the schema while keeping the
+# compression is the main reason this selection exists.
+# ---------------------------------------------------------------------------
+
+# Plant every artifact a full install leaves behind, so each test can assert
+# both what was removed and what survived.
+plant_all_components() {
+  for b in rtk tilth icm serena token-diet; do
+    echo "#!/bin/bash" > "$TMP_HOME/.local/bin/$b"
+    chmod +x "$TMP_HOME/.local/bin/$b"
+  done
+  mock_mcp_config claude-code tilth
+  mock_mcp_config claude-code serena
+  mock_mcp_config claude-code icm
+  mock_mcp_config claude-code rtk-mcp
+}
+
+@test "install.sh --dry-run leaves an EXISTING host config byte-identical" {
+  # Regression: 'install.sh --dry-run does not write any files to HOME' only
+  # asserts no NEW files appear, so it never caught install_rtk_mcp printing
+  # "would register" and then falling through to the real per-host writes.
+  # A dry run against a host that already has a config MUTATED it, adding
+  # rtk-mcp. The project pre-commit hook runs install.sh --dry-run, so every
+  # commit silently re-registered rtk-mcp on the developer's own machine.
+  mkdir -p "$TMP_HOME/.config/opencode"
+  cat > "$TMP_HOME/.config/opencode/opencode.json" << 'JSON'
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "icm": {
+      "command": ["icm"],
+      "enabled": true,
+      "type": "local"
+    }
+  }
+}
+JSON
+  local before
+  before="$(md5 -q "$TMP_HOME/.config/opencode/opencode.json" 2>/dev/null \
+    || md5sum "$TMP_HOME/.config/opencode/opencode.json" | cut -d' ' -f1)"
+
+  run bash "$SCRIPTS_DIR/install.sh" --dry-run --skip-tests
+
+  [ "$status" -eq 0 ]
+  local after
+  after="$(md5 -q "$TMP_HOME/.config/opencode/opencode.json" 2>/dev/null \
+    || md5sum "$TMP_HOME/.config/opencode/opencode.json" | cut -d' ' -f1)"
+  [ "$before" = "$after" ]
+  # Named explicitly so a future regression reports the cause, not just a hash.
+  run grep -c "rtk-mcp" "$TMP_HOME/.config/opencode/opencode.json"
+  [ "$output" = "0" ]
+}
+
+@test "uninstall: --only serena removes serena and leaves the other tools alone" {
+  plant_all_components
+
+  run bash "$SCRIPTS_DIR/uninstall.sh" --force --only serena
+
+  [ "$status" -eq 0 ]
+  [ ! -f "$TMP_HOME/.local/bin/serena" ]
+  [ -f "$TMP_HOME/.local/bin/rtk" ]
+  [ -f "$TMP_HOME/.local/bin/tilth" ]
+  [ -f "$TMP_HOME/.local/bin/icm" ]
+}
+
+@test "uninstall: --only rtk-mcp drops the MCP registration but keeps the rtk binary" {
+  plant_all_components
+
+  run bash "$SCRIPTS_DIR/uninstall.sh" --force --only rtk-mcp
+
+  [ "$status" -eq 0 ]
+  # The compression path must survive — binary and shell hooks are untouched.
+  [ -f "$TMP_HOME/.local/bin/rtk" ]
+  python3 - "$TMP_HOME/.claude/settings.json" << 'PY'
+import json, sys
+servers = json.load(open(sys.argv[1])).get("mcpServers", {})
+assert "rtk-mcp" not in servers, "rtk-mcp still registered"
+assert "tilth" in servers, "tilth was removed but was not selected"
+assert "serena" in servers, "serena was removed but was not selected"
+PY
+}
+
+@test "uninstall: --only accepts a comma-separated list" {
+  plant_all_components
+
+  run bash "$SCRIPTS_DIR/uninstall.sh" --force --only tilth,serena
+
+  [ "$status" -eq 0 ]
+  [ ! -f "$TMP_HOME/.local/bin/tilth" ]
+  [ ! -f "$TMP_HOME/.local/bin/serena" ]
+  [ -f "$TMP_HOME/.local/bin/rtk" ]
+  [ -f "$TMP_HOME/.local/bin/icm" ]
+}
+
+@test "uninstall: --skip serena removes everything except serena" {
+  plant_all_components
+
+  run bash "$SCRIPTS_DIR/uninstall.sh" --force --skip serena
+
+  [ "$status" -eq 0 ]
+  [ -f "$TMP_HOME/.local/bin/serena" ]
+  [ ! -f "$TMP_HOME/.local/bin/tilth" ]
+  [ ! -f "$TMP_HOME/.local/bin/icm" ]
+}
+
+@test "uninstall: an unknown component name is rejected and names the offender" {
+  plant_all_components
+
+  run bash "$SCRIPTS_DIR/uninstall.sh" --force --only nosuchtool
+
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"nosuchtool"* ]]
+  # Nothing may be removed when the selection is invalid.
+  [ -f "$TMP_HOME/.local/bin/rtk" ]
+  [ -f "$TMP_HOME/.local/bin/serena" ]
+}
+
+@test "uninstall: --only and --skip together are rejected" {
+  plant_all_components
+
+  run bash "$SCRIPTS_DIR/uninstall.sh" --force --only rtk --skip serena
+
+  [ "$status" -ne 0 ]
+  [ -f "$TMP_HOME/.local/bin/rtk" ]
+  [ -f "$TMP_HOME/.local/bin/serena" ]
+}
+
+@test "uninstall: no selection flag still removes every component (regression guard)" {
+  plant_all_components
+
+  run bash "$SCRIPTS_DIR/uninstall.sh" --force
+
+  [ "$status" -eq 0 ]
+  [ ! -f "$TMP_HOME/.local/bin/serena" ]
+  [ ! -f "$TMP_HOME/.local/bin/tilth" ]
+  [ ! -f "$TMP_HOME/.local/bin/icm" ]
+  [ ! -f "$TMP_HOME/.local/bin/token-diet" ]
+}
+
+@test "uninstall: --only rtk-mcp leaves shared token-diet infrastructure intact" {
+  # Regression: the shared artifacts (the local bin lib dir, compat.json,
+  # hosts-mcp.json, the opencode plugin + rules block) belong to the token-diet
+  # component. They are removed by inline blocks and by helpers that take no
+  # component-bearing argument, so they bypassed the first cut of the selection
+  # guard and were destroyed by an --only rtk-mcp run.
+  plant_all_components
+  mkdir -p "$TMP_HOME/.local/bin/lib"
+  echo "x" > "$TMP_HOME/.local/bin/lib/shared.sh"
+  mkdir -p "$TMP_HOME/.local/config"
+  echo '{}' > "$TMP_HOME/.local/config/compat.json"
+  echo '{}' > "$TMP_HOME/.local/config/hosts-mcp.json"
+
+  run bash "$SCRIPTS_DIR/uninstall.sh" --force --only rtk-mcp
+
+  [ "$status" -eq 0 ]
+  [ -d "$TMP_HOME/.local/bin/lib" ]
+  [ -f "$TMP_HOME/.local/bin/lib/shared.sh" ]
+  [ -f "$TMP_HOME/.local/config/compat.json" ]
+  [ -f "$TMP_HOME/.local/config/hosts-mcp.json" ]
+  [ -f "$TMP_HOME/.local/bin/token-diet" ]
+}
+
+@test "uninstall: removing a codex mcp server also removes its sub-tables" {
+  # Regression: the table regex matched only the exact parent header, and the
+  # body loop stops at the next TABLE header — so [mcp_servers.tilth.tools.*]
+  # was itself a header, ending the removal and orphaning a sub-table that
+  # referenced a server no longer defined. Hit live on a --only tilth run.
+  mkdir -p "$TMP_HOME/.codex"
+  cat > "$TMP_HOME/.codex/config.toml" << 'TOML'
+[mcp_servers.keepme]
+command = "keepme"
+
+[mcp_servers.tilth]
+command = "tilth"
+args = ["--mcp"]
+
+[mcp_servers.tilth.tools.tilth_read]
+enabled = true
+
+[mcp_servers.keepme.env]
+FOO = "bar"
+TOML
+
+  run bash "$SCRIPTS_DIR/uninstall.sh" --force --only tilth
+
+  [ "$status" -eq 0 ]
+  run grep -c "mcp_servers.tilth" "$TMP_HOME/.codex/config.toml"
+  [ "$output" = "0" ]
+  # Unrelated servers and their own sub-tables must survive untouched.
+  grep -q "mcp_servers.keepme\]" "$TMP_HOME/.codex/config.toml"
+  grep -q "mcp_servers.keepme.env\]" "$TMP_HOME/.codex/config.toml"
+}
+
+@test "uninstall: --only is honoured under --dry-run and mutates nothing" {
+  plant_all_components
+
+  run bash "$SCRIPTS_DIR/uninstall.sh" --dry-run --only serena
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"serena"* ]]
+  [ -f "$TMP_HOME/.local/bin/serena" ]
+  [ -f "$TMP_HOME/.local/bin/rtk" ]
+}

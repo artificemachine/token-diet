@@ -1677,6 +1677,12 @@ install_rtk_mcp() {
   if [ "${DRY_RUN:-false}" = "true" ]; then
     dryrun "pip install -e $src_dir"
     dryrun "register rtk-mcp MCP server across detected hosts"
+    # Return, do NOT fall through. The per-host registration below writes real
+    # config files and is not itself DRY_RUN-guarded, so without this a dry run
+    # printed "would register" and then actually registered. The project
+    # pre-commit hook runs `install.sh --dry-run --skip-tests`, so every commit
+    # silently re-added rtk-mcp to the developer's own hosts.
+    return 0
   else
     info "Installing rtk-mcp (editable) from $src_dir..."
     if pip install -e "$src_dir" 2>&1 | show_output; then

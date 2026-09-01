@@ -2010,10 +2010,42 @@ PYEOF
     [ -d "$config_dir" ] || return 0  # host not installed — skip silently
 
     local tkd_doc_file="$config_dir/token-diet.md"
-    cat > "$tkd_doc_file" << 'TKDDOC'
+
+    # Describe only what this run actually installed. A static list made
+    # `--icm-only` still tell agents to call tilth_read and Serena tools that
+    # were never installed, and a reinstall silently reverted any local edit
+    # correcting it. The doc must reflect real state, not the full catalogue.
+    local tkd_tools=() tkd_absent=()
+    $do_rtk    && tkd_tools+=("RTK")    || tkd_absent+=("RTK")
+    $do_tilth  && tkd_tools+=("tilth")  || tkd_absent+=("tilth")
+    $do_serena && tkd_tools+=("Serena") || tkd_absent+=("Serena")
+    $do_icm    && tkd_tools+=("ICM")    || tkd_absent+=("ICM")
+
+    local tkd_list
+    tkd_list="$(printf '%s, ' "${tkd_tools[@]}")"
+    tkd_list="${tkd_list%, }"
+    [ "${#tkd_tools[@]}" -gt 1 ] && tkd_list="$(sed 's/, \([^,]*\)$/ and \1/' <<< "$tkd_list")"
+
+    cat > "$tkd_doc_file" << TKDHEAD
 # Token Diet — AI Context Optimization
 
-`token-diet` is a unified optimization layer for AI agents. It orchestrates RTK, tilth, Serena, and ICM to maximize context efficiency.
+\`token-diet\` is a unified optimization layer for AI agents. It orchestrates
+${tkd_list:-no tools} to maximize context efficiency.
+TKDHEAD
+
+    # Name what is NOT installed, so an agent never reaches for a missing tool.
+    if [ "${#tkd_absent[@]}" -gt 0 ]; then
+      local tkd_miss
+      tkd_miss="$(printf '%s, ' "${tkd_absent[@]}")"; tkd_miss="${tkd_miss%, }"
+      cat >> "$tkd_doc_file" << TKDMISS
+
+> **Not installed on this host: ${tkd_miss}.** Do not call their MCP tools —
+> they are not registered. Install with \`install.sh\` and the matching
+> \`--<tool>-only\` flag if you need them.
+TKDMISS
+    fi
+
+    cat >> "$tkd_doc_file" << 'TKDDOC'
 
 ## Core Commands
 
@@ -2029,13 +2061,27 @@ PYEOF
 
 1. **Self-Monitor**: Regularly run `token-diet budget status` to stay within thresholds.
 2. **Tool Selection**:
-   - Use **tilth** for code reading and symbol search.
-   - Use **Serena** for complex refactoring and diagnostics.
-   - Use **RTK** for running commands and builds.
-   - Use **ICM** for persistent cross-session memory: recall past decisions and store new facts.
-3. **Be Precise**: Use `tilth_read` with line ranges (found via `token-diet diff-reads`) to minimize context waste.
-4. **Optimization**: If you detect you are looping or wasting tokens, run `token-diet loops` or `token-diet leaks` to self-audit.
 TKDDOC
+
+    # One bullet per installed tool only. An absent tool gets no bullet, so the
+    # doc can never instruct an agent to call something that is not there.
+    $do_tilth  && echo '   - Use **tilth** for code reading and symbol search.' >> "$tkd_doc_file"
+    $do_serena && echo '   - Use **Serena** for complex refactoring and diagnostics.' >> "$tkd_doc_file"
+    $do_rtk    && echo '   - Use **RTK** for running commands and builds. RTK works through a shell hook, not an MCP server, so it costs no context.' >> "$tkd_doc_file"
+    $do_icm    && echo '   - Use **ICM** for persistent cross-session memory: recall past decisions and store new facts.' >> "$tkd_doc_file"
+    if ! $do_tilth && ! $do_serena; then
+      echo '   - Use the built-in file-reading and search tools for code reading and symbol search.' >> "$tkd_doc_file"
+    fi
+
+    if $do_tilth; then
+      echo '3. **Be Precise**: Use `tilth_read` with line ranges (found via `token-diet diff-reads`) to minimize context waste.' >> "$tkd_doc_file"
+    else
+      echo '3. **Be Precise**: Read with explicit line ranges rather than whole files, and use `token-diet diff-reads` to find the ranges worth reading.' >> "$tkd_doc_file"
+    fi
+
+    cat >> "$tkd_doc_file" << 'TKDTAIL'
+4. **Optimization**: If you detect you are looping or wasting tokens, run `token-diet loops` or `token-diet leaks` to self-audit.
+TKDTAIL
 
     ok "token-diet.md written: $tkd_doc_file"
 

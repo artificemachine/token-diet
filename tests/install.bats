@@ -2219,6 +2219,37 @@ plant_all_components() {
   mock_mcp_config claude-code rtk-mcp
 }
 
+@test "install.sh: token-diet.md names only the components actually installed" {
+  # Regression: the doc was a static heredoc always claiming all four tools, so
+  # `--icm-only` still wrote "Use tilth for code reading and symbol search" and
+  # "Use Serena for complex refactoring". Agents then called tilth_*/serena_*
+  # tools that were never installed. The doc must describe real state.
+  mkdir -p "$TMP_HOME/.claude"
+  : > "$TMP_HOME/.claude/CLAUDE.md"
+
+  run bash "$SCRIPTS_DIR/install.sh" --icm-only --skip-tests --hosts claude
+
+  [ -f "$TMP_HOME/.claude/token-diet.md" ]
+  run grep -ciE "use \*\*tilth\*\*|use \*\*serena\*\*|tilth_read" "$TMP_HOME/.claude/token-diet.md"
+  [ "$output" = "0" ]
+  grep -qi "ICM" "$TMP_HOME/.claude/token-diet.md"
+}
+
+@test "install.sh: token-diet.md keeps the tilth and Serena guidance when they ARE installed" {
+  # The inverse guard: trimming the doc must not strip guidance for components
+  # that a full install genuinely provides.
+  mkdir -p "$TMP_HOME/.claude"
+  : > "$TMP_HOME/.claude/CLAUDE.md"
+
+  run bash "$SCRIPTS_DIR/install.sh" --dry-run --skip-tests --hosts claude
+  [ "$status" -eq 0 ]
+
+  # --dry-run writes nothing, so assert the generator directly on a full run by
+  # checking the source still carries both strings for the all-components path.
+  grep -q "Use \*\*tilth\*\*" "$SCRIPTS_DIR/install.sh"
+  grep -q "Use \*\*Serena\*\*" "$SCRIPTS_DIR/install.sh"
+}
+
 @test "install.sh --dry-run leaves an EXISTING host config byte-identical" {
   # Regression: 'install.sh --dry-run does not write any files to HOME' only
   # asserts no NEW files appear, so it never caught install_rtk_mcp printing

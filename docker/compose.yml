@@ -2,7 +2,6 @@
 # Usage: docker compose -f docker/compose.yml up serena
 #
 # Serena runs as MCP server, mounts your project read-only.
-# RTK and tilth are native binaries — no Docker needed.
 
 services:
   serena:

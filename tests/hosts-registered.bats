@@ -28,13 +28,13 @@ jw() { mkdir -p "$(dirname "$1")"; printf '%s\n' "$2" > "$1"; }
 # ---------------------------------------------------------------------------
 
 @test "no config files -> none" {
-  hr tilth
+  hr icm
   [ "$output" = "none" ]
 }
 
 @test "config present but tool not registered -> none" {
   jw "$HOME/.claude/settings.json" '{"mcpServers":{"other":{}}}'
-  hr tilth
+  hr icm
   [ "$output" = "none" ]
 }
 
@@ -43,21 +43,21 @@ jw() { mkdir -p "$(dirname "$1")"; printf '%s\n' "$2" > "$1"; }
 # ---------------------------------------------------------------------------
 
 @test "claude-code via .claude/settings.json" {
-  jw "$HOME/.claude/settings.json" '{"mcpServers":{"tilth":{"command":"tilth"}}}'
-  hr tilth
+  jw "$HOME/.claude/settings.json" '{"mcpServers":{"icm":{"command":"icm"}}}'
+  hr icm
   [ "$output" = "claude-code" ]
 }
 
 @test "claude-code via .claude.json" {
-  jw "$HOME/.claude.json" '{"mcpServers":{"tilth":{"command":"tilth"}}}'
-  hr tilth
+  jw "$HOME/.claude.json" '{"mcpServers":{"icm":{"command":"icm"}}}'
+  hr icm
   [ "$output" = "claude-code" ]
 }
 
 @test "claude-code appears twice when both .claude.json and settings.json register (no dedup for claude-code)" {
-  jw "$HOME/.claude/settings.json" '{"mcpServers":{"tilth":{}}}'
-  jw "$HOME/.claude.json" '{"mcpServers":{"tilth":{}}}'
-  hr tilth
+  jw "$HOME/.claude/settings.json" '{"mcpServers":{"icm":{}}}'
+  jw "$HOME/.claude.json" '{"mcpServers":{"icm":{}}}'
+  hr icm
   [ "$output" = "claude-code,claude-code" ]
 }
 
@@ -67,14 +67,14 @@ jw() { mkdir -p "$(dirname "$1")"; printf '%s\n' "$2" > "$1"; }
 # ---------------------------------------------------------------------------
 
 @test "claude-desktop via macOS Application Support path" {
-  jw "$HOME/Library/Application Support/Claude/claude_desktop_config.json" '{"mcpServers":{"tilth":{}}}'
-  hr tilth
+  jw "$HOME/Library/Application Support/Claude/claude_desktop_config.json" '{"mcpServers":{"icm":{}}}'
+  hr icm
   [ "$output" = "claude-desktop" ]
 }
 
 @test "QUIRK: Linux .config/Claude path is scanned but attributes no host -> none" {
-  jw "$HOME/.config/Claude/claude_desktop_config.json" '{"mcpServers":{"tilth":{}}}'
-  hr tilth
+  jw "$HOME/.config/Claude/claude_desktop_config.json" '{"mcpServers":{"icm":{}}}'
+  hr icm
   [ "$output" = "none" ]
 }
 
@@ -84,21 +84,21 @@ jw() { mkdir -p "$(dirname "$1")"; printf '%s\n' "$2" > "$1"; }
 # ---------------------------------------------------------------------------
 
 @test "opencode via legacy $HOME/.opencode.json" {
-  jw "$HOME/.opencode.json" '{"mcpServers":{"tilth":{}}}'
-  hr tilth
+  jw "$HOME/.opencode.json" '{"mcpServers":{"icm":{}}}'
+  hr icm
   [ "$output" = "opencode" ]
 }
 
 @test "opencode via XDG $HOME/.config/opencode/opencode.json" {
-  jw "$HOME/.config/opencode/opencode.json" '{"mcpServers":{"tilth":{}}}'
-  hr tilth
+  jw "$HOME/.config/opencode/opencode.json" '{"mcpServers":{"icm":{}}}'
+  hr icm
   [ "$output" = "opencode" ]
 }
 
 @test "opencode legacy + XDG together de-duplicate to a single opencode" {
-  jw "$HOME/.opencode.json" '{"mcpServers":{"tilth":{}}}'
-  jw "$HOME/.config/opencode/opencode.json" '{"mcpServers":{"tilth":{}}}'
-  hr tilth
+  jw "$HOME/.opencode.json" '{"mcpServers":{"icm":{}}}'
+  jw "$HOME/.config/opencode/opencode.json" '{"mcpServers":{"icm":{}}}'
+  hr icm
   [ "$output" = "opencode" ]
 }
 
@@ -108,8 +108,8 @@ jw() { mkdir -p "$(dirname "$1")"; printf '%s\n' "$2" > "$1"; }
 # ---------------------------------------------------------------------------
 
 @test "dialect: mcp key matches (opencode style)" {
-  jw "$HOME/.opencode.json" '{"mcp":{"tilth":{}}}'
-  hr tilth
+  jw "$HOME/.opencode.json" '{"mcp":{"icm":{}}}'
+  hr icm
   [ "$output" = "opencode" ]
 }
 
@@ -119,14 +119,14 @@ jw() { mkdir -p "$(dirname "$1")"; printf '%s\n' "$2" > "$1"; }
   # mcp_key_dialect ([mcpServers, mcp, servers]) now honors `servers` too.
   # This is a pure superset (no host that was detected before is lost) and
   # matches the dashboard's registry-driven detection.
-  jw "$HOME/.opencode.json" '{"servers":{"tilth":{}}}'
-  hr tilth
+  jw "$HOME/.opencode.json" '{"servers":{"icm":{}}}'
+  hr icm
   [ "$output" = "opencode" ]
 }
 
-@test "substring match: my-tilth-server key matches tool 'tilth'" {
-  jw "$HOME/.claude/settings.json" '{"mcpServers":{"my-tilth-server":{}}}'
-  hr tilth
+@test "substring match: my-icm-server key matches tool 'icm'" {
+  jw "$HOME/.claude/settings.json" '{"mcpServers":{"my-icm-server":{}}}'
+  hr icm
   [ "$output" = "claude-code" ]
 }
 
@@ -136,19 +136,19 @@ jw() { mkdir -p "$(dirname "$1")"; printf '%s\n' "$2" > "$1"; }
 
 @test "malformed JSON is skipped -> none" {
   jw "$HOME/.claude/settings.json" '{ this is not json'
-  hr tilth
+  hr icm
   [ "$output" = "none" ]
 }
 
 @test "empty file is skipped -> none" {
   mkdir -p "$HOME/.claude"; : > "$HOME/.claude/settings.json"
-  hr tilth
+  hr icm
   [ "$output" = "none" ]
 }
 
 @test "empty JSON object -> none" {
   jw "$HOME/.claude/settings.json" '{}'
-  hr tilth
+  hr icm
   [ "$output" = "none" ]
 }
 
@@ -156,17 +156,17 @@ jw() { mkdir -p "$(dirname "$1")"; printf '%s\n' "$2" > "$1"; }
 # Codex — TOML block [mcp_servers.<tool>] with a command line. Exact tool name.
 # ---------------------------------------------------------------------------
 
-@test "codex via [mcp_servers.tilth] with command" {
+@test "codex via [mcp_servers.icm] with command" {
   mkdir -p "$HOME/.codex"
-  printf '\n[mcp_servers.tilth]\ncommand = "tilth"\n' > "$HOME/.codex/config.toml"
-  hr tilth
+  printf '\n[mcp_servers.icm]\ncommand = "icm"\n' > "$HOME/.codex/config.toml"
+  hr icm
   [ "$output" = "codex" ]
 }
 
 @test "codex block without command line -> none" {
   mkdir -p "$HOME/.codex"
-  printf '\n[mcp_servers.tilth]\nargs = ["x"]\n' > "$HOME/.codex/config.toml"
-  hr tilth
+  printf '\n[mcp_servers.icm]\nargs = ["x"]\n' > "$HOME/.codex/config.toml"
+  hr icm
   [ "$output" = "none" ]
 }
 
@@ -175,14 +175,14 @@ jw() { mkdir -p "$(dirname "$1")"; printf '%s\n' "$2" > "$1"; }
 # ---------------------------------------------------------------------------
 
 @test "vscode via $HOME/.config/Code/User/settings.json (json)" {
-  jw "$HOME/.config/Code/User/settings.json" '{"mcpServers":{"tilth":{}}}'
-  hr tilth
+  jw "$HOME/.config/Code/User/settings.json" '{"mcpServers":{"icm":{}}}'
+  hr icm
   [ "$output" = "vscode" ]
 }
 
 @test "vscode grep is content-blind (matches tool name anywhere)" {
-  jw "$HOME/.config/Code/User/settings.json" 'random text tilth here'
-  hr tilth
+  jw "$HOME/.config/Code/User/settings.json" 'random text icm here'
+  hr icm
   [ "$output" = "vscode" ]
 }
 
@@ -191,14 +191,14 @@ jw() { mkdir -p "$(dirname "$1")"; printf '%s\n' "$2" > "$1"; }
 # ---------------------------------------------------------------------------
 
 @test "gemini via mcpServers" {
-  jw "$HOME/.gemini/settings.json" '{"mcpServers":{"tilth":{}}}'
-  hr tilth
+  jw "$HOME/.gemini/settings.json" '{"mcpServers":{"icm":{}}}'
+  hr icm
   [ "$output" = "gemini" ]
 }
 
 @test "gemini via mcp key" {
-  jw "$HOME/.gemini/settings.json" '{"mcp":{"tilth":{}}}'
-  hr tilth
+  jw "$HOME/.gemini/settings.json" '{"mcp":{"icm":{}}}'
+  hr icm
   [ "$output" = "gemini" ]
 }
 
@@ -207,17 +207,17 @@ jw() { mkdir -p "$(dirname "$1")"; printf '%s\n' "$2" > "$1"; }
 # ---------------------------------------------------------------------------
 
 @test "all hosts registered -> full ordered host list" {
-  jw "$HOME/.claude/settings.json" '{"mcpServers":{"tilth":{}}}'
-  jw "$HOME/.claude.json" '{"mcpServers":{"tilth":{}}}'
-  jw "$HOME/Library/Application Support/Claude/claude_desktop_config.json" '{"mcpServers":{"tilth":{}}}'
-  jw "$HOME/.config/Claude/claude_desktop_config.json" '{"mcpServers":{"tilth":{}}}'
-  jw "$HOME/.opencode.json" '{"mcpServers":{"tilth":{}}}'
-  jw "$HOME/.config/opencode/opencode.json" '{"mcpServers":{"tilth":{}}}'
+  jw "$HOME/.claude/settings.json" '{"mcpServers":{"icm":{}}}'
+  jw "$HOME/.claude.json" '{"mcpServers":{"icm":{}}}'
+  jw "$HOME/Library/Application Support/Claude/claude_desktop_config.json" '{"mcpServers":{"icm":{}}}'
+  jw "$HOME/.config/Claude/claude_desktop_config.json" '{"mcpServers":{"icm":{}}}'
+  jw "$HOME/.opencode.json" '{"mcpServers":{"icm":{}}}'
+  jw "$HOME/.config/opencode/opencode.json" '{"mcpServers":{"icm":{}}}'
   mkdir -p "$HOME/.codex"
-  printf '\n[mcp_servers.tilth]\ncommand = "tilth"\n' > "$HOME/.codex/config.toml"
-  jw "$HOME/.config/Code/User/settings.json" '{"mcpServers":{"tilth":{}}}'
-  jw "$HOME/.gemini/settings.json" '{"mcpServers":{"tilth":{}}}'
-  hr tilth
+  printf '\n[mcp_servers.icm]\ncommand = "icm"\n' > "$HOME/.codex/config.toml"
+  jw "$HOME/.config/Code/User/settings.json" '{"mcpServers":{"icm":{}}}'
+  jw "$HOME/.gemini/settings.json" '{"mcpServers":{"icm":{}}}'
+  hr icm
   [ "$output" = "claude-code,claude-code,claude-desktop,opencode,codex,vscode,gemini" ]
 }
 
@@ -235,8 +235,8 @@ jw() { mkdir -p "$(dirname "$1")"; printf '%s\n' "$2" > "$1"; }
   cp "$SCRIPTS_DIR/token-diet" "$iso/token-diet"
   mkdir -p "$iso/lib"
   cp "$SCRIPTS_DIR"/lib/*.sh "$iso/lib/" 2>/dev/null || true
-  jw "$HOME/.claude/settings.json" '{"mcpServers":{"tilth":{}}}'
-  run bash -c "cd /; source '$iso/token-diet' >/dev/null 2>&1; hosts_registered tilth"
+  jw "$HOME/.claude/settings.json" '{"mcpServers":{"icm":{}}}'
+  run bash -c "cd /; source '$iso/token-diet' >/dev/null 2>&1; hosts_registered icm"
   rm -rf "$iso"
   [ "$output" = "claude-code" ]
 }

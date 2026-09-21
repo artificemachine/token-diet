@@ -65,86 +65,9 @@ MOCK
   chmod +x "$TMP_BIN/$name"
 }
 
-# mock_cmd_with_gain
-# Creates an rtk mock that fully handles: --version, gain --help, gain --format json
-mock_cmd_with_gain() {
-  cat > "$TMP_BIN/rtk" << 'MOCK'
-#!/usr/bin/env bash
-case "$1" in
-  --version) echo "rtk 0.34.3-mock"; exit 0 ;;
-  gain)
-    case "$2" in
-      --help)     echo "Usage: rtk gain [OPTIONS]"; exit 0 ;;
-      --format)   echo '{"summary":{"total_commands":10,"total_input":5000,"total_saved":3500,"avg_savings_pct":70.0,"total_time_ms":250},"daily":[]}' ; exit 0 ;;
-      --daily)    echo '{"summary":{"total_commands":10,"total_input":5000,"total_saved":3500,"avg_savings_pct":70.0,"total_time_ms":250},"daily":[]}' ; exit 0 ;;
-      *)          echo "Usage: rtk gain [OPTIONS]"; exit 0 ;;
-    esac ;;
-  *)  exit 0 ;;
-esac
-MOCK
-  chmod +x "$TMP_BIN/rtk"
-}
-
-# mock_cmd_with_history
-# RTK mock with per-command "By Command" text table (cargo test×5, git log×3, npm test×2).
-# --format json returns the summary for budget tests.
-mock_cmd_with_history() {
-  cat > "$TMP_BIN/rtk" << 'MOCK'
-#!/usr/bin/env bash
-case "$1" in
-  --version) echo "rtk 0.34.3-mock"; exit 0 ;;
-  gain)
-    case "$2" in
-      --help)   echo "Usage: rtk gain [OPTIONS]"; exit 0 ;;
-      --format) echo '{"summary":{"total_commands":10,"total_input":65000,"total_saved":50000,"avg_savings_pct":76.9,"total_time_ms":300},"daily":[]}'; exit 0 ;;
-      --daily)  echo '{"summary":{"total_commands":10,"total_input":65000,"total_saved":50000,"avg_savings_pct":76.9,"total_time_ms":300},"daily":[]}'; exit 0 ;;
-      *)
-        printf 'RTK Token Savings (Global Scope)\n\nBy Command\n'
-        printf '────────────────────────────────────────────────────────────────────────\n'
-        printf '  #  Command                   Count   Saved    Avg%%%%    Time  Impact    \n'
-        printf '────────────────────────────────────────────────────────────────────────\n'
-        printf ' 1.  cargo test                    5   40.0K   80.0%%%%     0ms  ██████████\n'
-        printf ' 2.  git log                       3    9.0K   75.0%%%%     0ms  ████░░░░░░\n'
-        printf ' 3.  npm test                      2    1.0K   33.3%%%%     0ms  ███░░░░░░░\n'
-        printf '────────────────────────────────────────────────────────────────────────\n'
-        exit 0 ;;
-    esac ;;
-  *)  exit 0 ;;
-esac
-MOCK
-  chmod +x "$TMP_BIN/rtk"
-}
-
-# mock_cmd_no_loops
-# RTK mock whose "By Command" table has all counts below the loop threshold (3).
-mock_cmd_no_loops() {
-  cat > "$TMP_BIN/rtk" << 'MOCK'
-#!/usr/bin/env bash
-case "$1" in
-  --version) echo "rtk 0.34.3-mock"; exit 0 ;;
-  gain)
-    case "$2" in
-      --help)   echo "Usage: rtk gain [OPTIONS]"; exit 0 ;;
-      --format) echo '{"summary":{"total_commands":3,"total_input":700,"total_saved":560,"avg_savings_pct":80.0,"total_time_ms":50},"daily":[]}'; exit 0 ;;
-      *)
-        printf 'RTK Token Savings (Global Scope)\n\nBy Command\n'
-        printf '────────────────────────────────────────────────────────────────────────\n'
-        printf '  #  Command                   Count   Saved    Avg%%%%    Time  Impact    \n'
-        printf '────────────────────────────────────────────────────────────────────────\n'
-        printf ' 1.  git status                    1    0.4K   80.0%%%%     0ms  ████░░░░░░\n'
-        printf ' 2.  ls                            2    0.2K   80.0%%%%     0ms  ███░░░░░░░\n'
-        printf '────────────────────────────────────────────────────────────────────────\n'
-        exit 0 ;;
-    esac ;;
-  *)  exit 0 ;;
-esac
-MOCK
-  chmod +x "$TMP_BIN/rtk"
-}
-
 # mock_icm
-# Creates an icm mock mirroring the rtk/tilth stubs: handles --version, --help,
-# serve (the MCP entry point), and recall (used by `token-diet icm warmup`).
+# Creates an icm mock mirroring the serena runtime stubs: handles --version,
+# --help, serve (the MCP entry point), and recall (used by `token-diet icm warmup`).
 # Always exits 0 so health/route/doctor see icm as a working binary on PATH.
 mock_icm() {
   cat > "$TMP_BIN/icm" << 'MOCK'
@@ -246,84 +169,52 @@ PY
   fi
 }
 
-# mock_rtk_with_init_show [healthy|warn|fail]
-# Creates an rtk mock that handles gain AND init --show.
-# Pass "healthy" (default) for all-[ok] output, "warn" for one [warn], "fail" for one [FAIL].
-mock_rtk_with_init_show() {
-  local mode="${1:-healthy}"
-  local show_output
-  case "$mode" in
-    warn)
-      show_output='[warn] Hook: /mock/.claude/hooks/rtk-rewrite.sh (NOT executable - run: chmod +x)
-[ok] settings.json: RTK hook configured'
+# mock_context7_mcp [host]
+# Registers context7 the way install.sh does: a REMOTE HTTP MCP entry
+# ({"type": "http", "url": "https://mcp.context7.com/mcp"}), never a local
+# command — context7 has no binary on PATH. Codex gets a TOML block with a
+# url key instead of a command.
+mock_context7_mcp() {
+  local host="${1:-claude-code}"
+  local cfg
+
+  case "$host" in
+    codex)
+      mkdir -p "$TMP_HOME/.codex"
+      printf '\n[mcp_servers.context7]\nurl = "https://mcp.context7.com/mcp"\n' >> "$TMP_HOME/.codex/config.toml"
+      return 0
       ;;
-    fail)
-      show_output='[FAIL] Integrity: hook modified outside rtk init (run: rtk verify)
-[ok] settings.json: RTK hook configured'
+    claude-code)
+      cfg="$TMP_HOME/.claude/settings.json"
       ;;
-    *)  # healthy
-      show_output='[ok] Hook: /mock/.claude/hooks/rtk-rewrite.sh
-[ok] settings.json: RTK hook configured
-[ok] Codex RTK.md: /mock/.codex/RTK.md'
+    opencode)
+      cfg="$TMP_HOME/.opencode.json"
+      ;;
+    *)
+      echo "mock_context7_mcp: unknown host '$host'" >&2
+      return 1
       ;;
   esac
 
-  cat > "$TMP_BIN/rtk" << MOCK
-#!/usr/bin/env bash
-case "\$1" in
-  --version) echo "rtk 1.3.6-mock"; exit 0 ;;
-  gain)
-    case "\$2" in
-      --help)   echo "Usage: rtk gain [OPTIONS]"; exit 0 ;;
-      --format) echo '{"summary":{"total_commands":10,"total_input":5000,"total_saved":3500,"avg_savings_pct":70.0,"total_time_ms":250},"daily":[]}'; exit 0 ;;
-      *)        echo "Usage: rtk gain [OPTIONS]"; exit 0 ;;
-    esac ;;
-  init)
-    if [ "\$2" = "--show" ]; then
-      printf '%s\n' "$show_output"
-      exit 0
-    fi
-    exit 0 ;;
-  *) exit 0 ;;
-esac
-MOCK
-  chmod +x "$TMP_BIN/rtk"
+  if [ -f "$cfg" ]; then
+    python3 - "$cfg" << 'PY'
+import json, sys
+cfg_path = sys.argv[1]
+with open(cfg_path) as f:
+    d = json.load(f)
+d.setdefault("mcpServers", {})["context7"] = {
+    "type": "http",
+    "url": "https://mcp.context7.com/mcp",
 }
-
-# mock_rtk_with_auto_patch [success|fail]
-# Handles: --version, gain --format, init --show (warn output), init -g --auto-patch.
-# success (default) → auto-patch exits 0; fail → exits 1.
-# Writes $TMP_HOME/.rtk-auto-patch-called on each auto-patch invocation.
-mock_rtk_with_auto_patch() {
-  local mode="${1:-success}"
-  local patch_exit=0
-  [ "$mode" = "fail" ] && patch_exit=1
-
-  cat > "$TMP_BIN/rtk" << MOCK
-#!/usr/bin/env bash
-case "\$1" in
-  --version) echo "rtk 1.3.6-mock"; exit 0 ;;
-  gain)
-    case "\$2" in
-      --help)   echo "Usage: rtk gain [OPTIONS]"; exit 0 ;;
-      --format) echo '{"summary":{"total_commands":10,"total_input":5000,"total_saved":3500,"avg_savings_pct":70.0,"total_time_ms":250},"daily":[]}'; exit 0 ;;
-      *)        echo "Usage: rtk gain [OPTIONS]"; exit 0 ;;
-    esac ;;
-  init)
-    if [ "\$2" = "--show" ]; then
-      printf '[warn] Hook: /mock/.claude/hooks/rtk-rewrite.sh (NOT executable - run: chmod +x)\n'
-      printf '[ok] settings.json: RTK hook configured\n'
-      exit 0
-    fi
-    if [ "\$2" = "-g" ] && [ "\$3" = "--auto-patch" ]; then
-      touch "$TMP_HOME/.rtk-auto-patch-called"
-      exit $patch_exit
-    fi
-    exit 0 ;;
-  *) exit 0 ;;
-esac
-MOCK
-  chmod +x "$TMP_BIN/rtk"
+with open(cfg_path, "w") as f:
+    json.dump(d, f, indent=2)
+    f.write("\n")
+PY
+  else
+    local dir; dir="$(dirname "$cfg")"
+    mkdir -p "$dir"
+    printf '{"mcpServers": {"context7": {"type": "http", "url": "https://mcp.context7.com/mcp"}}}\n' > "$cfg"
+  fi
 }
 
 # mock_token_diet_extract

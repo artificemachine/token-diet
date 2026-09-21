@@ -14,7 +14,7 @@
 //   - Watches `tool.execute.before` for the `read` tool
 //   - Extracts via `token-diet extract <file>` via the SDK's shell escape
 //   - If exit 0 and stdout is a cache path, REPLACES output.args.filePath
-//     with the cache path (OpenCode mutation pattern — same as rtk.ts).
+//     with the cache path (OpenCode mutation pattern).
 //   - If exit 2 (needs markitdown), the read proceeds unchanged but a stderr
 //     note is surfaced so the user knows.
 //
@@ -156,7 +156,6 @@ export const TokenDietHooks: Plugin = async (pluginInput) => {
           const cachePath = String(result.stdout || "").trim()
           if (cachePath && cachePath !== filePath && existsSync(cachePath)) {
             // Substitute: subsequent Read call gets the cache file instead.
-            // (Mirrors rtk.ts command-rewrite pattern.)
             args.filePath = cachePath
           }
         } else if (result.exitCode === 3) {

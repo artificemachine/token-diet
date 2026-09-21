@@ -2,9 +2,8 @@
 
 This directory contains git submodules pointing to your audited forks of:
 
-- **rtk/** — Rust Token Killer (CLI output compression)
-- **tilth/** — Smart code reader (tree-sitter AST navigation)
 - **serena/** — IDE-like symbol navigation (LSP-powered)
+- **icm/** — persistent cross-tool memory
 
 ## Setup
 
@@ -12,16 +11,15 @@ This directory contains git submodules pointing to your audited forks of:
 
 ```bash
 # On your Gitea/Forgejo/GitLab instance, create repos:
-#   token-diet/rtk
-#   token-diet/tilth
 #   token-diet/serena
+#   token-diet/icm
 
 # Clone upstream and push to internal
-git clone https://github.com/rtk-ai/rtk.git
-cd rtk && git remote add internal https://your-gitea.internal/token-diet/rtk.git
+git clone https://github.com/oraios/serena.git
+cd serena && git remote add internal https://your-gitea.internal/token-diet/serena.git
 git push internal main
 
-# Repeat for tilth and serena
+# Repeat for icm
 ```
 
 2. Update `.gitmodules` URLs to point to your internal server.
@@ -36,8 +34,8 @@ git submodule update --init --recursive
 
 ```bash
 # Add upstream remote (one-time)
-cd forks/rtk
-git remote add upstream https://github.com/rtk-ai/rtk.git
+cd forks/serena
+git remote add upstream https://github.com/oraios/serena.git
 
 # Fetch and review changes before merging
 git fetch upstream

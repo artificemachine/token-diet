@@ -51,7 +51,11 @@ fi
 # Ensure all primary subcommands are mentioned in README.md
 echo "token-diet: verifying documentation sync..."
 # Extract command names from help output
-COMMANDS=$(bash "$REPO_ROOT/scripts/token-diet" --help | sed -n '/COMMANDS/,/TOOLS/p' | grep '^  [a-z]' | awk '{print $1}')
+# The help's second section is COMPONENTS (renamed from TOOLS when the
+# component set changed). The range end must match the current name: an
+# unmatched end pattern makes sed run to EOF, capturing the component list
+# and the usage examples as if they were undocumented subcommands.
+COMMANDS=$(bash "$REPO_ROOT/scripts/token-diet" --help | sed -n '/COMMANDS/,/COMPONENTS/p' | grep '^  [a-z]' | awk '{print $1}')
 MISSING=()
 for CMD in $COMMANDS; do
   # Skip internal/redundant/low-level commands to avoid noise

@@ -1,13 +1,5 @@
 # token-diet — audited forks of the token optimization stack
 
-[submodule "forks/rtk"]
-	path = forks/rtk
-	url = https://github.com/artificemachine/rtk.git
-
-[submodule "forks/tilth"]
-	path = forks/tilth
-	url = https://github.com/artificemachine/tilth.git
-
 [submodule "forks/serena"]
 	path = forks/serena
 	url = https://github.com/artificemachine/serena.git

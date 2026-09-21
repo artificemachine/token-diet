@@ -17,7 +17,7 @@
       "bom-ref": "token-diet@1.10.4",
       "name": "token-diet",
       "version": "1.10.4",
-      "description": "Installer, build system, and compliance kit for RTK + tilth + Serena + ICM token optimization stack",
+      "description": "Installer, build system, and compliance kit for the Serena + ICM + Context7 token optimization stack",
       "licenses": [{ "license": { "id": "MIT" } }],
       "purl": "pkg:github/token-diet/token-diet@1.10.4"
     }
@@ -25,62 +25,16 @@
   "components": [
     {
       "type": "library",
-      "bom-ref": "rtk@0.34.3",
-      "name": "rtk",
-      "version": "0.34.3",
-      "description": "Rust Token Killer — CLI proxy that filters and compresses command output for 60-90% token savings",
-      "licenses": [{ "license": { "id": "MIT" } }],
-      "purl": "pkg:github/celstnblacc/rtk@0.34.3",
-      "externalReferences": [
-        {
-          "type": "vcs",
-          "url": "https://github.com/celstnblacc/rtk.git",
-          "comment": "Audited fork — pinned commit: 8c27defe878c1514528821c0998ed9747e43a9c7"
-        }
-      ],
-      "properties": [
-        { "name": "language", "value": "Rust" },
-        { "name": "total-transitive-deps", "value": "164" },
-        { "name": "cargo-audit-date", "value": "2026-04-01" },
-        { "name": "cargo-audit-result", "value": "0 vulnerabilities" },
-        { "name": "submodule-commit", "value": "8c27defe878c1514528821c0998ed9747e43a9c7" }
-      ]
-    },
-    {
-      "type": "library",
-      "bom-ref": "tilth@0.5.7",
-      "name": "tilth",
-      "version": "0.5.7",
-      "description": "AST-aware code reading and symbol search MCP server — 38-44% cost reduction via tree-sitter",
-      "licenses": [{ "license": { "id": "MIT" } }],
-      "purl": "pkg:github/celstnblacc/tilth@0.5.7",
-      "externalReferences": [
-        {
-          "type": "vcs",
-          "url": "https://github.com/celstnblacc/tilth.git",
-          "comment": "Audited fork — pinned commit: 8aa3d26fa252f4938f7bc883ec67a5b9ddfdf123"
-        }
-      ],
-      "properties": [
-        { "name": "language", "value": "Rust" },
-        { "name": "total-transitive-deps", "value": "93" },
-        { "name": "cargo-audit-date", "value": "2026-04-01" },
-        { "name": "cargo-audit-result", "value": "0 vulnerabilities" },
-        { "name": "submodule-commit", "value": "8aa3d26fa252f4938f7bc883ec67a5b9ddfdf123" }
-      ]
-    },
-    {
-      "type": "library",
       "bom-ref": "serena@0.1.4",
       "name": "serena-agent",
       "version": "0.1.4",
       "description": "LSP-powered symbol navigation MCP server for AI coding agents",
       "licenses": [{ "license": { "id": "MIT" } }],
-      "purl": "pkg:github/celstnblacc/serena@0.1.4",
+      "purl": "pkg:github/artificemachine/serena@0.1.4",
       "externalReferences": [
         {
           "type": "vcs",
-          "url": "https://github.com/celstnblacc/serena.git",
+          "url": "https://github.com/artificemachine/serena.git",
           "comment": "Audited fork — pinned commit: 1acd0118b253e99a3bfaecfdd464499509b3ceb0"
         }
       ],
@@ -97,13 +51,13 @@
       "bom-ref": "icm@0.10.50",
       "name": "icm",
       "version": "0.10.50",
-      "description": "Infinite Context Memory — cross-tool persistent-memory MCP server (icm serve --compact); 4th token-diet tool, pinned to icm-v0.10.50 + fork patch e6c1da3 (no-default-features build fix)",
+      "description": "Infinite Context Memory — cross-tool persistent-memory MCP server (icm serve --compact); pinned to icm-v0.10.50 + fork patch e6c1da3 (no-default-features build fix)",
       "licenses": [{ "license": { "id": "Apache-2.0" } }],
-      "purl": "pkg:github/celstnblacc/icm@0.10.50",
+      "purl": "pkg:github/artificemachine/icm@0.10.50",
       "externalReferences": [
         {
           "type": "vcs",
-          "url": "https://github.com/celstnblacc/icm.git",
+          "url": "https://github.com/artificemachine/icm.git",
           "comment": "Audited fork — pinned commit e6c1da3 (icm-v0.10.50 + NoEmbedder no-default-features fix)"
         }
       ],
@@ -115,10 +69,23 @@
       ]
     }
   ],
+  "services": [
+    {
+      "bom-ref": "context7",
+      "name": "context7",
+      "description": "Remote MCP service serving up-to-date library documentation. Registered by the installer; no Context7 code is bundled or vendored.",
+      "endpoints": ["https://mcp.context7.com/mcp"],
+      "authenticated": false,
+      "x-trust-boundary": true,
+      "properties": [
+        { "name": "optional-auth", "value": "CONTEXT7_API_KEY, appended to the URL by the installer, never logged" }
+      ]
+    }
+  ],
   "dependencies": [
     {
-      "ref": "token-diet@1.0.0",
-      "dependsOn": ["rtk@0.34.3", "tilth@0.5.7", "serena@0.1.4", "icm@0.10.50"]
+      "ref": "token-diet@1.10.4",
+      "dependsOn": ["serena@0.1.4", "icm@0.10.50"]
     }
   ]
 }

@@ -39,7 +39,7 @@ _track() {
 }
 
 @test "full-tree: fails on a macOS home path" {
-  _track leak.json '"command": "/Users/somebody/.local/bin/tilth"'
+  _track leak.json '"command": "/Users/somebody/.local/bin/icm"'
   run bash "$SCANNER" --full-tree
   [ "$status" -eq 1 ]
   [[ "$output" == *"leak.json"* ]]

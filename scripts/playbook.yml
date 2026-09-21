@@ -1,7 +1,7 @@
 ---
 # =============================================================================
-# token-diet — AI Token Optimization Stack
-# RTK + tilth + Serena + ICM installer for Linux and macOS remote hosts
+# token-diet — AI Context Optimization Stack
+# Serena + ICM + Context7 installer for Linux and macOS remote hosts
 #
 # Usage:
 #   ansible-playbook -i inventory.ini scripts/playbook.yml
@@ -13,9 +13,9 @@
 #   ansible-playbook -i inventory.ini scripts/playbook.yml \
 #     --extra-vars "install_mode=local"
 #
-#   # Install only RTK and tilth, skip Serena:
+#   # Install only Serena, skip ICM and Context7:
 #   ansible-playbook -i inventory.ini scripts/playbook.yml \
-#     --extra-vars "install_serena=false"
+#     --extra-vars "install_icm=false install_context7=false"
 #
 #   # Skip Claude Code hook/MCP configuration:
 #   ansible-playbook -i inventory.ini scripts/playbook.yml \
@@ -33,7 +33,7 @@
 #   - Internet access (online mode) or token-diet repo already cloned (local mode)
 # =============================================================================
 
-- name: token-diet — AI Token Optimization Stack (RTK + tilth + Serena + ICM)
+- name: token-diet — AI Context Optimization Stack (Serena + ICM + Context7)
   hosts: all
   gather_facts: true
   become: false
@@ -53,12 +53,17 @@
 
     # -------------------------------------------------------------------------
     # Tool selection — set any to false to skip that tool
-    # Override: --extra-vars "install_rtk=false"
+    # Override: --extra-vars "install_serena=false"
     # -------------------------------------------------------------------------
-    install_rtk: true
-    install_tilth: true
     install_serena: true
     install_icm: true
+    install_context7: true
+
+    # -------------------------------------------------------------------------
+    # Context7 — remote HTTP MCP server (no local binary)
+    # Override: --extra-vars "context7_url=https://internal.gateway/mcp"
+    # -------------------------------------------------------------------------
+    context7_url: "https://mcp.context7.com/mcp"
 
     # -------------------------------------------------------------------------
     # Claude Code integration — set false to skip hook/MCP registration
@@ -117,7 +122,7 @@
       ansible.builtin.stat:
         path: "{{ cargo_bin }}/rustc"
       register: rustc_stat
-      when: install_rtk or install_tilth or install_icm
+      when: install_icm
       tags: [prereqs]
 
     - name: Prereqs | Install Rust via rustup (if not present)
@@ -127,7 +132,7 @@
       args:
         creates: "{{ cargo_bin }}/rustc"
       when:
-        - install_rtk or install_tilth or install_icm
+        - install_icm
         - not rustc_stat.stat.exists
       notify: Reload PATH
       tags: [prereqs]
@@ -137,7 +142,7 @@
         {{ cargo_bin }}/rustup update stable --no-self-update
       changed_when: false
       failed_when: false
-      when: install_rtk or install_tilth or install_icm
+      when: install_icm
       tags: [prereqs]
 
     # --- uv -------------------------------------------------------------------
@@ -170,130 +175,12 @@
       register: repo_clone
       tags: [prereqs]
 
-    - name: Prereqs | Update git submodules (forks/rtk, forks/tilth, etc.)
+    - name: Prereqs | Update git submodules (forks/serena, forks/icm)
       ansible.builtin.command:
         cmd: git submodule update --init --recursive
         chdir: "{{ token_diet_dest }}"
       changed_when: false
       tags: [prereqs]
-
-    # =========================================================================
-    # RTK
-    # =========================================================================
-
-    - name: RTK | Install from crates.io git (online mode)
-      ansible.builtin.command: >
-        {{ cargo_bin }}/cargo install
-        --git https://github.com/artificemachine/rtk
-        --force
-      register: rtk_install_online
-      changed_when: >
-        'Installed' in rtk_install_online.stderr or
-        'Compiling' in rtk_install_online.stderr
-      when:
-        - install_rtk
-        - install_mode == 'online'
-      tags: [rtk]
-
-    - name: RTK | Install from local fork (offline mode)
-      ansible.builtin.command: >
-        {{ cargo_bin }}/cargo install
-        --path {{ token_diet_dest }}/forks/rtk
-        --force
-      register: rtk_install_local
-      changed_when: >
-        'Installed' in rtk_install_local.stderr or
-        'Compiling' in rtk_install_local.stderr
-      when:
-        - install_rtk
-        - install_mode == 'local'
-      tags: [rtk]
-
-    - name: RTK | Configure Claude Code hooks (rtk init -g)
-      ansible.builtin.command: >
-        {{ cargo_bin }}/rtk init -g
-      register: rtk_init
-      changed_when: >
-        'hooks installed' in rtk_init.stdout | lower or
-        'writing' in rtk_init.stdout | lower
-      failed_when: false
-      when:
-        - install_rtk
-        - configure_claude
-      tags: [rtk]
-
-    - name: RTK | Verify installation
-      ansible.builtin.command: "{{ cargo_bin }}/rtk --version"
-      register: rtk_version
-      changed_when: false
-      failed_when: rtk_version.rc != 0
-      when: install_rtk
-      tags: [rtk, verify]
-
-    - name: RTK | Confirm version
-      ansible.builtin.debug:
-        msg: "RTK installed OK: {{ rtk_version.stdout | default('(no output)') }}"
-      when: install_rtk
-      tags: [rtk, verify]
-
-    # =========================================================================
-    # tilth
-    # =========================================================================
-
-    - name: tilth | Install from crates.io git (online mode)
-      ansible.builtin.command: >
-        {{ cargo_bin }}/cargo install
-        --git https://github.com/artificemachine/tilth
-        --force
-      register: tilth_install_online
-      changed_when: >
-        'Installed' in tilth_install_online.stderr or
-        'Compiling' in tilth_install_online.stderr
-      when:
-        - install_tilth
-        - install_mode == 'online'
-      tags: [tilth]
-
-    - name: tilth | Install from local fork (offline mode)
-      ansible.builtin.command: >
-        {{ cargo_bin }}/cargo install
-        --path {{ token_diet_dest }}/forks/tilth
-        --force
-      register: tilth_install_local
-      changed_when: >
-        'Installed' in tilth_install_local.stderr or
-        'Compiling' in tilth_install_local.stderr
-      when:
-        - install_tilth
-        - install_mode == 'local'
-      tags: [tilth]
-
-    - name: tilth | Register MCP server for Claude Code (tilth install claude-code)
-      ansible.builtin.command: >
-        {{ cargo_bin }}/tilth install claude-code
-      register: tilth_claude
-      changed_when: >
-        'installed' in tilth_claude.stdout | lower or
-        'registered' in tilth_claude.stdout | lower
-      failed_when: false
-      when:
-        - install_tilth
-        - configure_claude
-      tags: [tilth]
-
-    - name: tilth | Verify installation
-      ansible.builtin.command: "{{ cargo_bin }}/tilth --version"
-      register: tilth_version
-      changed_when: false
-      failed_when: tilth_version.rc != 0
-      when: install_tilth
-      tags: [tilth, verify]
-
-    - name: tilth | Confirm version
-      ansible.builtin.debug:
-        msg: "tilth installed OK: {{ tilth_version.stdout | default('(no output)') }}"
-      when: install_tilth
-      tags: [tilth, verify]
 
     # =========================================================================
     # ICM
@@ -416,24 +303,57 @@
       tags: [serena, verify]
 
     # =========================================================================
+    # Context7
+    # =========================================================================
+
+    - name: Context7 | Register HTTP MCP server for Claude Code
+      ansible.builtin.command: >
+        claude mcp add --scope user --transport http context7 {{ context7_url }}
+      register: context7_mcp
+      changed_when: >
+        'added' in context7_mcp.stdout | lower or
+        'registered' in context7_mcp.stdout | lower
+      failed_when: false
+      when:
+        - install_context7
+        - configure_claude
+      tags: [context7]
+
+    - name: Context7 | Verify registration for Claude Code
+      ansible.builtin.command: claude mcp get context7
+      register: context7_verify
+      changed_when: false
+      failed_when: false
+      when:
+        - install_context7
+        - configure_claude
+      tags: [context7, verify]
+
+    - name: Context7 | Confirm registration
+      ansible.builtin.debug:
+        msg:
+          url: "{{ context7_url }}"
+          registered: "{{ context7_verify.rc is defined and context7_verify.rc == 0 }}"
+          config_block: "{{ {'mcpServers': {'context7': {'type': 'http', 'url': context7_url}}} }}"
+      when: install_context7
+      tags: [context7, verify]
+
+    # =========================================================================
     # SUMMARY
     # =========================================================================
 
     - name: Summary | Collect installed tool versions
       ansible.builtin.command: "{{ item.cmd }}"
       loop:
-        - name: RTK
-          cmd: "{{ cargo_bin }}/rtk --version"
-          enabled: "{{ install_rtk }}"
-        - name: tilth
-          cmd: "{{ cargo_bin }}/tilth --version"
-          enabled: "{{ install_tilth }}"
         - name: ICM
           cmd: "{{ cargo_bin }}/icm --version"
           enabled: "{{ install_icm }}"
         - name: uv
           cmd: "{{ local_bin }}/uv --version"
           enabled: "{{ install_serena }}"
+        - name: Context7
+          cmd: claude mcp get context7
+          enabled: "{{ install_context7 and configure_claude }}"
       when: item.enabled | bool
       register: summary_versions
       failed_when: false
@@ -456,20 +376,20 @@
           ============================================================
           token-diet installation complete on {{ inventory_hostname }}
           ============================================================
-          install_mode  : {{ install_mode }}
-          install_rtk   : {{ install_rtk }}
-          install_tilth : {{ install_tilth }}
-          install_serena: {{ install_serena }}
-          install_icm   : {{ install_icm }}
-          configure_claude: {{ configure_claude }}
-          repo cloned to: {{ token_diet_dest }}
+          install_mode     : {{ install_mode }}
+          install_serena   : {{ install_serena }}
+          install_icm      : {{ install_icm }}
+          install_context7 : {{ install_context7 }}
+          configure_claude : {{ configure_claude }}
+          context7_url     : {{ context7_url }}
+          repo cloned to   : {{ token_diet_dest }}
           ============================================================
           Next steps:
             1. Open a new shell (or source ~/.bashrc / ~/.zshrc) to
                pick up updated PATH entries.
-            2. Run: rtk --version && tilth --version
-            3. Run: rtk gain   (confirm token savings tracking works)
-            4. In a Claude Code session: git status
-               (should be transparently rewritten to: rtk git status)
+            2. Run: icm --version
+            3. Run: claude mcp get context7   (confirm HTTP MCP registration)
+            4. In a Claude Code session: recall a stored fact via ICM and
+               pull current library docs via Context7.
           ============================================================
       tags: [verify, summary]

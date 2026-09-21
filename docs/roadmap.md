@@ -2,73 +2,72 @@
 
 ## The Thesis
 
-RTK, tilth, and Serena cover three layers of token optimization:
+Three tools cover three layers that text search and full-file reads cannot:
 
 | Layer | Tool | Mechanism | Savings |
 |-------|------|-----------|---------|
-| Output compression | RTK | CLI proxy, regex/truncate | 60-90% (tracked) |
-| Code reading | tilth | AST-aware tree-sitter | 38-44% (structural) |
-| Symbol navigation | Serena | LSP-based navigation | fewer turns (structural) |
+| Symbol navigation | Serena | LSP-based definitions, references, renames | fewer turns (structural) |
+| Persistent memory | ICM | Cross-session recall of decisions and errors | recall replaces re-reading (structural) |
+| Library documentation | Context7 | Current docs for the library in use | fewer hallucinated APIs (structural) |
 
-**What's missing: a fourth layer — observation and control.**
+**None of these is an output filter.** RTK and tilth were removed from the stack
+after independent benchmarks disproved the compression-savings claim; the
+evidence is recorded in [comparison.md](comparison.md). The retired tracked
+compression figure is not published anywhere in this project.
 
-No budgets. No loop detection. No cross-session memory. No per-project attribution. No cross-tool routing. That layer is where the next 20-30% savings live, on top of what the three tools already deliver.
+## Where the project stands (v1.10.4)
 
----
+### Shipped
 
-## Current Progress (v1.7.6)
+- [x] **Installer** — detects hosts, registers components, `--dry-run`, `--local` air-gapped build.
+- [x] **Component set** — Serena + ICM + Context7, each individually selectable (`--serena-only`, `--icm-only`, `--context7-only`).
+- [x] **CLI** — `status`, `health`, `doctor`, `repair`, `route`, `budget`, `mcp list`.
+- [x] **Context hooks** (`--with-context-hooks`) — docextract + ctxwarn, off by default.
+- [x] **Uninstall symmetry** — removes exactly what install writes, plus a legacy region that cleans pre-removal RTK/tilth installs.
+- [x] **Test suite** — bats + pytest + Pester, run in CI.
 
-### ✓ Foundation (Iteration 1)
-- [x] `token-diet health` — Lightweight diagnostics.
-- [x] `token-diet uninstall` — Clean removal path.
-- [x] Automated Test Suite — 140+ bats/pytest tests.
-- [x] `--verbose` installer flag.
+### Removed
 
-### ✓ Measurement & Visibility (Iteration 2)
-- [x] Per-project breakdown (`token-diet budget status`).
-- [x] Token explainer (`token-diet explain`).
-- [x] Dashboard v2 — Sparklines, Top Days, and Project Hubs.
-- [x] **Persistent Daily History** — Stats survive history cleanup.
-
-### ✓ Control (Iteration 3)
-- [x] Token budget enforcement (`.token-budget` with warn/hard stop).
-- [x] Loop detection (`token-diet loops`).
-- [x] **Zero-Config Discovery** — Automatic project budget detection.
-
----
+- [x] RTK, rtk-mcp, tilth: code, forks, docs, tests, and the tracked savings metric. See [comparison.md](comparison.md).
 
 ## Next Steps
 
-### Iteration 4 — Efficiency (deeper savings)
+### Iteration — Measurement honesty
 
-**Goal:** Extract 20-30% more savings from code reading patterns.
-
-| Feature | What | Why |
-|---------|------|-----|
-| Comment stripping | `token-diet strip`: strip non-doc comments, license headers, blank lines | ~30% of file content is noise for the agent |
-| Incremental diff reads | `token-diet diff-reads`: suggest reading only changed ranges | Agents re-read entire files after small changes — ~25% waste |
-| Dependency-ordered reads | `tilth deps --suggest-read-order`: read files in impact order | Alphabetical reading misses the critical path |
-
-### Iteration 5 — Integration (cross-tool orchestration)
-
-**Goal:** Make the three tools work as one unified system.
+**Goal:** replace the removed vanity metric with claims that can be defended.
 
 | Feature | What | Why |
 |---------|------|-----|
-| Cross-tool router | `token-diet route`: suggests tilth (fast reads), Serena (deep refactors), RTK (CLI output) | Agents waste tokens deciding which tool to use |
-| Session dedup persistence | Persist tilth's file-read cache across sessions via Serena memory | Same utility files re-read every session |
-| Context leakage detector | `token-diet leaks`: flags redundant reads in RTK history | "You read auth.rs 3 times in 10 turns — 2.4K tokens wasted" |
-| Test-first strategy | `token-diet test-first`: suggests reading tests before implementation | Reduces trial-and-error rereads by 15-20% |
+| Per-tool usage counter | Count Serena/ICM/Context7 tool calls per session, from host transcripts | Gives a real denominator without inventing a savings percentage |
+| Cost-basis harness | Script a small task set, record billed tokens and pass/fail, publish method + N | The Quesma methodology is the bar; anything less stays unquantified |
+| Budget accounting | Make `budget status` account for usage from a source that actually exists | It currently reports `untracked` because no usage counter is installed |
 
----
+### Iteration — Integration
+
+**Goal:** make the three tools cooperate instead of competing for the agent's attention.
+
+| Feature | What | Why |
+|---------|------|-----|
+| Cross-tool router | `token-diet route` already suggests a tool; extend it with the library-docs arm for Context7 | Agents waste turns deciding where to look |
+| Memory hygiene | Surface ICM topics that have grown stale or contradictory | Recall quality decays as memory grows |
+| Doc-freshness hints | Flag when Context7 returns docs that disagree with a pinned dependency version | Prevents confident wrong APIs |
+
+### Iteration — Footprint
+
+**Goal:** keep the stack cheap enough that its structural benefits are not eaten
+by its own runtime cost.
+
+| Feature | What | Why |
+|---------|------|-----|
+| Serena process GC | `serena-gc` exists; add a scheduled check | LSP servers are the heaviest component in the stack |
+| Host-scoped registration | Encourage project-local MCP scope over global | Global servers spawn a process tree per session |
+| Startup audit | Report what each host actually loads at session start | Users should see the cost they are paying |
 
 ## Estimated Impact
 
-| Iteration | Savings | Type | Status |
-|-----------|---------|------|--------|
-| 1 — Foundation | 0% direct | Enables everything else | **DONE** |
-| 2 — Measurement | 0% direct | Visibility drives behavior change | **DONE** |
-| 3 — Control | ~15% | Prevents budget blowouts and loops | **DONE** |
-| 4 — Efficiency | ~25% | Comment stripping + incremental reads | **IN PROGRESS** |
-| 5 — Integration | ~10% | Routing + dedup + leakage detection | **IN PROGRESS** |
-| **Cumulative** | **~50% additional** | On top of existing RTK/tilth/Serena savings | |
+This project no longer publishes a cumulative savings figure. The previous
+roadmap carried a "~50% additional" line inherited from the removed tools'
+claims; it was never measured and has been deleted rather than restated.
+
+Impact claims will be added here only with the method, the run count, and a
+cost basis — see [benchmarks.md](benchmarks.md).

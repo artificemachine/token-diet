@@ -75,16 +75,23 @@ Describe "Uninstall.ps1 -Force" {
     }
 
     It "removes MCP keys from claude_desktop_config.json" {
-        $cfg = Join-Path $env:APPDATA "Claude\claude_desktop_config.json"
-        @{ mcpServers = @{ tilth = @{ command = "tilth" }; serena = @{ command = "serena" }; icm = @{ command = "icm" } } } |
-            ConvertTo-Json -Depth 5 | Set-Content $cfg -Encoding UTF8
+        # serena/icm/context7 are current components; tilth removal is
+        # LEGACY-region coverage for machines provisioned before the drop.
+        $context7 = @{ type = "http"; url = "https://mcp.context7.com/mcp" }
+        @{ mcpServers = @{
+                serena   = @{ command = "serena" }
+                icm      = @{ command = "icm" }
+                context7 = $context7
+                tilth    = @{ command = "tilth" }
+            } } | ConvertTo-Json -Depth 5 | Set-Content $cfg -Encoding UTF8
 
         & $ScriptPath -Force 2>&1 | Out-Null
 
         $json = Get-Content $cfg -Raw | ConvertFrom-Json
-        $json.mcpServers.PSObject.Properties.Name | Should -Not -Contain "tilth"
         $json.mcpServers.PSObject.Properties.Name | Should -Not -Contain "serena"
         $json.mcpServers.PSObject.Properties.Name | Should -Not -Contain "icm"
+        $json.mcpServers.PSObject.Properties.Name | Should -Not -Contain "context7"
+        $json.mcpServers.PSObject.Properties.Name | Should -Not -Contain "tilth"
     }
 
     It "preserves serena memories without -IncludeData" {

@@ -8,7 +8,7 @@
       "type": "application",
       "name": "token-diet",
       "version": "1.11.4",
-      "description": "AI token optimization stack: RTK + tilth + Serena"
+      "description": "AI token optimization stack: Serena + ICM + Context7"
     },
     "timestamp": "2026-07-10T00:00:00Z",
     "tools": [
@@ -17,28 +17,6 @@
     ]
   },
   "components": [
-    {
-      "type": "application",
-      "name": "rtk",
-      "version": "0.43.0",
-      "purl": "pkg:cargo/rtk@0.43.0",
-      "description": "CLI output compression proxy",
-      "licenses": [{ "license": { "id": "MIT" } }],
-      "externalReferences": [
-        { "type": "vcs", "url": "https://github.com/rtk-ai/rtk" }
-      ]
-    },
-    {
-      "type": "application",
-      "name": "tilth",
-      "version": "0.9.0",
-      "purl": "pkg:cargo/tilth@0.9.0",
-      "description": "Smart code reader with tree-sitter AST",
-      "licenses": [{ "license": { "id": "MIT" } }],
-      "externalReferences": [
-        { "type": "vcs", "url": "https://github.com/jahala/tilth" }
-      ]
-    },
     {
       "type": "application",
       "name": "serena",
@@ -58,7 +36,20 @@
       "description": "Infinite Context Memory — cross-tool persistent-memory MCP server",
       "licenses": [{ "license": { "id": "Apache-2.0" } }],
       "externalReferences": [
-        { "type": "vcs", "url": "https://github.com/rtk-ai/icm" }
+        { "type": "vcs", "url": "https://github.com/artificemachine/icm" }
+      ]
+    }
+  ],
+  "services": [
+    {
+      "bom-ref": "context7",
+      "name": "context7",
+      "description": "Remote MCP service serving up-to-date library documentation. Registered by the installer; no Context7 code is bundled or vendored.",
+      "endpoints": ["https://mcp.context7.com/mcp"],
+      "authenticated": false,
+      "x-trust-boundary": true,
+      "properties": [
+        { "name": "optional-auth", "value": "CONTEXT7_API_KEY, appended to the URL by the installer, never logged" }
       ]
     }
   ]

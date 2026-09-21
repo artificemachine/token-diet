@@ -16,7 +16,7 @@ mocked `uv` but not `uvx`, mocked `claude` but not `codex`, and passed only
 because those binaries happened to be installed and on `PATH`. The code under
 test probes for host CLIs with `command -v`, so an unmocked binary meant the
 test was exercising a different branch than it claimed. Five test assertions
-invoked the real `rtk` and `tilth` CLIs to check file contents, which meant
+invoked real component CLIs to check file contents, which meant
 they failed with "command not found" anywhere the tools weren't installed.
 
 None of this was visible from the machine that wrote the tests. The lesson
@@ -66,15 +66,15 @@ See `tests/path-leak.bats`.
 ## Fixing the symptom five times
 
 `.vscode/mcp.json` was a tracked file containing a portable command name,
-`"command": "tilth"`. It kept reverting to an absolute path pointing at one
+a bare binary name. It kept reverting to an absolute path pointing at one
 developer's home directory. Git history shows five separate commits fixing it:
 `4751685`, `43eebaa`, `2495d6a`, `1e9a92c`, `f408b4f`. Each one edited the path
 back and moved on.
 
-The cause was two layers away. `install.sh` calls `tilth install <host>` to
-register the MCP server, and tilth's own installer writes the absolute path of
-its binary into the project's config file. Every install silently rewrote a
-tracked file in the repository that invoked it.
+The cause was two layers away. `install.sh` called a component's own
+`install <host>` subcommand to register the MCP server, and that installer
+writes the absolute path of its binary into the project's config file. Every
+install silently rewrote a tracked file in the repository that invoked it.
 
 The fix was to stop tracking the file. It is per-machine IDE configuration
 being rewritten by an external tool; the portable template ships to
@@ -85,20 +85,20 @@ the file.** The tell was the repetition, not the individual bugs.
 
 ## Dead code that pretended to work
 
-`token-diet doctor` reported that tilth was not registered with any MCP host.
-It was registered with five. The check ran `tilth doctor --json` and read the
-result.
+`token-diet doctor` reported that a component was not registered with any MCP
+host. It was registered with five. The check ran the component's own
+`doctor --json` and read the result.
 
-`tilth doctor` had never existed as a command. `doctor.rs` was present in the
-tilth fork, fully implemented with its own unit tests, but was never declared
-in `lib.rs`, so it was not compiled into the binary or reachable from the
-dispatcher. Passing `doctor` to tilth meant passing it as a *search query*,
-which returned perfectly valid JSON describing search results, which
+That subcommand had never existed as a command. The implementation was present
+in the component's fork, fully written with its own unit tests, but was never
+declared in the crate root, so it was not compiled into the binary or reachable
+from the dispatcher. Passing `doctor` to the tool meant passing it as a *search
+query*, which returned perfectly valid JSON describing search results, which
 `cmd_doctor` then parsed as a health report and interpreted as a failure.
 
 Attempting to wire the module in revealed it had also bit-rotted: it imported
-four symbols from `install.rs` that a later refactor had made private or
-removed. It could not compile against the code around it.
+four symbols from the installer module that a later refactor had made private
+or removed. It could not compile against the code around it.
 
 Two fixes, at two layers. Downstream, `token-diet` now validates that the JSON
 it receives actually looks like a health report before trusting it, and falls

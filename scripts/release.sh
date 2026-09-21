@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # token-diet release gate — handles remaining manual v1.0.0 items:
-#   1. cargo test + cargo clippy on both Rust forks
+#   1. cargo test + cargo clippy on the ICM fork
 #   2. serena pytest
 #   3. forks/README.md staging
 #   4. binary signing (codesign / gpg)
@@ -83,7 +83,7 @@ if [ "$BRANCH" != "main" ]; then
 fi
 
 # Verify submodules are initialized
-for fork in rtk tilth serena icm; do
+for fork in serena icm; do
   if [ -z "$(ls -A "$FORKS/$fork" 2>/dev/null)" ]; then
     fail "forks/$fork is empty — run: git submodule update --init --recursive"
   fi
@@ -111,49 +111,31 @@ fi
 # --- Tests + Clippy -----------------------------------------------------------
 if $DO_TESTS; then
 
-  header "RTK — cargo clippy + test"
+  header "ICM — cargo clippy + test"
   command -v cargo &>/dev/null || fail "Rust toolchain not found"
 
-  info "Running clippy on RTK..."
-  if cargo clippy --manifest-path "$FORKS/rtk/Cargo.toml" --all-targets -- -D warnings 2>&1; then
-    record_ok "RTK clippy clean"
+  # Match build.sh's default air-gap feature set so the gate tests what ships.
+  ICM_TEST_FLAGS="--no-default-features --features tui,backend-sqlite"
+
+  info "Running clippy on ICM..."
+  if cargo clippy --manifest-path "$FORKS/icm/crates/icm-cli/Cargo.toml" --all-targets -- -D warnings 2>&1; then
+    record_ok "ICM clippy clean"
   else
-    record_warn "RTK clippy warnings — review before release"
+    record_warn "ICM clippy warnings — review before release"
   fi
 
-  # From the fork's own dir: fork tests use relative fixture paths and fail
-  # under `--manifest-path` from the repo root (tilth: 13 cwd-dependent tests
-  # fail from root, all pass from the fork dir). Running from root made the
+  # From the crate's own dir: fork tests use relative fixture paths and fail
+  # under `--manifest-path` from the repo root. Running from root made the
   # gate report phantom failures.
-  info "Running RTK tests..."
-  if ( cd "$FORKS/rtk" && cargo test 2>&1 ) | tee /tmp/rtk-test.log | tail -5; then
-    if grep -q "FAILED\|error\[" /tmp/rtk-test.log; then
-      record_warn "RTK test failures — check /tmp/rtk-test.log"
+  info "Running ICM tests..."
+  if ( cd "$FORKS/icm/crates/icm-cli" && cargo test $ICM_TEST_FLAGS 2>&1 ) | tee /tmp/icm-test.log | tail -5; then
+    if grep -q "FAILED\|error\[" /tmp/icm-test.log; then
+      record_warn "ICM test failures — check /tmp/icm-test.log"
     else
-      record_ok "RTK tests passed"
+      record_ok "ICM tests passed"
     fi
   else
-    record_warn "RTK tests did not complete cleanly"
-  fi
-
-  header "tilth — cargo clippy + test"
-
-  info "Running clippy on tilth..."
-  if cargo clippy --manifest-path "$FORKS/tilth/Cargo.toml" --all-targets -- -D warnings 2>&1; then
-    record_ok "tilth clippy clean"
-  else
-    record_warn "tilth clippy warnings — review before release"
-  fi
-
-  info "Running tilth tests..."
-  if ( cd "$FORKS/tilth" && cargo test 2>&1 ) | tee /tmp/tilth-test.log | tail -5; then
-    if grep -q "FAILED\|error\[" /tmp/tilth-test.log; then
-      record_warn "tilth test failures — check /tmp/tilth-test.log"
-    else
-      record_ok "tilth tests passed"
-    fi
-  else
-    record_warn "tilth tests did not complete cleanly"
+    record_warn "ICM tests did not complete cleanly"
   fi
 
   header "Serena — pytest"
@@ -181,10 +163,9 @@ if $DO_SIGN && ! $DRY_RUN; then
 
   header "Binary Signing"
 
-  RTK_BIN="$DIST/rtk"
-  TILTH_BIN="$DIST/tilth"
+  ICM_BIN="$DIST/icm"
 
-  if [ ! -f "$RTK_BIN" ] || [ ! -f "$TILTH_BIN" ]; then
+  if [ ! -f "$ICM_BIN" ]; then
     skip "Binaries not found in dist/ — run 'bash scripts/build.sh --release' first"
     WARN=$((WARN + 1))
   else
@@ -202,23 +183,20 @@ if $DO_SIGN && ! $DRY_RUN; then
 
       if [ -z "$IDENTITY" ]; then
         warn "No 'Developer ID Application' certificate found in keychain."
-        warn "For ad-hoc signing (local use only): codesign -s - dist/rtk dist/tilth"
+        warn "For ad-hoc signing (local use only): codesign -s - dist/icm"
         warn "For distribution: install a Developer ID certificate first."
         echo ""
         read -rp "Sign ad-hoc for local use? [y/N] " ADHOC
         if [[ "$ADHOC" =~ ^[Yy]$ ]]; then
-          codesign -s - "$RTK_BIN" && record_ok "RTK signed (ad-hoc)"
-          codesign -s - "$TILTH_BIN" && record_ok "tilth signed (ad-hoc)"
+          codesign -s - "$ICM_BIN" && record_ok "ICM signed (ad-hoc)"
         else
           skip "Signing skipped — add Developer ID certificate and re-run"
           WARN=$((WARN + 1))
         fi
       else
         info "Found identity: $IDENTITY"
-        codesign --sign "$IDENTITY" --options runtime --timestamp "$RTK_BIN"
-        record_ok "RTK signed: $IDENTITY"
-        codesign --sign "$IDENTITY" --options runtime --timestamp "$TILTH_BIN"
-        record_ok "tilth signed: $IDENTITY"
+        codesign --sign "$IDENTITY" --options runtime --timestamp "$ICM_BIN"
+        record_ok "ICM signed: $IDENTITY"
       fi
 
     else
@@ -238,10 +216,8 @@ if $DO_SIGN && ! $DRY_RUN; then
           WARN=$((WARN + 1))
         else
           info "Using GPG key: $GPG_KEY"
-          gpg --batch --yes --detach-sign --armor --local-user "$GPG_KEY" "$RTK_BIN"
-          record_ok "RTK signed: $RTK_BIN.asc"
-          gpg --batch --yes --detach-sign --armor --local-user "$GPG_KEY" "$TILTH_BIN"
-          record_ok "tilth signed: $TILTH_BIN.asc"
+          gpg --batch --yes --detach-sign --armor --local-user "$GPG_KEY" "$ICM_BIN"
+          record_ok "ICM signed: $ICM_BIN.asc"
         fi
       fi
     fi
@@ -266,20 +242,16 @@ if $DO_TAG && ! $DRY_RUN; then
     fi
 
     # Every value here is derived. The previous template hardcoded all of it and
-    # every single field had drifted false: it printed token-diet's own $VERSION
-    # as RTK's version, claimed tilth 0.5.7 (actually 0.9.0) and serena-agent
-    # 0.1.4 (actually 1.5.4.dev0), listed three stale submodule SHAs, and omitted
-    # forks/icm entirely -- there are four forks, not three.
-    #
-    # It also asserted "0 vulnerabilities (164 deps)" on every tag. No audit runs
-    # at tag time, so that was an unverified security claim baked into permanent
-    # history. Dropped rather than derived: state what is known, not what sounds
-    # reassuring. Run `cargo audit` / `uv run pip-audit` separately and record
-    # real results in the release notes if that claim is wanted.
+    # every single field had drifted false, and it asserted "0 vulnerabilities
+    # (164 deps)" on every tag. No audit runs at tag time, so that was an
+    # unverified security claim baked into permanent history. Dropped rather
+    # than derived: state what is known, not what sounds reassuring. Run
+    # `cargo audit` / `uv run pip-audit` separately and record real results in
+    # the release notes if that claim is wanted.
     TAG_MSG="token-diet v$VERSION
 
 Tool versions:
-$(for t in rtk tilth icm; do
+$(for t in icm; do
     # `<tool> --version` prints "<tool> X.Y.Z"; keep only the version field.
     v="$(command -v "$t" >/dev/null 2>&1 && "$t" --version 2>/dev/null | tail -1 | awk '{print $NF}')"
     printf '  %-7s %s\n' "$t:" "${v:-not installed}"

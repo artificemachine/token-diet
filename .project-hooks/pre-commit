@@ -11,14 +11,73 @@ REPO_ROOT="$(git rev-parse --show-toplevel)"
 echo "token-diet: verifying install.sh dry-run..."
 bash "$REPO_ROOT/scripts/install.sh" --dry-run --skip-tests 2>&1 | tail -5
 
-# Run bash tests if bats is available
-if command -v bats &>/dev/null && [ -d "$REPO_ROOT/tests" ]; then
-  echo "token-diet: running bats tests..."
-  bats "$REPO_ROOT/tests/"*.bats
+# --- Test selection -----------------------------------------------------------
+# The full suite (261 bats + 67 pytest) takes ~10 minutes. CI runs all of it on
+# every pull request and every push to main (.github/workflows/test.yml), so this
+# hook only needs to cover what the staged change can break. Fail closed: any
+# path the map below does not recognise runs the full suite. FULL_TESTS=1 forces
+# the full suite on any commit.
+staged="$(git diff --cached --name-only --diff-filter=ACMR || true)"
+
+docs_only=true
+while IFS= read -r f; do
+  [ -n "$f" ] || continue
+  case "$f" in
+    *.md|docs/*|LICENSE|LICENSE-*|compliance/*) ;;
+    *) docs_only=false; break ;;
+  esac
+done <<< "$staged"
+
+suites=""
+run_pytest=false
+if [ "${FULL_TESTS:-0}" = "1" ]; then
+  suites="all"
+  run_pytest=true
+elif [ "$docs_only" = true ]; then
+  echo "token-diet: docs-only change — skipping bats and pytest (FULL_TESTS=1 forces them)."
+else
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    case "$f" in
+      scripts/install.sh|scripts/uninstall.sh|scripts/token-diet-install.sh|scripts/*.ps1|lib/*|config/*|tests/install.bats)
+        suites="$suites install hosts-registered" ;;
+      scripts/token-diet|scripts/token-diet-dashboard|scripts/token-diet-mcp|tests/test_*.py|tests/token-diet.bats)
+        suites="$suites token-diet"; run_pytest=true ;;
+      scripts/build.sh|build.sh|scripts/release.sh|.github/workflows/*|docker/*|tests/build.bats)
+        suites="$suites build" ;;
+      .github/scripts/*|tests/path-leak.bats)
+        suites="$suites path-leak" ;;
+      *.md|docs/*|LICENSE|LICENSE-*|compliance/*|.gitignore|.gitattributes) ;;
+      *) suites="all"; run_pytest=true ;;
+    esac
+  done <<< "$staged"
+  # A changed code path that matched no rule must not run nothing.
+  [ -n "$suites" ] || { suites="all"; run_pytest=true; }
 fi
 
-# Run Python tests if pytest is available
-if command -v python3 &>/dev/null && python3 -m pytest --version &>/dev/null 2>&1; then
+if [ "$suites" = "all" ]; then
+  run_pytest=true
+fi
+
+if command -v bats &>/dev/null && [ -d "$REPO_ROOT/tests" ] && [ -n "$suites" ]; then
+  if [ "$suites" = "all" ]; then
+    echo "token-diet: running the full bats suite..."
+    bats "$REPO_ROOT/tests/"*.bats
+  else
+    paths=""; seen=""
+    for s in $suites; do
+      case " $seen " in *" $s "*) continue ;; esac
+      seen="$seen $s"
+      paths="$paths $REPO_ROOT/tests/$s.bats"
+    done
+    echo "token-diet: running bats:$seen"
+    # shellcheck disable=SC2086
+    bats $paths
+  fi
+fi
+
+# Run Python tests when a Python-facing file changed (or the full suite was asked for)
+if [ "$run_pytest" = true ] && command -v python3 &>/dev/null && python3 -m pytest --version &>/dev/null 2>&1; then
   if [ -d "$REPO_ROOT/tests" ] && ls "$REPO_ROOT/tests"/test_*.py &>/dev/null 2>&1; then
     echo "token-diet: running pytest..."
     python3 -m pytest "$REPO_ROOT/tests/" -q

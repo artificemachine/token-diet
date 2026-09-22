@@ -1,5 +1,9 @@
 #!/usr/bin/env bats
 # Tests for scripts/token-diet CLI
+#
+# Component set: Serena + ICM + context7 (remote HTTP MCP) + the token-diet
+# CLI itself. RTK and tilth were dropped — every test that mocked `rtk` or
+# `tilth` was deleted or rewritten against the surviving components.
 
 load test_helper
 
@@ -26,136 +30,58 @@ load test_helper
 }
 
 # ---------------------------------------------------------------------------
-# Cycle 2.1 — health: missing tools
+# health: missing components
 # ---------------------------------------------------------------------------
 
-@test "health: exits 1 and prints tool names when no tools installed" {
-  # Shadow real tools with stubs that exit 1 so health sees them as missing
-  for tool in rtk tilth uvx docker; do
+@test "health: exits 1 and names every component when nothing is installed" {
+  # Shadow real runtimes/binaries with stubs that exit 1 so health sees
+  # serena (uvx/docker runtime) and icm as missing; context7 has no binary
+  # and is unregistered here, so it must be reported missing as well.
+  for tool in uvx uv docker icm; do
     printf '#!/usr/bin/env bash\nexit 1\n' > "$TMP_BIN/$tool"
     chmod +x "$TMP_BIN/$tool"
   done
 
   run "$SCRIPTS_DIR/token-diet" health
   [ "$status" -eq 1 ]
-  [[ "$output" == *"RTK"* ]]
-  [[ "$output" == *"tilth"* ]]
-  [[ "$output" == *"Serena"* ]]
-}
-
-# ---------------------------------------------------------------------------
-# Stack dashboard — the default `gain` view lists all four tools
-# (RTK + tilth + Serena + ICM). ICM has its own section.
-# ---------------------------------------------------------------------------
-
-@test "gain: dashboard lists all four stack tools including ICM" {
-  mock_cmd_with_gain
-  mock_cmd tilth
-  mock_cmd uvx
-
-  run "$SCRIPTS_DIR/token-diet" gain
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"RTK"* ]]
-  [[ "$output" == *"tilth"* ]]
   [[ "$output" == *"Serena"* ]]
   [[ "$output" == *"ICM"* ]]
+  [[ "$output" == *"context7"* ]]
 }
 
 # ---------------------------------------------------------------------------
-# Regression: `gain` must include LIVE rtk data, not just archived totals.
-#
-# The live JSON used to be piped into `python3 - "$arch" << 'PY'`. `python3 -`
-# reads its program from stdin, which the heredoc already supplies, so the pipe
-# was discarded (shellcheck SC2259). json.load(sys.stdin) then parsed the
-# Python source, hit the except branch, and reported zero live activity --
-# `gain` silently displayed archived totals alone. On the machine where this
-# was found that meant reporting 4.8M tokens saved instead of 92.5M.
+# health: all components present
 # ---------------------------------------------------------------------------
 
-@test "gain: includes live rtk totals, not only archived stats" {
-  mock_cmd_with_gain   # live: 10 commands, 5000 in, 3500 saved
-  mock_cmd tilth
-  mock_cmd uvx
-
-  run "$SCRIPTS_DIR/token-diet" gain
-  [ "$status" -eq 0 ]
-  # 10 live commands must appear. A zeroed live branch would render 0 here.
-  [[ "$output" == *"10"* ]]
-  [[ "$output" != *"Commands filtered:     0"* ]]
-}
-
-@test "gain: sums live rtk totals with archived stats" {
-  mock_cmd_with_gain   # live: 10 commands
-  mock_cmd tilth
-  mock_cmd uvx
-  mkdir -p "$TMP_HOME/.config/token-diet"
-  printf '{"cmds": 90, "input": 1000, "saved": 500, "time_ms": 100}\n' \
-    > "$TMP_HOME/.config/token-diet/archived_stats.json"
-
-  run "$SCRIPTS_DIR/token-diet" gain
-  [ "$status" -eq 0 ]
-  # 10 live + 90 archived = 100. Reporting 90 means live was dropped again.
-  [[ "$output" == *"100"* ]]
-}
-
-@test "gain: shows ICM version and active when icm installed" {
-  mock_cmd_with_gain
-  mock_cmd tilth
+@test "health: exits 0 when all components are available" {
   mock_cmd uvx
   mock_icm
-
-  run "$SCRIPTS_DIR/token-diet" gain
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"ICM"* ]]
-  [[ "$output" == *"active"* ]]
-}
-
-# ---------------------------------------------------------------------------
-# Cycle 2.2 — health: all tools present
-# ---------------------------------------------------------------------------
-
-@test "health: exits 0 when all three tools are available" {
-  mock_cmd_with_gain
-  mock_cmd tilth
-  mock_cmd uvx
+  mock_context7_mcp claude-code
 
   run "$SCRIPTS_DIR/token-diet" health
   [ "$status" -eq 0 ]
-  [[ "$output" == *"All tools healthy"* ]]
+  [[ "$output" == *"All components healthy"* ]]
 }
 
 # ---------------------------------------------------------------------------
-# Cycle 2.3 — health: MCP host registration
+# health: MCP host registration
 # ---------------------------------------------------------------------------
 
-@test "health: shows MCP host names when tools are registered" {
-  mock_cmd_with_gain
-  mock_cmd tilth
+@test "health: shows MCP host names when components are registered" {
   mock_cmd uvx
-  mock_mcp_config claude-code tilth
-  mock_mcp_config claude-code serena
+  mock_icm
+  mock_context7_mcp claude-code
+  mock_mcp_config claude-code serena "uvx"
+  mock_mcp_config claude-code icm "icm"
 
   run "$SCRIPTS_DIR/token-diet" health
   [ "$status" -eq 0 ]
   [[ "$output" == *"claude-code"* ]]
 }
 
-@test "health: exits 1 when Codex tilth MCP path is stale" {
-  mock_cmd_with_gain
-  mock_cmd tilth
-  mock_cmd uvx
-  mock_mcp_config codex tilth "/missing/tilth"
-
-  run "$SCRIPTS_DIR/token-diet" health
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"Codex tilth MCP command missing"* ]]
-  [[ "$output" == *"/missing/tilth"* ]]
-}
-
 @test "health: exits 1 when Codex serena MCP path is stale" {
-  mock_cmd_with_gain
-  mock_cmd tilth
   mock_cmd uvx
+  mock_icm
   mock_mcp_config codex serena "/missing/serena"
 
   run "$SCRIPTS_DIR/token-diet" health
@@ -164,8 +90,19 @@ load test_helper
   [[ "$output" == *"/missing/serena"* ]]
 }
 
+@test "health: exits 1 when Codex icm MCP path is stale" {
+  mock_cmd uvx
+  mock_icm
+  mock_mcp_config codex icm "/missing/icm"
+
+  run "$SCRIPTS_DIR/token-diet" health
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Codex icm MCP command missing"* ]]
+  [[ "$output" == *"/missing/icm"* ]]
+}
+
 # ---------------------------------------------------------------------------
-# Cycle 2.4 — health: listed in --help
+# health: listed in --help
 # ---------------------------------------------------------------------------
 
 @test "help text includes health command" {
@@ -178,13 +115,11 @@ load test_helper
 # Cycle 3.7 — uninstall dispatch
 # ---------------------------------------------------------------------------
 
-@test "help text includes update and hook commands" {
+@test "help text includes update and mcp commands" {
   run "$SCRIPTS_DIR/token-diet" --help
   [ "$status" -eq 0 ]
   [[ "$output" == *"update"* ]]
-  [[ "$output" == *"hook"* ]]
   [[ "$output" == *"mcp"* ]]
-
 }
 
 @test "update: runs TD_INSTALLER and passes flags through" {
@@ -211,7 +146,7 @@ INSTALLER
   [ "$status" -eq 7 ]
 }
 
-@test "hook: runs uninstall then update with TD_INSTALLER" {
+@test "update --fresh: runs uninstall then update with TD_INSTALLER" {
   # Plant a file uninstall.sh would remove
   echo "#!/bin/bash" > "$TMP_HOME/.local/bin/token-diet-dashboard"
   chmod +x "$TMP_HOME/.local/bin/token-diet-dashboard"
@@ -237,119 +172,6 @@ INSTALLER
   run "$SCRIPTS_DIR/token-diet" uninstall --force
   [ "$status" -eq 0 ]
   [ ! -f "$TMP_HOME/.local/bin/token-diet-dashboard" ]
-}
-
-# ---------------------------------------------------------------------------
-# Cycle 6.1 — breakdown: dispatch
-# ---------------------------------------------------------------------------
-
-@test "breakdown: exits 1 when RTK not available" {
-  for tool in rtk tilth uvx docker; do
-    printf '#!/usr/bin/env bash\nexit 1\n' > "$TMP_BIN/$tool"
-    chmod +x "$TMP_BIN/$tool"
-  done
-  run "$SCRIPTS_DIR/token-diet" breakdown
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"RTK"* ]]
-}
-
-@test "breakdown: exits 0 when RTK present" {
-  mock_cmd_with_history
-  run "$SCRIPTS_DIR/token-diet" breakdown
-  [ "$status" -eq 0 ]
-}
-
-# ---------------------------------------------------------------------------
-# Cycle 6.2 — breakdown: shows top commands ranked by tokens saved
-# ---------------------------------------------------------------------------
-
-@test "breakdown: shows command names from RTK history" {
-  mock_cmd_with_history
-  run "$SCRIPTS_DIR/token-diet" breakdown
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"cargo test"* ]]
-  [[ "$output" == *"git log"* ]]
-}
-
-# ---------------------------------------------------------------------------
-# Cycle 6.3 — breakdown: --limit N
-# ---------------------------------------------------------------------------
-
-@test "breakdown: --limit 1 shows only one command" {
-  mock_cmd_with_history
-  run "$SCRIPTS_DIR/token-diet" breakdown --limit 1
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"cargo test"* ]]
-  [[ "$output" != *"npm test"* ]]
-}
-
-# ---------------------------------------------------------------------------
-# Cycle 6.4 — breakdown: listed in --help
-# ---------------------------------------------------------------------------
-
-@test "help text includes breakdown command" {
-  run "$SCRIPTS_DIR/token-diet" --help
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"breakdown"* ]]
-}
-
-# ---------------------------------------------------------------------------
-# Cycle 7.0 — explain: no argument
-# ---------------------------------------------------------------------------
-
-@test "explain: exits 1 with usage when no arg given" {
-  run "$SCRIPTS_DIR/token-diet" explain
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"Usage"* ]] || [[ "$output" == *"usage"* ]]
-}
-
-# ---------------------------------------------------------------------------
-# Cycle 7.1 — explain: no data for unknown command
-# ---------------------------------------------------------------------------
-
-@test "explain: exits 1 with message for unknown command" {
-  mock_cmd_with_history
-  run "$SCRIPTS_DIR/token-diet" explain "unknown-cmd-xyz"
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"no data"* ]] || [[ "$output" == *"not found"* ]]
-}
-
-# ---------------------------------------------------------------------------
-# Cycle 7.2 — explain: shows breakdown for known command
-# ---------------------------------------------------------------------------
-
-@test "explain: shows input/saved/pct for a known command" {
-  mock_cmd_with_history
-  run "$SCRIPTS_DIR/token-diet" explain "cargo test"
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"cargo test"* ]]
-  [[ "$output" == *"80"* ]]
-}
-
-# ---------------------------------------------------------------------------
-# Cycle 7.3 — explain: listed in --help
-# ---------------------------------------------------------------------------
-
-@test "help text includes explain command" {
-  run "$SCRIPTS_DIR/token-diet" --help
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"explain"* ]]
-}
-
-# ---------------------------------------------------------------------------
-# Cycle 8.1 — extract: docextract subcommand
-# ---------------------------------------------------------------------------
-
-@test "extract --help exits 0 and prints usage" {
-  run "$SCRIPTS_DIR/token-diet" extract --help
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"Usage: token-diet extract"* ]]
-}
-
-@test "help text includes extract command" {
-  run "$SCRIPTS_DIR/token-diet" --help
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"extract"* ]]
 }
 
 # ---------------------------------------------------------------------------
@@ -415,9 +237,9 @@ PY
 
 @test "budget status: exits 0 and shows thresholds when budget exists" {
   cd "$TMP_HOME"
-  # warn=200K hard=500K — mock uses 65K (below warn), so status is OK (exit 0)
+  # warn=200K hard=500K — no live usage source below warn, so status is OK (exit 0)
   printf '{"warn":200000,"hard":500000}\n' > "$TMP_HOME/.token-budget"
-  mock_cmd_with_history
+  mock_icm
   run "$SCRIPTS_DIR/token-diet" budget status
   [ "$status" -eq 0 ]
   [[ "$output" == *"200"* ]] || [[ "$output" == *"500"* ]]
@@ -425,29 +247,16 @@ PY
 
 @test "budget status: auto-creates global .token-budget and exits 0 when none found" {
   cd "$TMP_HOME"
+  mock_icm
   run "$SCRIPTS_DIR/token-diet" budget status
   [ "$status" -eq 0 ] || [ "$status" -eq 2 ]  # 0=OK, 2=WARN (usage may exceed default warn)
   [ -f "$TMP_HOME/.token-budget" ]
 }
 
-# ---------------------------------------------------------------------------
-# Cycle 9.3 — budget status: exits 2 when over warn threshold
-# ---------------------------------------------------------------------------
-
-@test "budget status: exits 2 when RTK usage exceeds warn threshold" {
-  cd "$TMP_HOME"
-  # warn=100 hard=1000000 — mock uses 65K (above warn, below hard) → WARN exit 2
-  printf '{"warn":100,"hard":1000000}\n' > "$TMP_HOME/.token-budget"
-  mock_cmd_with_history
-  run "$SCRIPTS_DIR/token-diet" budget status
-  [ "$status" -eq 2 ]
-  [[ "$output" == *"WARN"* ]] || [[ "$output" == *"warn"* ]]
-}
-
-@test "budget status: hard=0 treated as unlimited — exits 0 even when usage exceeds warn" {
+@test "budget status: hard=0 treated as unlimited" {
   cd "$TMP_HOME"
   printf '{"warn":100,"hard":0}\n' > "$TMP_HOME/.token-budget"
-  mock_cmd_with_history
+  mock_icm
   run "$SCRIPTS_DIR/token-diet" budget status
   [[ "$output" == *"unlimited"* ]]
   [ "$status" -ne 3 ]
@@ -492,262 +301,6 @@ print(json.dumps({'content': 'The quick brown fox jumps over the lazy dog. ' * 1
 }
 
 # ---------------------------------------------------------------------------
-# Cycle 10.1 — loops: exits 0 when no repeated commands
-# ---------------------------------------------------------------------------
-
-@test "loops: exits 0 with clean message when no loops detected" {
-  mock_cmd_no_loops
-  run "$SCRIPTS_DIR/token-diet" loops
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"No loops"* ]] || [[ "$output" == *"no loops"* ]] || [[ "$output" == *"clean"* ]]
-}
-
-# ---------------------------------------------------------------------------
-# Cycle 10.2 — loops: detects commands run 3+ times
-# ---------------------------------------------------------------------------
-
-@test "loops: exits 1 and flags commands run 3+ times" {
-  # Plant a mock rtk that reports a looped command (count >= 3)
-  cat > "$TMP_BIN/rtk" << 'MOCK'
-#!/usr/bin/env bash
-case "$1" in
-  --version) echo "rtk 0.34.3-mock"; exit 0 ;;
-  gain)
-    case "$2" in
-      --help)   echo "Usage: rtk gain [OPTIONS]"; exit 0 ;;
-      --format) echo '{"summary":{"total_commands":9,"total_input":71000,"total_saved":56800,"avg_savings_pct":80.0,"total_time_ms":100},"daily":[]}'; exit 0 ;;
-      *)
-        printf 'RTK Token Savings (Global Scope)\n\nBy Command\n'
-        printf '────────────────────────────────────────────────────────────────────────\n'
-        printf '  #  Command                   Count   Saved    Avg%%%%    Time  Impact    \n'
-        printf '────────────────────────────────────────────────────────────────────────\n'
-        printf ' 1.  cargo build                   7   56.0K   80.0%%%%     0ms  ██████████\n'
-        printf ' 2.  git status                    2    0.8K   80.0%%%%     0ms  ░░░░░░░░░░\n'
-        printf '────────────────────────────────────────────────────────────────────────\n'
-        exit 0 ;;
-    esac ;;
-  *)  exit 0 ;;
-esac
-MOCK
-  chmod +x "$TMP_BIN/rtk"
-
-  run "$SCRIPTS_DIR/token-diet" loops
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"cargo build"* ]]
-}
-
-# ---------------------------------------------------------------------------
-# Cycle 10.3 — loops: listed in --help
-# ---------------------------------------------------------------------------
-
-@test "help text includes loops command" {
-  run "$SCRIPTS_DIR/token-diet" --help
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"loops"* ]]
-}
-
-# ---------------------------------------------------------------------------
-# Cycle 12.1 — strip: dispatch and basic output
-# ---------------------------------------------------------------------------
-
-@test "strip: exits 1 with usage when no file given" {
-  run "$SCRIPTS_DIR/token-diet" strip
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"Usage"* ]] || [[ "$output" == *"usage"* ]]
-}
-
-@test "strip: exits 1 when file does not exist" {
-  run "$SCRIPTS_DIR/token-diet" strip "/nonexistent/path/file.py"
-  [ "$status" -eq 1 ]
-}
-
-@test "strip: removes single-line comments from a Python file" {
-  cat > "$TMP_HOME/sample.py" << 'PY'
-# This is a top comment
-def hello():
-    # inline comment
-    return "hi"  # end-of-line comment
-PY
-  run "$SCRIPTS_DIR/token-diet" strip "$TMP_HOME/sample.py"
-  [ "$status" -eq 0 ]
-  [[ "$output" != *"This is a top comment"* ]]
-  [[ "$output" == *"def hello"* ]]
-  [[ "$output" == *"return"* ]]
-}
-
-@test "strip: removes single-line comments from a bash file" {
-  cat > "$TMP_HOME/sample.sh" << 'SH'
-#!/usr/bin/env bash
-# This header comment goes away
-echo "hello"   # inline comment removed
-SH
-  run "$SCRIPTS_DIR/token-diet" strip "$TMP_HOME/sample.sh"
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"echo"* ]]
-  [[ "$output" != *"header comment"* ]]
-}
-
-@test "strip: --stats prints reduction percentage" {
-  cat > "$TMP_HOME/sample.py" << 'PY'
-# comment line one
-# comment line two
-def work():
-    pass
-PY
-  run "$SCRIPTS_DIR/token-diet" strip --stats "$TMP_HOME/sample.py"
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"%"* ]]
-}
-
-# ---------------------------------------------------------------------------
-# Cycle 12.4 — strip: listed in --help
-# ---------------------------------------------------------------------------
-
-@test "help text includes strip command" {
-  run "$SCRIPTS_DIR/token-diet" --help
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"strip"* ]]
-}
-
-# ---------------------------------------------------------------------------
-# Cycle 13.1 — diff-reads: dispatch
-# ---------------------------------------------------------------------------
-
-@test "diff-reads: exits 1 with usage when no file given" {
-  run "$SCRIPTS_DIR/token-diet" diff-reads
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"Usage"* ]] || [[ "$output" == *"usage"* ]]
-}
-
-@test "diff-reads: exits 1 when file does not exist" {
-  run "$SCRIPTS_DIR/token-diet" diff-reads "/nonexistent/file.py"
-  [ "$status" -eq 1 ]
-}
-
-@test "diff-reads: exits 0 and shows line ranges for a file in a git repo" {
-  # Use the real repo root — it's a git repo with real changes
-  run "$SCRIPTS_DIR/token-diet" diff-reads "$SCRIPTS_DIR/token-diet"
-  [ "$status" -eq 0 ]
-}
-
-# ---------------------------------------------------------------------------
-# Cycle 13.3 — diff-reads: listed in --help
-# ---------------------------------------------------------------------------
-
-@test "help text includes diff-reads command" {
-  run "$SCRIPTS_DIR/token-diet" --help
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"diff-reads"* ]]
-}
-
-# ---------------------------------------------------------------------------
-# Cycle 14.1 — route: no task given
-# ---------------------------------------------------------------------------
-
-@test "route: exits 1 with usage when no task given" {
-  run "$SCRIPTS_DIR/token-diet" route
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"Usage"* ]] || [[ "$output" == *"usage"* ]]
-}
-
-# ---------------------------------------------------------------------------
-# Cycle 14.2 — route: tilth for read/search tasks
-# ---------------------------------------------------------------------------
-
-@test "route: suggests tilth for read/search tasks" {
-  run "$SCRIPTS_DIR/token-diet" route "read src/main.rs"
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"tilth"* ]]
-}
-
-# ---------------------------------------------------------------------------
-# Cycle 14.3 — route: Serena for rename/refactor, RTK for run/build/test
-# ---------------------------------------------------------------------------
-
-@test "route: suggests Serena for rename/refactor tasks" {
-  run "$SCRIPTS_DIR/token-diet" route "rename function foo to bar"
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"Serena"* ]] || [[ "$output" == *"serena"* ]]
-}
-
-@test "route: suggests RTK for run/build/test tasks" {
-  run "$SCRIPTS_DIR/token-diet" route "run cargo test"
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"RTK"* ]]
-}
-
-@test "route: suggests ICM for recall/memory tasks" {
-  run "$SCRIPTS_DIR/token-diet" route "recall the prior decision about auth"
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"ICM"* ]]
-}
-
-# ---------------------------------------------------------------------------
-# Cycle 14.4 — route: listed in --help
-# ---------------------------------------------------------------------------
-
-@test "help text includes route command" {
-  run "$SCRIPTS_DIR/token-diet" --help
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"route"* ]]
-}
-
-# ---------------------------------------------------------------------------
-# Cycle 15.1 — leaks: no repeated file reads
-# ---------------------------------------------------------------------------
-
-@test "leaks: exits 0 with clean message when no repeated file reads" {
-  mock_cmd_no_loops
-  run "$SCRIPTS_DIR/token-diet" leaks
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"No leaks"* ]] || [[ "$output" == *"no leaks"* ]] || [[ "$output" == *"clean"* ]]
-}
-
-# ---------------------------------------------------------------------------
-# Cycle 15.2 — leaks: detects files read 2+ times
-# ---------------------------------------------------------------------------
-
-@test "leaks: exits 1 and flags files read 2+ times" {
-  cat > "$TMP_BIN/rtk" << 'MOCK'
-#!/usr/bin/env bash
-case "$1" in
-  --version) echo "rtk 0.34.3-mock"; exit 0 ;;
-  gain)
-    case "$2" in
-      --help)   echo "Usage: rtk gain [OPTIONS]"; exit 0 ;;
-      --format) echo '{"summary":{"total_commands":6,"total_input":15500,"total_saved":11900,"avg_savings_pct":76.8,"total_time_ms":100},"daily":[]}'; exit 0 ;;
-      *)
-        printf 'RTK Token Savings (Global Scope)\n\nBy Command\n'
-        printf '────────────────────────────────────────────────────────────────────────\n'
-        printf '  #  Command                   Count   Saved    Avg%%%%    Time  Impact    \n'
-        printf '────────────────────────────────────────────────────────────────────────\n'
-        printf ' 1.  cat src/auth.rs               3    7.0K   77.0%%%%     0ms  ████░░░░░░\n'
-        printf ' 2.  cat src/main.rs               2    4.5K   75.0%%%%     0ms  ████░░░░░░\n'
-        printf ' 3.  git status                    1    0.4K   80.0%%%%     0ms  ░░░░░░░░░░\n'
-        printf '────────────────────────────────────────────────────────────────────────\n'
-        exit 0 ;;
-    esac ;;
-  *)  exit 0 ;;
-esac
-MOCK
-  chmod +x "$TMP_BIN/rtk"
-
-  run "$SCRIPTS_DIR/token-diet" leaks
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"auth.rs"* ]]
-}
-
-# ---------------------------------------------------------------------------
-# Cycle 15.3 — leaks: listed in --help
-# ---------------------------------------------------------------------------
-
-@test "help text includes leaks command" {
-  run "$SCRIPTS_DIR/token-diet" --help
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"leaks"* ]]
-}
-
-# ---------------------------------------------------------------------------
 # Cycle 16.1 — test-first: dispatch
 # ---------------------------------------------------------------------------
 
@@ -786,76 +339,39 @@ MOCK
 }
 
 # ---------------------------------------------------------------------------
-# Regression: single-quoted TOML command value is parsed correctly
+# Cycle 14.1 — route: no task given
 # ---------------------------------------------------------------------------
 
-@test "health: single-quoted TOML command is detected as registered" {
-  mock_cmd_with_gain
-  mock_cmd tilth
-  mock_cmd uv
-  mock_cmd uvx
-  mock_cmd codex
-  # Write a Codex config using single-quoted TOML (valid TOML literal string)
-  mkdir -p "$TMP_HOME/.codex"
-  printf '\n[mcp_servers.tilth]\ncommand = '"'"'tilth'"'"'\n' >> "$TMP_HOME/.codex/config.toml"
-
-  run "$SCRIPTS_DIR/token-diet" health
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"codex"* ]]
-}
-
-@test "health: stale single-quoted TOML path is flagged" {
-  mock_cmd_with_gain
-  mock_cmd tilth
-  mock_cmd uv
-  mock_cmd codex
-  mkdir -p "$TMP_HOME/.codex"
-  printf '\n[mcp_servers.tilth]\ncommand = '"'"'/missing/tilth'"'"'\n' >> "$TMP_HOME/.codex/config.toml"
-
-  run "$SCRIPTS_DIR/token-diet" health
-  [[ "$output" == *"MCP command missing: /missing/tilth"* ]]
-}
-
-@test "verify: stale serena Codex command is flagged in inline fallback" {
-  tmp_bin="$(mktemp -d)"
-  cp "$SCRIPTS_DIR/token-diet" "$tmp_bin/token-diet"
-  chmod +x "$tmp_bin/token-diet"
-  mock_cmd_with_gain
-  mock_cmd tilth
-  mock_cmd uv
-  mkdir -p "$TMP_HOME/.codex"
-  printf '\n[mcp_servers.serena]\ncommand = "/missing/serena"\n' >> "$TMP_HOME/.codex/config.toml"
-  clean_path="${PATH//:$PROJECT_ROOT\/scripts/}"
-
-  run env HOME="$TMP_HOME" PATH="$clean_path" "$tmp_bin/token-diet" verify
+@test "route: exits 1 with usage when no task given" {
+  run "$SCRIPTS_DIR/token-diet" route
   [ "$status" -eq 1 ]
-  [[ "$output" == *"serena codex: registered but '/missing/serena' not in PATH"* ]]
-}
-
-@test "verify: stale icm Codex command is flagged in inline fallback" {
-  tmp_bin="$(mktemp -d)"
-  cp "$SCRIPTS_DIR/token-diet" "$tmp_bin/token-diet"
-  chmod +x "$tmp_bin/token-diet"
-  mock_cmd_with_gain
-  mock_cmd tilth
-  mock_cmd uv
-  mkdir -p "$TMP_HOME/.codex"
-  printf '\n[mcp_servers.icm]\ncommand = "/missing/icm"\n' >> "$TMP_HOME/.codex/config.toml"
-  clean_path="${PATH//:$PROJECT_ROOT\/scripts/}"
-
-  run env HOME="$TMP_HOME" PATH="$clean_path" "$tmp_bin/token-diet" verify
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"icm codex: registered but '/missing/icm' not in PATH"* ]]
+  [[ "$output" == *"Usage"* ]] || [[ "$output" == *"usage"* ]]
 }
 
 # ---------------------------------------------------------------------------
-# UX fix: verify inline fallback exits 1 when issues found
+# Cycle 14.3 — route: Serena for rename/refactor, ICM for recall/memory
 # ---------------------------------------------------------------------------
 
-@test "--version: prints token-diet version and exits 0" {
-  run "$SCRIPTS_DIR/token-diet" --version
+@test "route: suggests Serena for rename/refactor tasks" {
+  run "$SCRIPTS_DIR/token-diet" route "rename function foo to bar"
   [ "$status" -eq 0 ]
-  [[ "$output" == token-diet\ * ]]
+  [[ "$output" == *"Serena"* ]] || [[ "$output" == *"serena"* ]]
+}
+
+@test "route: suggests ICM for recall/memory tasks" {
+  run "$SCRIPTS_DIR/token-diet" route "recall the prior decision about auth"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"ICM"* ]]
+}
+
+# ---------------------------------------------------------------------------
+# Cycle 14.4 — route: listed in --help
+# ---------------------------------------------------------------------------
+
+@test "help text includes route command" {
+  run "$SCRIPTS_DIR/token-diet" --help
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"route"* ]]
 }
 
 # ---------------------------------------------------------------------------
@@ -977,72 +493,72 @@ MOCK
 }
 
 # ---------------------------------------------------------------------------
-# no-rtk / use-rtk — RTK toggle
+# Regression: single-quoted TOML command value is parsed correctly
 # ---------------------------------------------------------------------------
 
-@test "no-rtk: creates sentinel file and exits 0" {
-  run env HOME="$TMP_HOME" "$SCRIPTS_DIR/token-diet" no-rtk
+@test "health: single-quoted TOML command is detected as registered" {
+  mock_cmd uvx
+  mock_icm
+  mock_cmd codex
+  mock_context7_mcp claude-code
+  # Write a Codex config using single-quoted TOML (valid TOML literal string)
+  mkdir -p "$TMP_HOME/.codex"
+  printf '\n[mcp_servers.icm]\ncommand = '"'"'icm'"'"'\n' >> "$TMP_HOME/.codex/config.toml"
+
+  run "$SCRIPTS_DIR/token-diet" health
   [ "$status" -eq 0 ]
-  [ -f "$TMP_HOME/.config/token-diet/rtk-disabled" ]
+  [[ "$output" == *"codex"* ]]
 }
 
-@test "no-rtk: output confirms RTK is disabled" {
-  run env HOME="$TMP_HOME" "$SCRIPTS_DIR/token-diet" no-rtk
+@test "health: stale single-quoted TOML path is flagged" {
+  mock_cmd uvx
+  mock_icm
+  mock_cmd codex
+  mkdir -p "$TMP_HOME/.codex"
+  printf '\n[mcp_servers.icm]\ncommand = '"'"'/missing/icm'"'"'\n' >> "$TMP_HOME/.codex/config.toml"
+
+  run "$SCRIPTS_DIR/token-diet" health
+  [[ "$output" == *"MCP command missing: /missing/icm"* ]]
+}
+
+@test "verify: stale serena Codex command is flagged in inline fallback" {
+  tmp_bin="$(mktemp -d)"
+  cp "$SCRIPTS_DIR/token-diet" "$tmp_bin/token-diet"
+  chmod +x "$tmp_bin/token-diet"
+  mock_cmd uvx
+  mock_icm
+  mkdir -p "$TMP_HOME/.codex"
+  printf '\n[mcp_servers.serena]\ncommand = "/missing/serena"\n' >> "$TMP_HOME/.codex/config.toml"
+  clean_path="${PATH//:$PROJECT_ROOT\/scripts/}"
+
+  run env HOME="$TMP_HOME" PATH="$clean_path" "$tmp_bin/token-diet" verify
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"serena codex: registered but '/missing/serena' not in PATH"* ]]
+}
+
+@test "verify: stale icm Codex command is flagged in inline fallback" {
+  tmp_bin="$(mktemp -d)"
+  cp "$SCRIPTS_DIR/token-diet" "$tmp_bin/token-diet"
+  chmod +x "$tmp_bin/token-diet"
+  mock_cmd uvx
+  mock_icm
+  mkdir -p "$TMP_HOME/.codex"
+  printf '\n[mcp_servers.icm]\ncommand = "/missing/icm"\n' >> "$TMP_HOME/.codex/config.toml"
+  clean_path="${PATH//:$PROJECT_ROOT\/scripts/}"
+
+  run env HOME="$TMP_HOME" PATH="$clean_path" "$tmp_bin/token-diet" verify
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"icm codex: registered but '/missing/icm' not in PATH"* ]]
+}
+
+# ---------------------------------------------------------------------------
+# --version
+# ---------------------------------------------------------------------------
+
+@test "--version: prints token-diet version and exits 0" {
+  run "$SCRIPTS_DIR/token-diet" --version
   [ "$status" -eq 0 ]
-  [[ "$output" == *"RTK disabled"* ]]
-}
-
-@test "use-rtk: removes sentinel file and exits 0" {
-  mkdir -p "$TMP_HOME/.config/token-diet"
-  touch "$TMP_HOME/.config/token-diet/rtk-disabled"
-  run env HOME="$TMP_HOME" "$SCRIPTS_DIR/token-diet" use-rtk
-  [ "$status" -eq 0 ]
-  [ ! -f "$TMP_HOME/.config/token-diet/rtk-disabled" ]
-}
-
-@test "use-rtk: exits 0 and reports already enabled when sentinel absent" {
-  run env HOME="$TMP_HOME" "$SCRIPTS_DIR/token-diet" use-rtk
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"already enabled"* ]]
-}
-
-@test "no-rtk then use-rtk: sentinel created then removed" {
-  env HOME="$TMP_HOME" "$SCRIPTS_DIR/token-diet" no-rtk
-  [ -f "$TMP_HOME/.config/token-diet/rtk-disabled" ]
-  env HOME="$TMP_HOME" "$SCRIPTS_DIR/token-diet" use-rtk
-  [ ! -f "$TMP_HOME/.config/token-diet/rtk-disabled" ]
-}
-
-@test "help text includes hook command" {
-  run "$SCRIPTS_DIR/token-diet" --help
-  [[ "$output" == *"hook"* ]]
-  [[ "$output" == *"mcp"* ]]
-
-}
-
-@test "no-rtk: does not modify hook when sentinel already present in hook" {
-  # Simulate a hook that already contains the token-diet sentinel check
-  # (as installed by RTK >= hook-version 4).
-  mkdir -p "$TMP_HOME/.claude/hooks"
-  cat > "$TMP_HOME/.claude/hooks/rtk-rewrite.sh" << 'HOOK'
-#!/usr/bin/env bash
-# rtk-hook-version: 4
-# token-diet integration: honour the no-rtk / use-rtk toggle
-if [ -f "$HOME/.config/token-diet/rtk-disabled" ]; then exit 0; fi
-if ! command -v jq &>/dev/null; then exit 0; fi
-HOOK
-
-  local checksum_before
-  checksum_before=$(shasum -a 256 "$TMP_HOME/.claude/hooks/rtk-rewrite.sh" | awk '{print $1}')
-
-  run env HOME="$TMP_HOME" "$SCRIPTS_DIR/token-diet" no-rtk
-  [ "$status" -eq 0 ]
-
-  local checksum_after
-  checksum_after=$(shasum -a 256 "$TMP_HOME/.claude/hooks/rtk-rewrite.sh" | awk '{print $1}')
-
-  # Hook must not have been modified — sentinel was already present
-  [ "$checksum_before" = "$checksum_after" ]
+  [[ "$output" == token-diet\ * ]]
 }
 
 # ---------------------------------------------------------------------------
@@ -1063,33 +579,19 @@ HOOK
 # Cycle 14.2 — doctor: binary checks
 # ---------------------------------------------------------------------------
 
-@test "doctor: exits 1 and reports rtk missing when rtk not in PATH" {
-  # Shadow real rtk with a stub that exits 1 so doctor sees it as missing
-  printf '#!/usr/bin/env bash\nexit 1\n' > "$TMP_BIN/rtk"
-  chmod +x "$TMP_BIN/rtk"
-  mock_cmd tilth
+@test "doctor: exits 1 and reports icm missing when icm not in PATH" {
+  # Shadow real icm with a stub that exits 1 so doctor sees it as missing
+  printf '#!/usr/bin/env bash\nexit 1\n' > "$TMP_BIN/icm"
+  chmod +x "$TMP_BIN/icm"
   mock_cmd uvx
 
   run "$SCRIPTS_DIR/token-diet" doctor
   [ "$status" -eq 1 ]
-  [[ "$output" == *"rtk"* ]]
-}
-
-@test "doctor: exits 1 and reports tilth missing when tilth not in PATH" {
-  mock_rtk_with_init_show
-  # Shadow real tilth with a stub that exits 1
-  printf '#!/usr/bin/env bash\nexit 1\n' > "$TMP_BIN/tilth"
-  chmod +x "$TMP_BIN/tilth"
-  mock_cmd uvx
-
-  run "$SCRIPTS_DIR/token-diet" doctor
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"tilth"* ]]
+  [[ "$output" == *"icm"* ]]
 }
 
 @test "doctor: exits 1 and reports serena missing when no runtime available" {
-  mock_rtk_with_init_show
-  mock_cmd tilth
+  mock_icm
   # Shadow uvx and uv with stubs that exit 1; no docker image
   for cmd in uvx uv docker; do
     printf '#!/usr/bin/env bash\nexit 1\n' > "$TMP_BIN/$cmd"
@@ -1102,89 +604,43 @@ HOOK
 }
 
 # ---------------------------------------------------------------------------
-# Cycle 14.3 — doctor: RTK hook checks
-# ---------------------------------------------------------------------------
-
-@test "doctor: exits 1 and reports RTK hook failure" {
-  mock_rtk_with_init_show fail
-  mock_cmd tilth
-  mock_cmd uvx
-  mock_mcp_config claude-code tilth
-  mock_mcp_config claude-code serena
-
-  run "$SCRIPTS_DIR/token-diet" doctor
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"FAIL"* ]] || [[ "$output" == *"Integrity"* ]]
-}
-
-@test "doctor: exits 1 and reports RTK hook warning" {
-  mock_rtk_with_init_show warn
-  mock_cmd tilth
-  mock_cmd uvx
-  mock_mcp_config claude-code tilth
-  mock_mcp_config claude-code serena
-
-  run "$SCRIPTS_DIR/token-diet" doctor
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"Hook"* ]] || [[ "$output" == *"warn"* ]] || [[ "$output" == *"NOT executable"* ]]
-}
-
-# ---------------------------------------------------------------------------
 # Cycle 14.4 — doctor: MCP registration checks
 # ---------------------------------------------------------------------------
 
-@test "doctor: exits 1 when tilth not registered in claude-code" {
-  mock_rtk_with_init_show
-  mock_cmd tilth
-  mock_cmd uvx
-  mock_mcp_config claude-code serena
-
-  run "$SCRIPTS_DIR/token-diet" doctor
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"tilth"* ]]
-}
-
 @test "doctor: exits 1 when serena not registered in claude-code" {
-  mock_rtk_with_init_show
-  mock_cmd tilth
   mock_cmd uvx
-  mock_mcp_config claude-code tilth
+  mock_icm
+  mock_mcp_config claude-code icm "icm"
 
   run "$SCRIPTS_DIR/token-diet" doctor
   [ "$status" -eq 1 ]
   [[ "$output" == *"serena"* ]]
 }
 
-@test "doctor: exits 1 when MCP command is stale (binary missing)" {
-  mock_rtk_with_init_show
-  mock_cmd tilth
+@test "doctor: exits 1 when icm not registered in claude-code" {
   mock_cmd uvx
-  mock_mcp_config claude-code tilth "/nonexistent/tilth"
-  mock_mcp_config claude-code serena
-
-  run "$SCRIPTS_DIR/token-diet" doctor
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"/nonexistent/tilth"* ]] || [[ "$output" == *"missing"* ]]
-}
-
-@test "doctor: exits 1 when icm registered in claude-code but command missing" {
-  mock_rtk_with_init_show
-  mock_cmd tilth
-  mock_cmd uvx
-  mock_mcp_config claude-code tilth "tilth"
+  mock_icm
   mock_mcp_config claude-code serena "uvx"
-  mock_mcp_config claude-code icm "/nonexistent/icm"
 
   run "$SCRIPTS_DIR/token-diet" doctor
   [ "$status" -eq 1 ]
   [[ "$output" == *"icm"* ]]
+}
+
+@test "doctor: exits 1 when MCP command is stale (binary missing)" {
+  mock_cmd uvx
+  mock_icm
+  mock_mcp_config claude-code icm "/nonexistent/icm"
+  mock_mcp_config claude-code serena "uvx"
+
+  run "$SCRIPTS_DIR/token-diet" doctor
+  [ "$status" -eq 1 ]
   [[ "$output" == *"/nonexistent/icm"* ]] || [[ "$output" == *"missing"* ]]
 }
 
 @test "doctor: exits 1 when icm Codex MCP path is stale" {
-  mock_rtk_with_init_show
-  mock_cmd tilth
   mock_cmd uvx
+  mock_icm
   mock_mcp_config codex icm "/missing/icm"
 
   run "$SCRIPTS_DIR/token-diet" doctor
@@ -1193,19 +649,30 @@ HOOK
 }
 
 # ---------------------------------------------------------------------------
+# context7 — remote HTTP MCP component in the doctor component list
+# ---------------------------------------------------------------------------
+
+@test "doctor: lists context7 among its component checks" {
+  mock_cmd uvx
+  mock_icm
+  mock_context7_mcp claude-code
+
+  run "$SCRIPTS_DIR/token-diet" doctor
+  [[ "$output" == *"context7"* ]]
+}
+
+# ---------------------------------------------------------------------------
 # Cycle 14.5 — doctor: healthy full stack
 # ---------------------------------------------------------------------------
 
 @test "doctor: exits 0 and prints 'All checks passed' when full stack healthy" {
-  mock_rtk_with_init_show healthy
-  mock_cmd tilth
   mock_cmd uvx
   mock_icm
-  mock_gemini tilth serena icm
+  mock_gemini serena icm
   # Register MCP tools with commands that exist in $TMP_BIN
-  mock_mcp_config claude-code tilth "tilth"
   mock_mcp_config claude-code serena "uvx"
   mock_mcp_config claude-code icm "icm"
+  mock_context7_mcp claude-code
 
   run "$SCRIPTS_DIR/token-diet" doctor
   [ "$status" -eq 0 ]
@@ -1217,14 +684,12 @@ HOOK
 # ---------------------------------------------------------------------------
 
 @test "doctor --json: outputs valid JSON with healthy=true when full stack ok" {
-  mock_rtk_with_init_show healthy
-  mock_cmd tilth
   mock_cmd uvx
   mock_icm
-  mock_gemini tilth serena icm
-  mock_mcp_config claude-code tilth "tilth"
+  mock_gemini serena icm
   mock_mcp_config claude-code serena "uvx"
   mock_mcp_config claude-code icm "icm"
+  mock_context7_mcp claude-code
 
   run "$SCRIPTS_DIR/token-diet" doctor --json
   [ "$status" -eq 0 ]
@@ -1232,14 +697,12 @@ HOOK
 }
 
 @test "doctor --json: emits icm_mcp.registered_hosts mirroring serena_mcp" {
-  mock_rtk_with_init_show healthy
-  mock_cmd tilth
   mock_cmd uvx
   mock_icm
-  mock_gemini tilth serena icm
-  mock_mcp_config claude-code tilth "tilth"
+  mock_gemini serena icm
   mock_mcp_config claude-code serena "uvx"
   mock_mcp_config claude-code icm "icm"
+  mock_context7_mcp claude-code
 
   run "$SCRIPTS_DIR/token-diet" doctor --json
   [ "$status" -eq 0 ]
@@ -1254,10 +717,9 @@ assert 'claude-code' in d['icm_mcp']['registered_hosts'], d['icm_mcp']['register
 }
 
 @test "doctor --json: outputs valid JSON with healthy=false and findings when issues" {
-  # Shadow rtk so it's seen as missing
-  printf '#!/usr/bin/env bash\nexit 1\n' > "$TMP_BIN/rtk"
-  chmod +x "$TMP_BIN/rtk"
-  mock_cmd tilth
+  # Shadow icm so it's seen as missing
+  printf '#!/usr/bin/env bash\nexit 1\n' > "$TMP_BIN/icm"
+  chmod +x "$TMP_BIN/icm"
   mock_cmd uvx
 
   run "$SCRIPTS_DIR/token-diet" doctor --json
@@ -1286,67 +748,14 @@ assert len(d['findings']) > 0
 }
 
 @test "repair: --dry-run accepted, exits 0 when nothing to repair" {
-  mock_rtk_with_init_show healthy
-  mock_cmd tilth
   mock_cmd uvx
-  mock_mcp_config claude-code tilth "tilth"
+  mock_icm
   mock_mcp_config claude-code serena "uvx"
+  mock_mcp_config claude-code icm "icm"
+  mock_context7_mcp claude-code
 
   run "$SCRIPTS_DIR/token-diet" repair --dry-run
   [ "$status" -eq 0 ]
-}
-
-# ---------------------------------------------------------------------------
-# Cycle 15.2 — repair: RTK hook repair
-# ---------------------------------------------------------------------------
-
-@test "repair: repairs RTK hook warning with rtk init -g --auto-patch" {
-  mock_rtk_with_auto_patch success
-  mock_cmd tilth
-  mock_cmd uvx
-  mock_mcp_config claude-code tilth "tilth"
-  mock_mcp_config claude-code serena "uvx"
-
-  run "$SCRIPTS_DIR/token-diet" repair
-  [ "$status" -eq 0 ]
-  [ -f "$TMP_HOME/.rtk-auto-patch-called" ]
-  [[ "$output" == *"RTK"* ]]
-}
-
-@test "repair: reports failure when rtk init -g --auto-patch fails" {
-  mock_rtk_with_auto_patch fail
-  mock_cmd tilth
-  mock_cmd uvx
-  mock_mcp_config claude-code tilth "tilth"
-  mock_mcp_config claude-code serena "uvx"
-
-  run "$SCRIPTS_DIR/token-diet" repair
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"RTK"* ]]
-}
-
-@test "repair: skips RTK repair when rtk not installed" {
-  printf '#!/usr/bin/env bash\nexit 1\n' > "$TMP_BIN/rtk"
-  chmod +x "$TMP_BIN/rtk"
-  mock_cmd tilth
-  mock_cmd uvx
-
-  run "$SCRIPTS_DIR/token-diet" repair
-  [ "$status" -eq 0 ]
-  [ ! -f "$TMP_HOME/.rtk-auto-patch-called" ]
-}
-
-@test "repair: --dry-run shows would-run for RTK warning without invoking rtk init" {
-  mock_rtk_with_auto_patch success
-  mock_cmd tilth
-  mock_cmd uvx
-  mock_mcp_config claude-code tilth "tilth"
-  mock_mcp_config claude-code serena "uvx"
-
-  run "$SCRIPTS_DIR/token-diet" repair --dry-run
-  [ "$status" -eq 0 ]
-  [ ! -f "$TMP_HOME/.rtk-auto-patch-called" ]
-  [[ "$output" == *"rtk init"* ]] || [[ "$output" == *"auto-patch"* ]] || [[ "$output" == *"RTK"* ]]
 }
 
 # ---------------------------------------------------------------------------
@@ -1360,13 +769,12 @@ assert len(d['findings']) > 0
   # `token-diet repair` silently did nothing for OpenCode while `doctor`
   # correctly reported the problem. A repair that cannot reach the file the
   # doctor diagnoses is not a repair.
-  mock_rtk_with_init_show healthy
-  mock_cmd tilth
   mock_cmd uvx
+  mock_icm
 
   mkdir -p "$TMP_HOME/.config/opencode"
   cat > "$TMP_HOME/.config/opencode/opencode.json" <<'JSON'
-{"mcp": {"tilth": {"type": "local", "command": ["/nonexistent/tilth", "--mcp"]}}}
+{"mcp": {"icm": {"type": "local", "command": ["/nonexistent/icm"]}}}
 JSON
 
   run "$SCRIPTS_DIR/token-diet" repair
@@ -1376,68 +784,64 @@ JSON
   updated=$(python3 -c "
 import json
 d = json.load(open('$TMP_HOME/.config/opencode/opencode.json'))
-e = d.get('mcp', {}).get('tilth', {})
+e = d.get('mcp', {}).get('icm', {})
 c = e.get('command')
 print(c[0] if isinstance(c, list) else (c or ''))
 ")
-  [[ "$updated" != "/nonexistent/tilth" ]]
+  [[ "$updated" != "/nonexistent/icm" ]]
   [[ "$updated" != "" ]]
 }
 
-@test "repair: updates stale tilth command path in claude-code config" {
-  mock_rtk_with_init_show healthy
-  mock_cmd tilth
+@test "repair: updates stale icm command path in claude-code config" {
   mock_cmd uvx
-  mock_mcp_config claude-code tilth "/nonexistent/tilth"
+  mock_icm
+  mock_mcp_config claude-code icm "/nonexistent/icm"
   mock_mcp_config claude-code serena "uvx"
 
   run "$SCRIPTS_DIR/token-diet" repair
   [ "$status" -eq 0 ]
 
-  # Verify the JSON was updated to the working tilth path
+  # Verify the JSON was updated to the working icm path
   local updated_cmd
   updated_cmd=$(python3 -c "
 import json
 d = json.load(open('$TMP_HOME/.claude/settings.json'))
 servers = d.get('mcpServers', {})
-key = next((k for k in servers if 'tilth' in k.lower()), None)
+key = next((k for k in servers if 'icm' in k.lower()), None)
 print(servers[key]['command'] if key else '')
 ")
-  [[ "$updated_cmd" != "/nonexistent/tilth" ]]
+  [[ "$updated_cmd" != "/nonexistent/icm" ]]
   [[ "$updated_cmd" != "" ]]
 }
 
 @test "repair: fails when stale MCP command and tool not in PATH" {
-  mock_rtk_with_init_show healthy
-  # tilth absent from TMP_BIN; restrict PATH to TMP_BIN + system dirs only,
-  # excluding $HOME/.local/bin where the real tilth lives.
   mock_cmd uvx
-  mock_mcp_config claude-code tilth "/nonexistent/tilth"
+  # icm absent from TMP_BIN; restrict PATH to TMP_BIN + system dirs only,
+  # excluding $HOME/.local/bin where the real icm lives.
+  mock_mcp_config claude-code icm "/nonexistent/icm"
   mock_mcp_config claude-code serena "uvx"
 
   run env HOME="$TMP_HOME" PATH="$TMP_BIN:/usr/bin:/bin" "$SCRIPTS_DIR/token-diet" repair
   [ "$status" -eq 1 ]
-  [[ "$output" == *"tilth"* ]]
+  [[ "$output" == *"icm"* ]]
 }
 
 @test "repair: skips not-registered entries (installer scope, not repair scope)" {
-  mock_rtk_with_init_show healthy
-  mock_cmd tilth
   mock_cmd uvx
-  # Only serena registered — tilth not registered at all
+  mock_icm
+  # Only serena registered — icm not registered at all
   mock_mcp_config claude-code serena "uvx"
 
   run "$SCRIPTS_DIR/token-diet" repair
   [ "$status" -eq 0 ]
-  # Must not attempt to install tilth — it should be skipped silently
+  # Must not attempt to install icm — it should be skipped silently
   [[ "$output" != *"install"* ]]
 }
 
 @test "repair: --dry-run shows would-update but does not write JSON" {
-  mock_rtk_with_init_show healthy
-  mock_cmd tilth
   mock_cmd uvx
-  mock_mcp_config claude-code tilth "/nonexistent/tilth"
+  mock_icm
+  mock_mcp_config claude-code icm "/nonexistent/icm"
   mock_mcp_config claude-code serena "uvx"
 
   # Record config before
@@ -1451,7 +855,7 @@ print(servers[key]['command'] if key else '')
   local after
   after=$(cat "$TMP_HOME/.claude/settings.json")
   [ "$before" = "$after" ]
-  [[ "$output" == *"tilth"* ]]
+  [[ "$output" == *"icm"* ]]
 }
 
 # ---------------------------------------------------------------------------
@@ -1459,15 +863,14 @@ print(servers[key]['command'] if key else '')
 # ---------------------------------------------------------------------------
 
 @test "repair: flags stale codex TOML command as manual-only and exits 0" {
-  mock_rtk_with_init_show healthy
-  mock_cmd tilth
   mock_cmd uvx
-  mock_mcp_config codex tilth "/nonexistent/tilth"
+  mock_icm
+  mock_mcp_config codex icm "/nonexistent/icm"
 
   run "$SCRIPTS_DIR/token-diet" repair
   [ "$status" -eq 0 ]
   # Must not modify codex config
-  [[ "$(cat "$TMP_HOME/.codex/config.toml")" == *"/nonexistent/tilth"* ]]
+  [[ "$(cat "$TMP_HOME/.codex/config.toml")" == *"/nonexistent/icm"* ]]
 }
 
 # ---------------------------------------------------------------------------
@@ -1475,11 +878,11 @@ print(servers[key]['command'] if key else '')
 # ---------------------------------------------------------------------------
 
 @test "repair --json: healthy=true and repairs=0 when nothing to repair" {
-  mock_rtk_with_init_show healthy
-  mock_cmd tilth
   mock_cmd uvx
-  mock_mcp_config claude-code tilth "tilth"
+  mock_icm
   mock_mcp_config claude-code serena "uvx"
+  mock_mcp_config claude-code icm "icm"
+  mock_context7_mcp claude-code
 
   run "$SCRIPTS_DIR/token-diet" repair --json
   [ "$status" -eq 0 ]
@@ -1495,10 +898,9 @@ assert 'skipped' in d
 }
 
 @test "repair --json: repaired list non-empty after fixing stale MCP command" {
-  mock_rtk_with_init_show healthy
-  mock_cmd tilth
   mock_cmd uvx
-  mock_mcp_config claude-code tilth "/nonexistent/tilth"
+  mock_icm
+  mock_mcp_config claude-code icm "/nonexistent/icm"
   mock_mcp_config claude-code serena "uvx"
 
   run "$SCRIPTS_DIR/token-diet" repair --json
@@ -1513,10 +915,9 @@ assert d['healthy'] is True
 }
 
 @test "repair --json: failed list non-empty when tool not in PATH" {
-  mock_rtk_with_init_show healthy
-  # tilth absent from TMP_BIN; restrict PATH to TMP_BIN + system dirs only
   mock_cmd uvx
-  mock_mcp_config claude-code tilth "/nonexistent/tilth"
+  # icm absent from TMP_BIN; restrict PATH to TMP_BIN + system dirs only
+  mock_mcp_config claude-code icm "/nonexistent/icm"
   mock_mcp_config claude-code serena "uvx"
 
   run env HOME="$TMP_HOME" PATH="$TMP_BIN:/usr/bin:/bin" "$SCRIPTS_DIR/token-diet" repair --json
@@ -1531,10 +932,9 @@ assert len(d['failed']) >= 1
 }
 
 @test "repair --json --dry-run: dry_run key is true" {
-  mock_rtk_with_auto_patch success
-  mock_cmd tilth
   mock_cmd uvx
-  mock_mcp_config claude-code tilth "/nonexistent/tilth"
+  mock_icm
+  mock_mcp_config claude-code icm "/nonexistent/icm"
   mock_mcp_config claude-code serena "uvx"
 
   run "$SCRIPTS_DIR/token-diet" repair --json --dry-run
@@ -1551,9 +951,8 @@ assert d.get('dry_run') is True
 # ---------------------------------------------------------------------------
 
 @test "repair: exits 0 when only skips (no failures, no repairs needed)" {
-  mock_rtk_with_init_show healthy
-  mock_cmd tilth
   mock_cmd uvx
+  mock_icm
   # No MCP configs at all — everything skipped silently
 
   run "$SCRIPTS_DIR/token-diet" repair
@@ -1564,10 +963,9 @@ assert d.get('dry_run') is True
 # Cycle 16.1 — compat: version shows OK when tools meet min version
 # ---------------------------------------------------------------------------
 
-@test "compat: version shows OK for rtk when version meets min" {
-  # mock_cmd_with_gain → rtk 0.34.3-mock; min in compat.json is 0.23.0 → OK
-  mock_cmd_with_gain
-  mock_cmd tilth  # 0.99.0-mock; min is 0.4.0 → OK
+@test "compat: version shows OK for icm when version meets min" {
+  # mock_icm → icm 0.10.50-mock; any real compat.json min is far below → OK
+  mock_icm
   mock_cmd uvx
 
   run "$SCRIPTS_DIR/token-diet" version
@@ -1576,25 +974,19 @@ assert d.get('dry_run') is True
 }
 
 # ---------------------------------------------------------------------------
-# Cycle 16.2 — compat: version shows WARN when rtk below min
+# Cycle 16.2 — compat: version shows WARN when icm below min
 # ---------------------------------------------------------------------------
 
-@test "compat: version shows WARN for rtk when version below min" {
-  # rtk 0.10.0 < min 0.23.0 → WARN
-  cat > "$TMP_BIN/rtk" << 'MOCK'
+@test "compat: version shows WARN for icm when version below min" {
+  # icm 0.0.1 is below any plausible min → WARN
+  cat > "$TMP_BIN/icm" << 'MOCK'
 #!/usr/bin/env bash
 case "$1" in
-  --version) echo "rtk 0.10.0"; exit 0 ;;
-  gain)
-    case "$2" in
-      --help)   echo "Usage: rtk gain [OPTIONS]"; exit 0 ;;
-      --format) echo '{"summary":{"total_commands":0,"total_input":0,"total_saved":0,"avg_savings_pct":0.0,"total_time_ms":0},"daily":[]}'; exit 0 ;;
-    esac ;;
+  --version) echo "icm 0.0.1"; exit 0 ;;
   *) exit 0 ;;
 esac
 MOCK
-  chmod +x "$TMP_BIN/rtk"
-  mock_cmd tilth
+  chmod +x "$TMP_BIN/icm"
   mock_cmd uvx
 
   run "$SCRIPTS_DIR/token-diet" version
@@ -1603,34 +995,26 @@ MOCK
 }
 
 # ---------------------------------------------------------------------------
-# Cycle 16.3 — compat: doctor flags below-min rtk version as issue
+# Cycle 16.3 — compat: doctor flags below-min icm version as issue
 # ---------------------------------------------------------------------------
 
-@test "compat: doctor exits 1 when rtk version below min" {
-  # rtk 0.10.0 < min 0.23.0
-  cat > "$TMP_BIN/rtk" << 'MOCK'
+@test "compat: doctor exits 1 when icm version below min" {
+  cat > "$TMP_BIN/icm" << 'MOCK'
 #!/usr/bin/env bash
 case "$1" in
-  --version) echo "rtk 0.10.0"; exit 0 ;;
-  gain)
-    case "$2" in
-      --help)   echo "Usage: rtk gain [OPTIONS]"; exit 0 ;;
-      --format) echo '{"summary":{"total_commands":0,"total_input":0,"total_saved":0,"avg_savings_pct":0.0,"total_time_ms":0},"daily":[]}'; exit 0 ;;
-    esac ;;
-  init) exit 0 ;;
+  --version) echo "icm 0.0.1"; exit 0 ;;
   *) exit 0 ;;
 esac
 MOCK
-  chmod +x "$TMP_BIN/rtk"
-  mock_cmd tilth
+  chmod +x "$TMP_BIN/icm"
   mock_cmd uvx
-  mock_mcp_config claude-code tilth "tilth"
   mock_mcp_config claude-code serena "uvx"
+  mock_mcp_config claude-code icm "icm"
 
   run "$SCRIPTS_DIR/token-diet" doctor
   [ "$status" -eq 1 ]
-  [[ "$output" == *"rtk"* ]]
-  [[ "$output" == *"0.10.0"* ]] || [[ "$output" == *"below"* ]] || \
+  [[ "$output" == *"icm"* ]]
+  [[ "$output" == *"0.0.1"* ]] || [[ "$output" == *"below"* ]] || \
   [[ "$output" == *"compat"* ]] || [[ "$output" == *"min"* ]]
 }
 
@@ -1639,14 +1023,12 @@ MOCK
 # ---------------------------------------------------------------------------
 
 @test "compat: doctor --json includes compat block with per-tool status" {
-  mock_rtk_with_init_show healthy
-  mock_cmd tilth
   mock_cmd uvx
   mock_icm
-  mock_gemini tilth serena icm
-  mock_mcp_config claude-code tilth "tilth"
+  mock_gemini serena icm
   mock_mcp_config claude-code serena "uvx"
   mock_mcp_config claude-code icm "icm"
+  mock_context7_mcp claude-code
 
   run "$SCRIPTS_DIR/token-diet" doctor --json
   [ "$status" -eq 0 ]
@@ -1655,7 +1037,7 @@ import json, sys
 d = json.loads(sys.stdin.read())
 assert 'compat' in d, 'missing compat key: ' + str(list(d.keys()))
 c = d['compat']
-assert 'rtk' in c or 'tilth' in c, 'compat block has no tool entries: ' + str(c)
+assert 'icm' in c or 'serena' in c, 'compat block has no tool entries: ' + str(c)
 " <<< "$output"
 }
 
@@ -1664,84 +1046,34 @@ assert 'rtk' in c or 'tilth' in c, 'compat block has no tool entries: ' + str(c)
 # ---------------------------------------------------------------------------
 
 @test "compat: doctor exits 0 when all tools above min version" {
-  # rtk 1.3.6-mock > 0.23.0; tilth 0.99.0-mock > 0.4.0
-  mock_rtk_with_init_show healthy
-  mock_cmd tilth
   mock_cmd uvx
   mock_icm
-  mock_gemini tilth serena icm
-  mock_mcp_config claude-code tilth "tilth"
+  mock_gemini serena icm
   mock_mcp_config claude-code serena "uvx"
   mock_mcp_config claude-code icm "icm"
+  mock_context7_mcp claude-code
 
   run "$SCRIPTS_DIR/token-diet" doctor
   [ "$status" -eq 0 ]
 }
 
 # ---------------------------------------------------------------------------
-# Cycle 16.6 — compat: doctor flags below-min tilth version as issue
-# ---------------------------------------------------------------------------
-
-@test "compat: doctor exits 1 when tilth version below min" {
-  mock_rtk_with_init_show healthy
-  # tilth 0.2.0 < min 0.4.0
-  cat > "$TMP_BIN/tilth" << 'MOCK'
-#!/usr/bin/env bash
-case "$1" in
-  --version) echo "tilth 0.2.0"; exit 0 ;;
-  --help)    echo "Usage: tilth [OPTIONS]"; exit 0 ;;
-  *) exit 0 ;;
-esac
-MOCK
-  chmod +x "$TMP_BIN/tilth"
-  mock_cmd uvx
-  mock_mcp_config claude-code tilth "tilth"
-  mock_mcp_config claude-code serena "uvx"
-
-  run "$SCRIPTS_DIR/token-diet" doctor
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"tilth"* ]]
-  [[ "$output" == *"0.2.0"* ]] || [[ "$output" == *"below"* ]] || \
-  [[ "$output" == *"compat"* ]] || [[ "$output" == *"min"* ]]
-}
-
-# ---------------------------------------------------------------------------
-# Cycle 17.1 — OQ-1: cmd_hook and cmd_mcp must each be defined exactly once
+# Cycle 17.1 — OQ-1: cmd_mcp must be defined exactly once
 #
 # Regression: scripts/token-diet previously had two definitions of cmd_hook
-# (lines 611, 666) — first used ${RED}/${GREEN} color codes, second was bare
-# text. Bash function shadowing meant the second definition always won at
-# dispatch (line 2541), making the first one pure dead code. Also discovered
-# the same pattern for cmd_mcp (lines 574, 629) — byte-identical, also pure
-# dead code (HANDOFF only flagged cmd_hook; cmd_mcp was an additional find).
-#
-# These tests assert exactly one definition of each function exists in the
+# (lines 611, 666) and cmd_mcp (lines 574, 629). Bash function shadowing meant
+# the second definition always won at dispatch, making the first pure dead
+# code. These tests assert exactly one definition of cmd_mcp exists in the
 # source, so future code drift that re-introduces a duplicate is caught at
 # `bats tests/token-diet.bats` time rather than only on visual inspection.
+# (The cmd_hook guard was retired with the RTK hook: rtk was dropped and the
+# hook command with it.)
 # ---------------------------------------------------------------------------
-
-@test "scripts/token-diet defines cmd_hook exactly once (OQ-1)" {
-  local count
-  count=$(grep -cE '^cmd_hook\(\) \{' "$SCRIPTS_DIR/token-diet")
-  [ "$count" -eq 1 ]
-}
 
 @test "scripts/token-diet defines cmd_mcp exactly once (OQ-1 cmd_mcp)" {
   local count
   count=$(grep -cE '^cmd_mcp\(\) \{' "$SCRIPTS_DIR/token-diet")
   [ "$count" -eq 1 ]
-}
-
-@test "hook: dispatch is unaffected by duplicate cleanup (smoke)" {
-  # Sanity: cmd_hook still works correctly post-deletion. The live definition
-  # (the uncolored one) is the one kept, and its outputs match exactly.
-  run "$SCRIPTS_DIR/token-diet" hook
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"RTK hook is currently:"* ]]
-  [[ "$output" == *"Usage: token-diet hook"* ]]
-  # No color codes must leak — proves the live (uncolored) definition is the one reached.
-  [[ ! "$output" =~ \\\\033\[ ]] || [[ ! "$output" =~ '\\e\[' ]]
-  ! grep -q 'RED\|GREEN' <(echo "$output")
 }
 
 @test "mcp: dispatch is unaffected by duplicate cleanup (smoke)" {

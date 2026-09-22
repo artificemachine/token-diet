@@ -1,26 +1,26 @@
 #!/usr/bin/env bash
 # token-diet — token optimization stack dashboard
-# Shows combined token savings and health across RTK + tilth + Serena.
+# Shows component status and health across Serena + ICM + context7.
 #
 # Usage:
-#   token-diet gain           Show token savings dashboard (default)
-#   token-diet health         Quick health check: tools + MCP hosts
-#   token-diet version        Show versions of all three tools
+#   token-diet status         Show component status dashboard (default)
+#   token-diet health         Quick health check: components + MCP hosts
+#   token-diet version        Show versions of the installed components
 #   token-diet verify         Re-run installation verification
 #   token-diet uninstall      Remove all token-diet components
 #   token-diet --help         Show this help
 
 set -euo pipefail
 
-readonly TD_VERSION="1.16.0"
+readonly TD_VERSION="1.16.1"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # --- Colors -------------------------------------------------------------------
 if [ -t 1 ]; then
   GREEN='\033[0;32m'; YELLOW='\033[1;33m'; RED='\033[0;31m'
-  CYAN='\033[0;36m'; BOLD='\033[1m'; DIM='\033[2m'; NC='\033[0m'
+  BOLD='\033[1m'; DIM='\033[2m'; NC='\033[0m'
 else
-  GREEN=''; YELLOW=''; RED=''; CYAN=''; BOLD=''; DIM=''; NC=''
+  GREEN=''; YELLOW=''; RED=''; BOLD=''; DIM=''; NC=''
 fi
 
 ok()   { echo -e "  ${GREEN}✓${NC}  $*"; }
@@ -35,24 +35,6 @@ human_tokens() {
   elif [ "$n" -ge 1000 ];    then printf "%.1fK" "$(echo "$n / 1000"    | bc -l)"
   else printf "%d" "$n"
   fi
-}
-
-human_ms() {
-  local ms=$1
-  if   [ "$ms" -ge 3600000 ]; then printf "%dh %dm" "$((ms/3600000))" "$(( (ms%3600000)/60000 ))"
-  elif [ "$ms" -ge 60000 ];   then printf "%dm %ds" "$((ms/60000))" "$(( (ms%60000)/1000 ))"
-  elif [ "$ms" -ge 1000 ];    then printf "%ds"      "$((ms/1000))"
-  else printf "%dms" "$ms"
-  fi
-}
-
-bar() {
-  local pct=${1%.*}   # integer part of percentage
-  local width=20
-  local filled=$(( pct * width / 100 ))
-  local empty=$(( width - filled ))
-  printf '%0.s█' $(seq 1 "$filled") 2>/dev/null || printf '%*s' "$filled" | tr ' ' '█'
-  printf '%0.s░' $(seq 1 "$empty")  2>/dev/null || printf '%*s' "$empty"  | tr ' ' '░'
 }
 
 check_cmd() { command -v "$1" &>/dev/null; }
@@ -225,7 +207,7 @@ for rel in paths:
         continue
     # Merge all dialect keys (mcpServers, mcp, servers). A config may carry both
     # mcpServers and mcp (e.g. opencode) — merge, do not first-truthy, so neither
-    # is dropped. Substring key match (my-tilth-server matches tool "tilth").
+    # is dropped. Substring key match (my-serena-wrapper matches tool "serena").
     servers = {}
     for key in dialect:
         v = d.get(key)
@@ -277,79 +259,11 @@ PY
 }
 
 # --- Commands -----------------------------------------------------------------
-cmd_gain() {
-  local tools_active=0
-  local rtk_ok=false tilth_ok=false serena_ok=false
+# Note: tracked token-savings metrics were removed together with RTK (independent benchmarks found rtk gain did not reflect real cost); context7, Serena and ICM have no per-command counter, so this view reports presence and health, not spend.
+cmd_status() {
+  local components_active=0
 
-  echo -e "\n${BOLD}token-diet${NC} ${DIM}— combined savings dashboard${NC}\n"
-
-  # --- RTK -------------------------------------------------------------------
-  echo -e "${BOLD}RTK${NC} ${DIM}— command output compression (tracked)${NC}"
-  echo -e "${DIM}$(printf '%.0s─' {1..50})${NC}"
-
-  if check_cmd rtk; then
-    rtk_ok=true
-    tools_active=$((tools_active + 1))
-    local json
-    json=$(rtk gain --format json 2>/dev/null)
-    local cmds saved input pct ms
-    local arch="$HOME/.config/token-diet/archived_stats.json"
-        # The live rtk JSON is passed as argv[2], NOT piped. `python3 -` already
-        # consumes stdin to read this program from the heredoc, so a pipe into
-        # it is silently discarded (shellcheck SC2259). When this read from
-        # sys.stdin, it always hit the except branch and reported zero live
-        # activity, so `gain` displayed archived totals only — under-reporting
-        # by the entire current history.
-        read -r cmds input saved pct ms <<< "$(python3 - "$arch" "$json" << 'PY'
-import sys,json,pathlib
-arch_p = pathlib.Path(sys.argv[1])
-raw = sys.argv[2] if len(sys.argv) > 2 else ""
-try:
-    live = json.loads(raw).get('summary', {}) if raw.strip() else {}
-    cmds, inp, saved, time = live.get('total_commands', 0), live.get('total_input', 0), live.get('total_saved', 0), live.get('total_time_ms', 0)
-except Exception:
-    cmds, inp, saved, time = 0, 0, 0, 0
-if arch_p.exists():
-    try:
-        a = json.loads(arch_p.read_text())
-        cmds += a.get('cmds', 0); inp += a.get('input', 0); saved += a.get('saved', 0); time += a.get('time_ms', 0)
-    except: pass
-pct = round((saved / inp * 100), 1) if inp > 0 else 0.0
-print(f"{cmds} {inp} {saved} {pct} {time}")
-PY
-)"  
-
-    printf "  %-22s %s\n"  "Commands filtered:"  "$cmds"
-    printf "  %-22s %s\n"  "Tokens in:"          "$(human_tokens "$input")"
-    printf "  %-22s %s\n"  "Tokens saved:"        "$(human_tokens "$saved")  (${pct}%)"
-    printf "  %-22s %s\n"  "Exec time:"           "$(human_ms "$ms")"
-    echo -e "  Efficiency:  ${CYAN}$(bar "$pct")${NC}  ${BOLD}${pct}%${NC}"
-    local rtk_ver; rtk_ver=$(rtk --version 2>/dev/null | awk '{print $2}')
-    ok "RTK ${rtk_ver} — active"
-  else
-    miss "RTK not installed  →  run: bash install.sh --rtk-only"
-  fi
-
-  echo ""
-
-  # --- tilth -----------------------------------------------------------------
-  echo -e "${BOLD}tilth${NC} ${DIM}— AST-aware code reading (tree-sitter)${NC}"
-  echo -e "${DIM}$(printf '%.0s─' {1..50})${NC}"
-  echo -e "  ${DIM}Note: tilth reduces prompt size — not tracked per-command${NC}"
-
-  if check_cmd tilth; then
-    tilth_ok=true
-    tools_active=$((tools_active + 1))
-    local tv; tv=$(tilth --version 2>/dev/null | awk '{print $2}')
-    local th; th=$(hosts_registered "tilth")
-    printf "  %-22s %s\n" "Version:"   "$tv"
-    printf "  %-22s %s\n" "MCP hosts:" "$th"
-    ok "tilth ${tv} — active"
-  else
-    miss "tilth not installed  →  run: bash install.sh --tilth-only"
-  fi
-
-  echo ""
+  echo -e "\n${BOLD}token-diet${NC} ${DIM}— component status${NC}\n"
 
   # --- Serena ----------------------------------------------------------------
   echo -e "${BOLD}Serena${NC} ${DIM}— LSP symbol navigation${NC}"
@@ -359,11 +273,11 @@ PY
   local mode; mode=$(_serena_runtime_mode)
 
   if [ "$mode" != "none" ]; then
-    tools_active=$((tools_active + 1))
+    components_active=$((components_active + 1))
     local sh; sh=$(hosts_registered "serena")
     local mem_count=0
     [ -d "$HOME/.serena/memories" ] && mem_count=$(ls "$HOME/.serena/memories/" 2>/dev/null | wc -l | tr -d ' ')
-    
+
     printf "  %-22s %s\n" "Runtime:"   "$mode"
     printf "  %-22s %s\n" "MCP hosts:" "$sh"
     printf "  %-22s %s\n" "Memories:"  "$mem_count"
@@ -380,7 +294,7 @@ PY
   echo -e "  ${DIM}Note: ICM cuts re-explanation cost — recall replaces re-reading${NC}"
 
   if check_cmd icm; then
-    tools_active=$((tools_active + 1))
+    components_active=$((components_active + 1))
     local iv; iv=$(icm --version 2>/dev/null | awk '{print $2}')
     local ih; ih=$(hosts_registered "icm")
     printf "  %-22s %s\n" "Version:"   "$iv"
@@ -390,52 +304,42 @@ PY
     miss "ICM not installed  →  run: bash install.sh --icm-only"
   fi
 
+  echo ""
+
+  # --- context7 --------------------------------------------------------------
+  echo -e "${BOLD}context7${NC} ${DIM}— remote library-docs MCP${NC}"
   echo -e "${DIM}$(printf '%.0s─' {1..50})${NC}"
-  if $rtk_ok; then
-    # Use the aggregated values from above
-    printf "  Combined savings (tracked): %s (%s%%)\n" \
-      "$(human_tokens "$saved")" "$pct"
-    echo -e "\n  ${DIM}tilth + Serena savings are structural (smaller prompts, fewer turns)${NC}"
-    echo -e "  ${DIM}and not individually tracked — but typically add 30-50% reduction${NC}"
+  echo -e "  ${DIM}Note: CONTEXT7_API_KEY is appended to the URL at registration${NC}"
+  echo -e "  ${DIM}time by the installer — the key is never echoed or displayed${NC}"
+
+  local c7_hosts; c7_hosts=$(hosts_registered "context7")
+  if [ "$c7_hosts" != "none" ]; then
+    components_active=$((components_active + 1))
+    printf "  %-22s %s\n" "Transport:" "remote HTTP"
+    printf "  %-22s %s\n" "Endpoint:"  "https://mcp.context7.com/mcp"
+    printf "  %-22s %s\n" "MCP hosts:" "$c7_hosts"
+    ok "context7 — active"
+  else
+    miss "context7 not registered  →  register via install.sh (optional CONTEXT7_API_KEY)"
   fi
 
+  echo -e "${DIM}$(printf '%.0s─' {1..50})${NC}"
+  echo -e "  ${DIM}Serena, ICM and context7 savings are structural (smaller prompts,${NC}"
+  echo -e "  ${DIM}fewer turns, fresher docs) and not individually tracked${NC}"
+
   echo ""
-  if [ "$tools_active" -eq 4 ]; then
-    echo -e "  ${GREEN}${BOLD}Full stack active. Maximum token savings.${NC}"
-  elif [ "$tools_active" -gt 0 ]; then
+  if [ "$components_active" -eq 3 ]; then
+    echo -e "  ${GREEN}${BOLD}Full stack active.${NC}"
+  elif [ "$components_active" -gt 0 ]; then
     echo -e "  ${YELLOW}${BOLD}Partial stack — run 'bash install.sh' to complete setup.${NC}"
   else
-    echo -e "  ${RED}${BOLD}No tools installed — run 'bash install.sh' to get started.${NC}"
+    echo -e "  ${RED}${BOLD}No components installed — run 'bash install.sh' to get started.${NC}"
   fi
   echo ""
 }
 
 cmd_version() {
-  echo -e "\n${BOLD}token-diet stack versions${NC}\n"
-
-  if check_cmd rtk; then
-    local rtk_ver; rtk_ver=$(rtk --version 2>/dev/null | awk '{print $2}')
-    local rtk_min; rtk_min=$(_compat_min "rtk")
-    if _semver_ok "$rtk_ver" "$rtk_min"; then
-      ok "RTK    rtk ${rtk_ver}  (compat: OK)"
-    else
-      warn "RTK    rtk ${rtk_ver}  (compat: WARN — below min ${rtk_min}, upgrade: cargo install rtk)"
-    fi
-  else
-    miss "RTK    not installed"
-  fi
-
-  if check_cmd tilth; then
-    local tilth_ver; tilth_ver=$(tilth --version 2>/dev/null | awk '{print $2}')
-    local tilth_min; tilth_min=$(_compat_min "tilth")
-    if _semver_ok "$tilth_ver" "$tilth_min"; then
-      ok "tilth  tilth ${tilth_ver}  (compat: OK)"
-    else
-      warn "tilth  tilth ${tilth_ver}  (compat: WARN — below min ${tilth_min}, upgrade: cargo install tilth)"
-    fi
-  else
-    miss "tilth  not installed"
-  fi
+  echo -e "\n${BOLD}token-diet component versions${NC}\n"
 
   local mode; mode=$(_serena_runtime_mode)
   if [ "$mode" != "none" ]; then
@@ -443,59 +347,27 @@ cmd_version() {
   else
     miss "Serena runtime not found"
   fi
-  echo ""
-}
-cmd_verify() {
-  # Prefer install.sh next to this script (source tree or ~/.local/bin copy)
-  local install_sh
-  for install_sh in "$SCRIPT_DIR/install.sh" "$SCRIPT_DIR/token-diet-install.sh"; do
-    if [[ -f "$install_sh" ]]; then
-      bash "$install_sh" --verify
-      return
-    fi
-  done
 
-  # Inline fallback — used when running from ~/.local/bin (install.sh not copied there)
-  local all_ok=true
-  echo "=== Token Stack Verification ==="
-  if command -v rtk &>/dev/null && rtk --version &>/dev/null 2>&1; then
-    printf "  ${GREEN}✓${NC} RTK ........... %s\n" "$(rtk --version 2>/dev/null)"
-  else
-    printf "  ${YELLOW}✗${NC} RTK ........... not installed\n"; all_ok=false
-  fi
-  if command -v tilth &>/dev/null; then
-    printf "  ${GREEN}✓${NC} tilth ......... %s\n" "$(tilth --version 2>/dev/null || echo 'installed')"
-    local tilth_codex_issue; tilth_codex_issue=$(codex_mcp_command_issue "tilth")
-    if [ -n "$tilth_codex_issue" ]; then
-      printf "  ${YELLOW}✗${NC} %s\n" "$tilth_codex_issue"
-      all_ok=false
+  if check_cmd icm; then
+    local icm_ver; icm_ver=$(icm --version 2>/dev/null | awk '{print $2}')
+    local icm_min; icm_min=$(_compat_min "icm")
+    if _semver_ok "$icm_ver" "$icm_min"; then
+      ok "ICM     icm ${icm_ver}  (compat: OK)"
+    else
+      warn "ICM     icm ${icm_ver}  (compat: WARN — below min ${icm_min}, upgrade ICM)"
     fi
   else
-    printf "  ${YELLOW}✗${NC} tilth ......... not installed\n"; all_ok=false
+    miss "ICM     not installed"
   fi
-  if docker image inspect token-diet/serena:latest &>/dev/null 2>&1; then
-    printf "  ${GREEN}✓${NC} Serena ........ Docker image loaded\n"
-  elif command -v uv &>/dev/null; then
-    printf "  ${GREEN}✓${NC} Serena (uv) ... %s\n" "$(uv --version 2>/dev/null)"
+
+  local c7_hosts; c7_hosts=$(hosts_registered "context7")
+  if [ "$c7_hosts" != "none" ]; then
+    ok "context7  remote (registered in: ${c7_hosts})"
   else
-    printf "  ${YELLOW}✗${NC} Serena ........ not installed\n"; all_ok=false
-  fi
-  local serena_codex_issue; serena_codex_issue=$(codex_mcp_command_issue "serena")
-  if [ -n "$serena_codex_issue" ]; then
-    printf "  ${YELLOW}✗${NC} %s\n" "$serena_codex_issue"
-    all_ok=false
+    miss "context7  not registered in any MCP host"
   fi
   echo ""
-  if $all_ok; then
-    printf "  ${GREEN}✓${NC} All tools installed. Token diet active.\n"
-    echo ""
-  else
-    printf "  ${YELLOW}⚠${NC}  Some tools or MCP registrations need attention.\n"
-    echo ""
-    return 1
-  fi
 }
-
 cmd_dashboard() {
   local dashboard_bin
   # Prefer the installed copy, fall back to script-dir sibling
@@ -514,30 +386,6 @@ cmd_health() {
   local issues=0
   echo -e "\n${BOLD}token-diet health${NC}\n"
 
-  # RTK
-  if check_cmd rtk && rtk gain --help &>/dev/null 2>&1; then
-    local rtk_ver; rtk_ver=$(rtk --version 2>/dev/null | awk '{print $2}') || true
-    ok "RTK ${rtk_ver}"
-  else
-    miss "RTK not found"
-    issues=$(( issues + 1 ))
-  fi
-
-  # tilth
-  if check_cmd tilth; then
-    local tilth_ver; tilth_ver=$(tilth --version 2>/dev/null | awk '{print $2}') || true
-    local tilth_hosts; tilth_hosts=$(hosts_registered "tilth")
-    ok "tilth ${tilth_ver}  (hosts: ${tilth_hosts})"
-    local tilth_codex_issue; tilth_codex_issue=$(codex_mcp_command_issue "tilth")
-    if [ -n "$tilth_codex_issue" ]; then
-      warn "$tilth_codex_issue"
-      issues=$(( issues + 1 ))
-    fi
-  else
-    miss "tilth not found"
-    issues=$(( issues + 1 ))
-  fi
-
   # Serena
   if check_cmd uvx || docker image inspect token-diet/serena:latest &>/dev/null 2>&1; then
     local serena_hosts; serena_hosts=$(hosts_registered "serena")
@@ -553,13 +401,37 @@ cmd_health() {
     issues=$(( issues + 1 ))
   fi
 
+  # ICM
+  if check_cmd icm; then
+    local icm_ver; icm_ver=$(icm --version 2>/dev/null | awk '{print $2}') || true
+    local icm_hosts; icm_hosts=$(hosts_registered "icm")
+    ok "ICM ${icm_ver}  (hosts: ${icm_hosts})"
+    local icm_codex_issue; icm_codex_issue=$(codex_mcp_command_issue "icm")
+    if [ -n "$icm_codex_issue" ]; then
+      warn "$icm_codex_issue"
+      issues=$(( issues + 1 ))
+    fi
+  else
+    miss "ICM not found"
+    issues=$(( issues + 1 ))
+  fi
+
+  # context7 — remote MCP server; healthy = registered in at least one host
+  local c7_hosts; c7_hosts=$(hosts_registered "context7")
+  if [ "$c7_hosts" != "none" ]; then
+    ok "context7  (remote, hosts: ${c7_hosts})"
+  else
+    miss "context7 not registered in any MCP host"
+    issues=$(( issues + 1 ))
+  fi
+
   echo ""
   if [ "$issues" -eq 0 ]; then
-    echo -e "  ${GREEN}${BOLD}All tools healthy${NC}"
+    echo -e "  ${GREEN}${BOLD}All components healthy${NC}"
     echo ""
     return 0
   else
-    echo -e "  ${YELLOW}${BOLD}${issues} issue(s) found — reinstall tools or repair MCP registrations${NC}"
+    echo -e "  ${YELLOW}${BOLD}${issues} issue(s) found — reinstall components or repair MCP registrations${NC}"
     echo ""
     return 1
   fi
@@ -655,144 +527,42 @@ cmd_mcp() {
   case "$sub" in
     install|register)
       shift
-      cmd_update --tilth-only --serena-only "$@"
+      cmd_update --serena-only "$@"
       ;;
                 list|status)
-      (cmd_doctor --json 2>/dev/null || true) | python3 -c 'import json, sys; 
+      (cmd_doctor --json 2>/dev/null || true) | python3 -c 'import json, sys;
 try:
     d=json.load(sys.stdin)
 except Exception:
     d={}
-t_hosts = d.get("tilth_mcp", {}).get("hosts", {}).keys() if "tilth_mcp" in d else []
-if not t_hosts: t_hosts = d.get("tilth_mcp", {}).get("registered_hosts", [])
 s_hosts = d.get("serena_mcp", {}).get("registered_hosts", [])
 i_hosts = d.get("icm_mcp", {}).get("registered_hosts", [])
-all_hosts = sorted(list(set(list(t_hosts) + list(s_hosts) + list(i_hosts))))
+c_hosts = d.get("context7_mcp", {}).get("registered_hosts", [])
+all_hosts = sorted(list(set(list(s_hosts) + list(i_hosts) + list(c_hosts))))
 print("Registered MCP Hosts:")
 if not all_hosts: print("  (none)")
 for h in all_hosts:
     st = []
-    if h in t_hosts: st.append("tilth")
     if h in s_hosts: st.append("serena")
     if h in i_hosts: st.append("icm")
+    if h in c_hosts: st.append("context7")
     print("  ✓ %-16s (%s)" % (h, ", ".join(st)))'
       ;;
     *)
       echo "Usage: token-diet mcp [install|list]"
       echo ""
-      echo "  install   Register token-diet MCP servers (tilth/Serena/ICM) in detected AI hosts"
+      echo "  install   Register token-diet MCP servers (Serena/ICM) in detected AI hosts"
       echo "  list      Show hosts where token-diet MCP is currently registered"
       exit 1
       ;;
   esac
 }
 
-cmd_hook() {
-  local state="${1:-}"
-  case "$state" in
-    on|enable)  cmd_use_rtk ;;
-    off|disable) cmd_no_rtk ;;
-    *)
-      if [ -f "$HOME/.token-diet-no-rtk" ]; then
-        echo "RTK hook is currently: DISABLED"
-      else
-        echo "RTK hook is currently: ENABLED"
-      fi
-      echo "Usage: token-diet hook [on|off]"
-      ;;
-  esac
-}
-
-cmd_clean() {
-  local hist="$HOME/.rtk/history.json"
-  local sqlite="$HOME/Library/Application Support/rtk/history.db"
-  local arch="$HOME/.config/token-diet/archived_stats.json"
-  mkdir -p "$(dirname "$arch")"
-
-  echo -e "\n\033[1mtoken-diet clean\033[0m\n"
-
-  # Capture current totals and daily history
-  local json; json=$(rtk gain --daily --format json 2>/dev/null)
-  if [ -n "$json" ]; then
-    python3 - "$arch" "$json" << 'PY'
-import json, os, sys, pathlib, tempfile
-def atomic_write(path, text):
-    d = os.path.dirname(path) or "."
-    fd, tmp = tempfile.mkstemp(dir=d, prefix=".td-", suffix=".tmp")
-    try:
-        with os.fdopen(fd, "w") as f:
-            f.write(text)
-            f.flush()
-            os.fsync(f.fileno())
-        try:
-            os.chmod(tmp, os.stat(path).st_mode & 0o7777)
-        except OSError:
-            pass
-        os.replace(tmp, path)
-    except BaseException:
-        try:
-            os.unlink(tmp)
-        except OSError:
-            pass
-        raise
-arch_p = pathlib.Path(sys.argv[1]); live_data = json.loads(sys.argv[2])
-live = live_data["summary"]
-live_daily = live_data.get("daily", [])
-
-data = {"cmds": 0, "input": 0, "saved": 0, "time_ms": 0, "daily": []}
-if arch_p.exists():
-    try: data = json.loads(arch_p.read_text())
-    except: pass
-
-# 1. Update summary
-data["cmds"]    += live.get("total_commands", 0)
-data["input"]   += live.get("total_input", 0)
-data["saved"]   += live.get("total_saved", 0)
-data["time_ms"] += live.get("total_time_ms", 0)
-
-# 2. Update daily history (keep last 30 days)
-arch_daily = {d["date"]: d for d in data.get("daily", [])}
-for d in live_daily:
-    date = d["date"]
-    if date in arch_daily:
-        # Merge stats for same day
-        a = arch_daily[date]
-        a["commands"] += d["commands"]
-        a["saved_tokens"] += d["saved_tokens"]
-        # Recalculate pct
-        total_in = a.get("input_tokens", 0) + d.get("input_tokens", 0)
-        a["input_tokens"] = total_in
-        if total_in > 0: a["savings_pct"] = (a["saved_tokens"] / total_in) * 100
-    else:
-        arch_daily[date] = d
-
-data["daily"] = sorted(arch_daily.values(), key=lambda x: x["date"])[-30:]
-atomic_write(str(arch_p), json.dumps(data, indent=2) + "\n")
-PY
-    echo "  ✓ Totals and daily history carried forward to archived_stats.json"
-  fi
-
-  if [ -f "$hist" ]; then
-    mv "$hist" "${hist}.$(date +%s).bak"
-    echo "  ✓ JSON history archived."
-  fi
-  if [ -f "$sqlite" ]; then
-    mv "$sqlite" "${sqlite}.$(date +%s).bak"
-    rm -f "${sqlite}-wal" "${sqlite}-shm"
-    echo "  ✓ SQLite history archived."
-  fi
-  
-  echo "  ✓ A fresh, fast history will start on your next command."
-  echo ""
-}
-
 cmd_upstream() {
   local sub="${1:-help}"
   local tool="${2:-}"
-  local rtk_url="https://github.com/rtk-ai/rtk.git"
-  local tilth_url="https://github.com/jahala/tilth.git"
-  local serena_url="https://github.com/oraios/serena.git"
-  local icm_url="https://github.com/rtk-ai/icm.git"
+  local serena_url="https://github.com/artificemachine/serena.git"
+  local icm_url="https://github.com/artificemachine/icm.git"
 
   # Fork maintenance only makes sense from a source checkout. Once token-diet is
   # installed to ~/.local/bin there is no ../forks, so refuse with a clear
@@ -812,8 +582,6 @@ cmd_upstream() {
   case "$sub" in
     setup)
       echo "Configuring upstream remotes in forks/..."
-      (cd "$forks_dir/rtk" && git remote add upstream "$rtk_url" 2>/dev/null || git remote set-url upstream "$rtk_url" && echo "  ✓ rtk")
-      (cd "$forks_dir/tilth" && git remote add upstream "$tilth_url" 2>/dev/null || git remote set-url upstream "$tilth_url" && echo "  ✓ tilth")
       (cd "$forks_dir/serena" && git remote add upstream "$serena_url" 2>/dev/null || git remote set-url upstream "$serena_url" && echo "  ✓ serena")
       (cd "$forks_dir/icm" && git remote add upstream "$icm_url" 2>/dev/null || git remote set-url upstream "$icm_url" && echo "  ✓ icm")
       echo "Setup complete."
@@ -838,7 +606,7 @@ cmd_upstream() {
       ;;
     diff)
       if [ -z "$tool" ]; then
-        echo "Error: specify tool (rtk|tilth|serena|icm)"
+        echo "Error: specify tool (serena|icm)"
         exit 1
       fi
       local dir="$forks_dir/$tool"
@@ -1034,17 +802,6 @@ EOF
   esac
 }
 
-# Fetch current RTK total_input tokens. Returns 0 if RTK unavailable.
-_get_rtk_total() {
-  if check_cmd rtk; then
-    rtk gain --format json 2>/dev/null \
-      | python3 -c "import json,sys; print(json.load(sys.stdin)['summary']['total_input'])" 2>/dev/null \
-      || echo 0
-  else
-    echo 0
-  fi
-}
-
 # Walk up from cwd toward $HOME looking for .token-budget. Echoes path if found.
 find_budget_file() {
   local dir="$PWD"
@@ -1061,9 +818,7 @@ find_budget_file() {
 ensure_global_budget() {
   local global="$HOME/.token-budget"
   if [ ! -f "$global" ]; then
-    local _baseline
-    _baseline="$(_get_rtk_total)"
-    python3 - "$global" "$_baseline" << 'PY'
+    python3 - "$global" << 'PY'
 import json, os, sys, pathlib, datetime, tempfile
 def atomic_write(path, text):
     d = os.path.dirname(path) or "."
@@ -1088,7 +843,7 @@ p = pathlib.Path(sys.argv[1])
 atomic_write(str(p), json.dumps({
     "warn": 1500000, "hard": 0,
     "installed_at": datetime.date.today().isoformat(),
-    "baseline_tokens": int(sys.argv[2]),
+    "baseline_tokens": 0,
 }, indent=2) + "\n")
 PY
   fi
@@ -1109,7 +864,7 @@ cmd_budget() {
         warn ".token-budget already exists at $target"
         return 0
       fi
-      local _baseline; _baseline=$(_get_rtk_total)
+      local _baseline=0
       TD_LIB_DIR="$SCRIPT_DIR/lib" python3 - "$target" "$_baseline" << 'PY'
 import datetime, os, sys
 sys.path.insert(0, os.environ["TD_LIB_DIR"])
@@ -1123,9 +878,9 @@ d = {"warn": 1500000, "hard": 0,
 tdconfig.atomic_write_json(sys.argv[1], d)
 PY
       if $is_global; then
-        ok "Created global $target  (warn: 1.5M, hard: unlimited, baseline: $(human_tokens "$_baseline"))"
+        ok "Created global $target  (warn: 1.5M, hard: unlimited)"
       else
-        ok "Created $target  (warn: 1.5M, hard: unlimited, baseline: $(human_tokens "$_baseline"))"
+        ok "Created $target  (warn: 1.5M, hard: unlimited)"
       fi
       local gitignore="$PWD/.gitignore"
       if [ -f "$gitignore" ]; then
@@ -1216,9 +971,11 @@ PY
 import json; d=json.load(open('$file'))
 print(d.get('warn',1500000), d.get('hard',0), d.get('baseline_tokens',0))" 2>/dev/null)" \
           || { warn_t=1500000; hard_t=0; baseline=0; }
-        local raw_total; raw_total=$(_get_rtk_total)
-        local used=$(( raw_total - baseline ))
-        [ "$used" -lt 0 ] && used=0
+        # No usage counter is installed anymore (the tracked counter went away
+        # with the deprecated command wrapper; context7/Serena/ICM savings are
+        # structural and were never per-command countable). Budget status is
+        # therefore threshold-display only: no burn-down, no hard-stop math.
+        local used=0
 
         local unlimited=false
         [ "$hard_t" -eq 0 ] && unlimited=true
@@ -1226,17 +983,13 @@ print(d.get('warn',1500000), d.get('hard',0), d.get('baseline_tokens',0))" 2>/de
         if $unlimited; then remaining="unlimited"
         else
           remaining=$(( hard_t - used ))
-          [ "$hard_t" -gt 0 ] && pct=$(( used * 100 / hard_t ))
         fi
 
         echo -e "\n${BOLD}token-diet budget${NC}  ${DIM}${label}${NC}  ${DIM}($file)${NC}\n"
-        printf "  %-20s %s\n" "Used:"      "$(human_tokens "$used")"
+        printf "  %-20s %s\n" "Used:"      "untracked (no usage counter installed)"
         printf "  %-20s %s\n" "Warn at:"   "$(human_tokens "$warn_t")"
         printf "  %-20s %s\n" "Hard stop:" "$(if $unlimited; then echo 'unlimited'; else human_tokens "$hard_t"; fi)"
         printf "  %-20s %s\n" "Remaining:" "$(if $unlimited; then echo 'unlimited'; else human_tokens "$remaining"; fi)"
-        if ! $unlimited; then
-          echo -e "  Burn-down:  ${CYAN}$(bar "$pct")${NC}  ${BOLD}${pct}%${NC}"
-        fi
         echo ""
 
         if ! $unlimited && [ "$used" -ge "$hard_t" ]; then
@@ -1244,7 +997,7 @@ print(d.get('warn',1500000), d.get('hard',0), d.get('baseline_tokens',0))" 2>/de
         elif [ "$used" -ge "$warn_t" ]; then
           echo -e "  ${YELLOW}${BOLD}WARN — approaching warn threshold (${pct}%)${NC}\n"; return 2
         else
-          echo -e "  ${GREEN}${BOLD}Budget OK${NC}\n"; return 0
+          echo -e "  ${GREEN}${BOLD}Budget OK (usage untracked — thresholds shown for reference)${NC}\n"; return 0
         fi
       }
 
@@ -1289,196 +1042,6 @@ print(d.get('warn',1500000), d.get('hard',0))" 2>/dev/null)" \
   esac
 }
 
-cmd_loops() {
-  if ! check_cmd rtk || ! rtk gain --help &>/dev/null 2>&1; then
-    echo -e "  ${RED}RTK not installed — loop detection requires RTK${NC}" >&2
-    return 1
-  fi
-
-  local raw; raw=$(rtk gain 2>/dev/null) || true
-  if [ -z "$raw" ]; then
-    echo -e "  ${YELLOW}No RTK history yet${NC}"
-    return 0
-  fi
-
-  local threshold=3
-  local loops_found
-  loops_found=$(python3 - "$raw" "$threshold" << 'PY'
-import re, sys
-
-def parse_saved(s):
-    s = s.strip()
-    if s.endswith('K'): return int(float(s[:-1]) * 1000)
-    elif s.endswith('M'): return int(float(s[:-1]) * 1_000_000)
-    elif re.match(r'^\d+$', s): return int(s)
-    return 0
-
-raw = sys.argv[1]
-threshold = int(sys.argv[2])
-pattern = re.compile(r'^\s*\d+\.\s+(.+?)\s{2,}(\d+)\s+([\d.]+[KM]?)\s+([\d.]+)%', re.MULTILINE)
-for m in pattern.finditer(raw):
-    cmd = m.group(1).rstrip()
-    count = int(m.group(2))
-    if count >= threshold:
-        saved = parse_saved(m.group(3))
-        pct = float(m.group(4))
-        total_input = int(saved / (pct / 100)) if pct > 0 else saved
-        wasted = total_input - saved
-        print(f'{cmd}\t{count}\t{wasted}')
-PY
-  ) || true
-
-  echo -e "\n${BOLD}=== token-diet loops ===${NC}\n"
-
-  if [ -z "$loops_found" ]; then
-    echo -e "  ${GREEN}No loops detected — all commands run < ${threshold} times${NC}"
-    echo ""
-    return 0
-  fi
-
-  echo -e "${BOLD}Repeated commands  ${DIM}(≥${threshold} runs — potential agent loops)${NC}"
-  echo -e "${DIM}$(printf '%.0s─' {1..52})${NC}"
-  while IFS=$'\t' read -r cmd count wasted; do
-    echo -e "  ${RED}✗${NC}  ${BOLD}${cmd}${NC}  — ${count}x  (~$(human_tokens "$wasted") tokens lost to repetition)"
-  done <<< "$loops_found"
-  echo ""
-  echo -e "  ${YELLOW}Tip: instruct your agent to cache results or use tilth for repeated reads${NC}"
-  echo ""
-  return 1
-}
-
-cmd_breakdown() {
-  local limit=10
-  while [[ $# -gt 0 ]]; do
-    case "$1" in
-      --limit) limit="${2:-$limit}"; shift ;;
-      *) ;;
-    esac
-    shift
-  done
-
-  if ! check_cmd rtk || ! rtk gain --help &>/dev/null 2>&1; then
-    echo -e "  ${RED}RTK not installed — breakdown requires RTK${NC}" >&2
-    return 1
-  fi
-
-  local raw; raw=$(rtk gain 2>/dev/null) || true
-  if [ -z "$raw" ]; then
-    echo -e "  ${YELLOW}No RTK history yet — run some commands first${NC}"
-    return 0
-  fi
-
-  echo -e "\n${BOLD}=== token-diet breakdown ===${NC}\n"
-  echo -e "${BOLD}Top commands by tokens saved${NC}  ${DIM}(limit: ${limit})${NC}"
-  echo -e "${DIM}$(printf '%.0s─' {1..52})${NC}"
-
-  python3 - "$raw" "$limit" << 'PY'
-import re, sys
-
-def parse_saved(s):
-    s = s.strip()
-    if s.endswith('K'): return int(float(s[:-1]) * 1000)
-    elif s.endswith('M'): return int(float(s[:-1]) * 1_000_000)
-    elif re.match(r'^\d+$', s): return int(s)
-    return 0
-
-raw = sys.argv[1]
-limit = int(sys.argv[2])
-pattern = re.compile(r'^\s*\d+\.\s+(.+?)\s{2,}(\d+)\s+([\d.]+[KM]?)\s+([\d.]+)%', re.MULTILINE)
-rows = []
-for m in pattern.finditer(raw):
-    cmd = m.group(1).rstrip()
-    count = int(m.group(2))
-    saved = parse_saved(m.group(3))
-    pct = float(m.group(4))
-    total_input = int(saved / (pct / 100)) if pct > 0 else saved
-    rows.append((cmd, count, saved, pct, total_input))
-
-for i, (cmd, count, saved, pct, inp) in enumerate(rows[:limit], 1):
-    saved_k = f"{saved/1000:.1f}K" if saved >= 1000 else str(saved)
-    inp_k   = f"{inp/1000:.1f}K"   if inp   >= 1000 else str(inp)
-    label = cmd[:34]
-    print(f"  {i:>2}. {label:<36} {saved_k:>7} saved  {pct:>5.1f}%  ({count}x, {inp_k} in)")
-PY
-
-  echo ""
-}
-
-cmd_explain() {
-  local target="${1:-}"
-  if [ -z "$target" ]; then
-    echo "Usage: token-diet explain <command>" >&2
-    return 1
-  fi
-
-  if ! check_cmd rtk || ! rtk gain --help &>/dev/null 2>&1; then
-    echo -e "  ${RED}RTK not installed — explain requires RTK${NC}" >&2
-    return 1
-  fi
-
-  local raw; raw=$(rtk gain 2>/dev/null) || true
-  if [ -z "$raw" ]; then
-    echo -e "  ${YELLOW}No RTK history yet — run some commands first${NC}"
-    return 1
-  fi
-
-  local result
-  result=$(python3 - "$raw" "$target" << 'PY'
-import re, sys
-
-def parse_saved(s):
-    s = s.strip()
-    if s.endswith('K'): return int(float(s[:-1]) * 1000)
-    elif s.endswith('M'): return int(float(s[:-1]) * 1_000_000)
-    elif re.match(r'^\d+$', s): return int(s)
-    return 0
-
-raw = sys.argv[1]
-target = sys.argv[2]
-pattern = re.compile(r'^\s*\d+\.\s+(.+?)\s{2,}(\d+)\s+([\d.]+[KM]?)\s+([\d.]+)%', re.MULTILINE)
-for m in pattern.finditer(raw):
-    cmd = m.group(1).rstrip()
-    if cmd != target:
-        continue
-    count = int(m.group(2))
-    saved = parse_saved(m.group(3))
-    pct = float(m.group(4))
-    total_input = int(saved / (pct / 100)) if pct > 0 else saved
-    out = total_input - saved
-    print(f"cmd={cmd}")
-    print(f"count={count}")
-    print(f"input={total_input}")
-    print(f"output={out}")
-    print(f"saved={saved}")
-    print(f"pct={pct}")
-    sys.exit(0)
-sys.exit(1)
-PY
-  ) || true
-
-  if [ -z "$result" ]; then
-    echo -e "  ${YELLOW}No data for '${target}' — not found in RTK history${NC}"
-    return 1
-  fi
-
-  local cmd count inp out saved pct
-  cmd=$(echo "$result"   | grep "^cmd="    | cut -d= -f2-)
-  count=$(echo "$result" | grep "^count="  | cut -d= -f2-)
-  inp=$(echo "$result"   | grep "^input="  | cut -d= -f2-)
-  out=$(echo "$result"   | grep "^output=" | cut -d= -f2-)
-  saved=$(echo "$result" | grep "^saved="  | cut -d= -f2-)
-  pct=$(echo "$result"   | grep "^pct="    | cut -d= -f2-)
-
-  echo -e "\n${BOLD}=== token-diet explain ===${NC}\n"
-  echo -e "${BOLD}${cmd}${NC}  ${DIM}(${count} runs)${NC}"
-  echo -e "${DIM}$(printf '%.0s─' {1..44})${NC}"
-  printf "  %-20s %s\n" "Tokens in:"    "$(human_tokens "$inp")"
-  printf "  %-20s %s\n" "Tokens out:"   "$(human_tokens "$out")"
-  printf "  %-20s %s  (${pct}%%)\n" "Tokens saved:" "$(human_tokens "$saved")"
-  echo -e "  Efficiency:  ${CYAN}$(bar "$pct")${NC}  ${BOLD}${pct}%${NC}"
-  echo ""
-}
-
 cmd_route() {
   local task="${1:-}"
   if [[ -z "$task" ]]; then
@@ -1493,80 +1056,21 @@ cmd_route() {
     echo -e "${BOLD}→ Serena${NC} (LSP navigation)"
     echo "  Best for: rename, refactor, find references, diagnostics, symbol search"
     echo "  Command:  use serena MCP tools (rename_symbol, find_referencing_symbols)"
-  elif [[ "$lower" =~ (run|build|test|install|npm|cargo|make|git|docker|pip|exec|deploy) ]]; then
-    echo -e "${BOLD}→ RTK${NC} (output compression)"
-    echo "  Best for: CLI commands whose output would flood context"
-    echo "  Command:  rtk <your-command>  (or let the Claude Code hook wrap it)"
-  elif [[ "$lower" =~ (read|search|find|list|outline|grep|cat|show|view|open|import|deps) ]]; then
-    echo -e "${BOLD}→ tilth${NC} (AST-aware reading)"
-    echo "  Best for: reading files, searching symbols, exploring structure"
-    echo "  Command:  use tilth MCP tools (tilth_read, tilth_search, tilth_files)"
+  elif [[ "$lower" =~ (docs|documentation|library|api|framework|version|changelog|how do i|setup.*lib) ]]; then
+    echo -e "${BOLD}→ context7${NC} (remote library documentation)"
+    echo "  Best for: up-to-date docs and API lookups for a named library or framework"
+    echo "  Command:  use the context7 MCP tools (resolve-library-id, get-library-docs)"
   elif [[ "$lower" =~ (remember|recall|memory|memoir|forget|persist|what did|last (time|session)|prior (decision|session|work)) ]]; then
     echo -e "${BOLD}→ ICM${NC} (persistent memory)"
     echo "  Best for: recalling past decisions, storing facts, cross-session/cross-tool memory"
     echo "  Command:  use icm MCP tools (recall, remember) — shared across Claude/Codex/Gemini/OpenCode"
   else
-    echo -e "${BOLD}No clear match${NC} — these tools may apply:"
+    echo -e "${BOLD}No clear match${NC} — these components may apply:"
     echo ""
-    echo "  tilth   — reading/searching code (AST-aware, fast)"
-    echo "  Serena  — renaming/navigating symbols (LSP-powered)"
-    echo "  RTK     — running CLI commands (output compression)"
-    echo "  ICM     — recalling/storing memory across sessions and tools"
+    echo "  Serena   — renaming/navigating symbols (LSP-powered)"
+    echo "  context7 — library docs and API lookups (remote MCP)"
+    echo "  ICM      — recalling/storing memory across sessions and tools"
   fi
-}
-
-cmd_leaks() {
-  if ! check_cmd rtk; then
-    miss "RTK not installed — leaks detection requires RTK history"
-    exit 1
-  fi
-
-  local raw
-  raw=$(rtk gain 2>/dev/null) || { miss "RTK history unavailable"; exit 1; }
-
-  local leaks
-  leaks=$(python3 - "$raw" << 'PY'
-import re, sys
-
-def parse_saved(s):
-    s = s.strip()
-    if s.endswith('K'): return int(float(s[:-1]) * 1000)
-    elif s.endswith('M'): return int(float(s[:-1]) * 1_000_000)
-    elif re.match(r'^\d+$', s): return int(s)
-    return 0
-
-raw = sys.argv[1]
-pattern = re.compile(r'^\s*\d+\.\s+(.+?)\s{2,}(\d+)\s+([\d.]+[KM]?)\s+([\d.]+)%', re.MULTILINE)
-FILE_READ = re.compile(r'\b(?:rtk\s+)?(?:cat|head|tail|tilth\s+read|tilth_read)\s+(\S+\.\w+)')
-found = []
-for m in pattern.finditer(raw):
-    cmd = m.group(1).rstrip()
-    count = int(m.group(2))
-    fm = FILE_READ.search(cmd)
-    if fm and count >= 2:
-        saved = parse_saved(m.group(3))
-        pct = float(m.group(4))
-        total_input = int(saved / (pct / 100)) if pct > 0 else saved
-        found.append((fm.group(1), count, total_input))
-found.sort(key=lambda x: x[1], reverse=True)
-for f, cnt, tok in found:
-    print(f"{f}\t{cnt}\t{tok}")
-PY
-)
-
-  if [[ -z "$leaks" ]]; then
-    ok "No leaks detected — no files read multiple times"
-    exit 0
-  fi
-
-  echo -e "${BOLD}Context leaks — files read multiple times:${NC}"
-  echo ""
-  while IFS=$'\t' read -r filepath count total_input; do
-    warn "$filepath  (${count}×, ~$(human_tokens "$total_input") tokens)"
-  done <<< "$leaks"
-  echo ""
-  echo "  Tip: use tilth_read with offset/limit to read only changed sections"
-  exit 1
 }
 
 cmd_extract() {
@@ -1893,50 +1397,6 @@ cmd_serena_status() {
   echo ""
 }
 
-# --- RTK toggle ---------------------------------------------------------------
-RTK_DISABLED_FLAG="$HOME/.config/token-diet/rtk-disabled"
-RTK_HOOK="$HOME/.claude/hooks/rtk-rewrite.sh"
-
-_patch_rtk_hook() {
-  # Inject sentinel-file check into the Claude Code RTK hook (idempotent).
-  # Safe to call multiple times — bails out if already patched.
-  [ -f "$RTK_HOOK" ] || return 0
-  grep -q "rtk-disabled" "$RTK_HOOK" && return 0
-
-  local tmp
-  tmp="$(mktemp)"
-  awk '
-    /^if ! command -v jq/ && !patched {
-      print "# Temporary disable (token-diet no-rtk / token-diet use-rtk)"
-      print "if [ -f \"$HOME/.config/token-diet/rtk-disabled\" ]; then exit 0; fi"
-      print ""
-      patched=1
-    }
-    { print }
-  ' "$RTK_HOOK" > "$tmp" && mv "$tmp" "$RTK_HOOK"
-}
-
-cmd_no_rtk() {
-  mkdir -p "$(dirname "$RTK_DISABLED_FLAG")"
-  touch "$RTK_DISABLED_FLAG"
-  _patch_rtk_hook
-  echo -e "${BOLD}[ok]${NC}  RTK disabled — commands pass through unfiltered"
-  echo      "      Re-enable: token-diet use-rtk"
-  if ! grep -q "rtk-disabled" "$RTK_HOOK" 2>/dev/null; then
-    echo -e "${YELLOW}[warn]${NC} RTK hook not found at $RTK_HOOK"
-    echo      "       Sentinel file created; hook bypass will apply once hook is installed."
-  fi
-}
-
-cmd_use_rtk() {
-  if [ ! -f "$RTK_DISABLED_FLAG" ]; then
-    echo -e "${BOLD}[ok]${NC}  RTK is already enabled"
-    return 0
-  fi
-  rm -f "$RTK_DISABLED_FLAG"
-  echo -e "${BOLD}[ok]${NC}  RTK re-enabled — commands filtered for token savings"
-}
-
 cmd_repair() {
   local dry_run=false json_mode=false
   while [[ $# -gt 0 ]]; do
@@ -1959,34 +1419,7 @@ cmd_repair() {
     echo ""
   }
 
-  # ── 1. RTK hooks ─────────────────────────────────────────────────────────
-  if check_cmd rtk && rtk --version &>/dev/null 2>&1; then
-    local rtk_show; rtk_show=$(rtk init --show 2>/dev/null || echo "")
-    local rtk_has_issues=false
-    local _line
-    while IFS= read -r _line; do
-      case "$_line" in \[warn\]*|\[FAIL\]*) rtk_has_issues=true ;; esac
-    done <<< "$rtk_show"
-
-    if $rtk_has_issues; then
-      if $dry_run; then
-        $json_mode || warn "RTK hooks: would run 'rtk init -g --auto-patch'"
-        _skipped "RTK hooks: dry-run — would run rtk init -g --auto-patch"
-      else
-        if rtk init -g --auto-patch &>/dev/null 2>&1; then
-          $json_mode || ok "RTK hooks repaired"
-          _repaired "RTK hooks: ran rtk init -g --auto-patch"
-        else
-          $json_mode || miss "RTK hooks: repair failed — run 'rtk init -g --auto-patch' manually"
-          _failed "RTK hooks: rtk init -g --auto-patch failed"
-        fi
-      fi
-    fi
-  else
-    _skipped "RTK hooks: rtk not installed"
-  fi
-
-  # ── 2. JSON MCP stale commands ───────────────────────────────────────────
+  # ── 1. JSON MCP stale commands ───────────────────────────────────────────
   _repair_mcp_json() {
     local tool="$1" host_label="$2" cfg="$3"
     [ -f "$cfg" ] || return 0
@@ -2042,7 +1475,7 @@ def mutate(d):
         return False          # nothing to change; skip the write entirely
     existing = servers[key].get("command")
     if isinstance(existing, list) and existing:
-        # Preserve the rest of the argv (e.g. ["tilth", "--mcp"]); swap only
+        # Preserve the rest of the argv (e.g. ["icm", "mcp"]); swap only
         # the binary. Rewriting it to a bare string would break OpenCode,
         # whose >=1.18 schema requires command to be an array.
         servers[key]["command"] = [new_cmd] + existing[1:]
@@ -2079,17 +1512,19 @@ PY
   [ -f "$HOME/.config/opencode/opencode.json" ] && oc_cfg="$HOME/.config/opencode/opencode.json"
 
   local _mcp_tool
-  for _mcp_tool in tilth serena icm; do
+  # context7 is a remote HTTP server (a URL registration, not a local binary),
+  # so stale-command repair does not apply to it.
+  for _mcp_tool in serena icm; do
     _repair_mcp_json "$_mcp_tool" "claude-code"    "$cc_cfg"
     _repair_mcp_json "$_mcp_tool" "claude-desktop" "$cd_mac"
     _repair_mcp_json "$_mcp_tool" "claude-desktop" "$cd_linux"
     _repair_mcp_json "$_mcp_tool" "opencode"       "$oc_cfg"
   done
 
-  # ── 3. Codex TOML — stale commands flagged as manual only ────────────────
+  # ── 2. Codex TOML — stale commands flagged as manual only ────────────────
   local codex_cfg="$HOME/.codex/config.toml"
   if [ -f "$codex_cfg" ]; then
-    for _mcp_tool in tilth serena icm; do
+    for _mcp_tool in serena icm; do
       local codex_cmd; codex_cmd=$(codex_mcp_command "$_mcp_tool" 2>/dev/null || echo "")
       [ -n "$codex_cmd" ] || continue
       if ! mcp_command_exists "$codex_cmd"; then
@@ -2099,7 +1534,7 @@ PY
     done
   fi
 
-  # ── 4. Summary ───────────────────────────────────────────────────────────
+  # ── 3. Summary ───────────────────────────────────────────────────────────
   if $json_mode; then
     python3 - "$repairs" "$failures" "$dry_run" \
       "REPAIRED_SEP" "${repaired[@]+"${repaired[@]}"}" \
@@ -2163,41 +1598,7 @@ cmd_doctor() {
   $json_mode || { echo -e "${BOLD}Binaries${NC}"; \
                   echo -e "${DIM}$(printf '%.0s─' {1..50})${NC}"; }
 
-  local rtk_ok=false tilth_ok=false serena_ok=false rtk_ver="" tilth_ver=""
-
-  if check_cmd rtk && rtk --version &>/dev/null 2>&1; then
-    rtk_ok=true
-    rtk_ver=$(rtk --version 2>/dev/null | awk '{print $2}')
-    $json_mode || ok "rtk     ${rtk_ver}   ${DIM}$(command -v rtk)${NC}"
-    local _rtk_min; _rtk_min=$(_compat_min "rtk")
-    if _semver_ok "$rtk_ver" "$_rtk_min"; then
-      compat_results+=("rtk:ok:${rtk_ver}:${_rtk_min}")
-    else
-      $json_mode || warn "rtk ${rtk_ver} is below minimum ${_rtk_min} — upgrade: cargo install rtk"
-      _issue "compat: rtk ${rtk_ver} below minimum ${_rtk_min}"
-      compat_results+=("rtk:warn:${rtk_ver}:${_rtk_min}")
-    fi
-  else
-    $json_mode || miss "rtk     not found  →  run: bash install.sh --rtk-only"
-    _issue "rtk: binary missing"
-  fi
-
-  if check_cmd tilth && tilth --version &>/dev/null 2>&1; then
-    tilth_ok=true
-    tilth_ver=$(tilth --version 2>/dev/null | awk '{print $2}')
-    $json_mode || ok "tilth   ${tilth_ver}   ${DIM}$(command -v tilth)${NC}"
-    local _tilth_min; _tilth_min=$(_compat_min "tilth")
-    if _semver_ok "$tilth_ver" "$_tilth_min"; then
-      compat_results+=("tilth:ok:${tilth_ver}:${_tilth_min}")
-    else
-      $json_mode || warn "tilth ${tilth_ver} is below minimum ${_tilth_min} — upgrade: cargo install tilth"
-      _issue "compat: tilth ${tilth_ver} below minimum ${_tilth_min}"
-      compat_results+=("tilth:warn:${tilth_ver}:${_tilth_min}")
-    fi
-  else
-    $json_mode || miss "tilth   not found  →  run: bash install.sh --tilth-only"
-    _issue "tilth: binary missing"
-  fi
+  local serena_ok=false icm_ok=false icm_ver=""
 
   local uvx_ok=false uv_ok=false
   { check_cmd uvx && uvx --version &>/dev/null 2>&1; } && uvx_ok=true || true
@@ -2218,38 +1619,27 @@ cmd_doctor() {
     _issue "serena: no runtime (uvx/uv/docker)"
   fi
 
-  # ── 2. RTK hooks ────────────────────────────────────────────────────────────
-  $json_mode || { echo ""; echo -e "${BOLD}RTK hooks${NC}"; \
-                  echo -e "${DIM}$(printf '%.0s─' {1..50})${NC}"; }
-
-  if $rtk_ok; then
-    local rtk_show; rtk_show=$(rtk init --show 2>/dev/null || echo "")
-    if [ -n "$rtk_show" ]; then
-      local label
-      while IFS= read -r line; do
-        label="${line#*\] }"  # strip leading [STATUS] prefix
-        case "$line" in
-          \[ok\]*)
-            $json_mode || ok "$label" ;;
-          \[warn\]*)
-            $json_mode || warn "$label"
-            _issue "RTK hook warning: $label" ;;
-          \[FAIL\]*)
-            $json_mode || miss "$label"
-            _issue "RTK hook failure: $label" ;;
-          \[--\]*)
-            $json_mode || dim "  (not configured) $label" ;;
-        esac
-      done <<< "$rtk_show"
+  if check_cmd icm && icm --version &>/dev/null 2>&1; then
+    icm_ok=true
+    icm_ver=$(icm --version 2>/dev/null | awk '{print $2}')
+    $json_mode || ok "icm     ${icm_ver}   ${DIM}$(command -v icm)${NC}"
+    local _icm_min; _icm_min=$(_compat_min "icm")
+    if _semver_ok "$icm_ver" "$_icm_min"; then
+      compat_results+=("icm:ok:${icm_ver}:${_icm_min}")
     else
-      $json_mode || warn "rtk init --show returned no output"
-      _issue "RTK: could not read hook status"
+      $json_mode || warn "icm ${icm_ver} is below minimum ${_icm_min} — upgrade ICM"
+      _issue "compat: icm ${icm_ver} below minimum ${_icm_min}"
+      compat_results+=("icm:warn:${icm_ver}:${_icm_min}")
     fi
   else
-    $json_mode || dim "  (skipped — rtk not installed)"
+    $json_mode || miss "icm     not found  →  run: bash install.sh --icm-only"
+    _issue "icm: binary missing"
   fi
 
-  # ── 3. MCP registrations ────────────────────────────────────────────────────
+  # context7 is a remote HTTP MCP server — no local binary. Presence is checked
+  # in the MCP registrations section below (registered-in-any-host).
+
+  # ── 2. MCP registrations ────────────────────────────────────────────────────
   $json_mode || { echo ""; echo -e "${BOLD}MCP registrations${NC}"; \
                   echo -e "${DIM}$(printf '%.0s─' {1..50})${NC}"; }
 
@@ -2260,7 +1650,7 @@ cmd_doctor() {
   # OpenCode: prefer XDG path if it exists, fall back to legacy.
   local oc_cfg="$HOME/.opencode.json"
   [ -f "$HOME/.config/opencode/opencode.json" ] && oc_cfg="$HOME/.config/opencode/opencode.json"
-  local -a tilth_registered_hosts=() serena_registered_hosts=() icm_registered_hosts=()
+  local -a serena_registered_hosts=() icm_registered_hosts=() context7_registered_hosts=()
 
   _doctor_check_mcp_json() {
     local tool="$1" host_label="$2" cfg="$3" hosts_var="$4" silent_miss="${5:-}" assume_installed="${6:-}"
@@ -2335,13 +1725,18 @@ PY
     local gemini_settings="$HOME/.gemini/settings.json"
     local gemini_registered=false
     if [ -f "$gemini_settings" ]; then
-      python3 - "$gemini_settings" "$tool" << 'PY' 2>/dev/null
+      # if-condition form: the probe legitimately exits 1 when the tool is not
+      # registered, and a bare non-zero command here would trip `set -e` and
+      # kill doctor before it prints anything.
+      if python3 - "$gemini_settings" "$tool" << 'PY' 2>/dev/null
 import json,sys
 d=json.load(open(sys.argv[1]))
 servers={**d.get('mcpServers',{}),**d.get('mcp',{})}
 sys.exit(0 if any(sys.argv[2] in k.lower() for k in servers.keys()) else 1)
 PY
-      [ $? -eq 0 ] && gemini_registered=true
+      then
+        gemini_registered=true
+      fi
     fi
     if $gemini_registered; then
       eval "${hosts_var}+=(\"gemini\")"
@@ -2351,101 +1746,6 @@ PY
       _issue "${tool} gemini: not registered"
     fi
   }
-
-  # tilth: delegate to `tilth doctor` which covers all 22 hosts
-  local tilth_doctor_json=""
-  if $tilth_ok; then
-    tilth_doctor_json=$(tilth doctor --json 2>/dev/null || echo "")
-    # Some tilth builds don't wire up a real `doctor` subcommand at all —
-    # `doctor` then parses as tilth's [QUERY] search argument and returns
-    # real (but unrelated) search-result JSON instead of failing outright.
-    # Only trust the output as a doctor report if it actually looks like one.
-    if [ -n "$tilth_doctor_json" ] && ! echo "$tilth_doctor_json" | python3 -c "
-import json, sys
-d = json.load(sys.stdin)
-sys.exit(0 if ('hosts' in d or 'checks' in d) else 1)
-" 2>/dev/null; then
-      tilth_doctor_json=""
-    fi
-    if [ -n "$tilth_doctor_json" ]; then
-      if $json_mode; then
-        : # folded into JSON output below
-      else
-        echo -e "  ${BOLD}tilth${NC}"
-        echo "$tilth_doctor_json" | python3 -c "
-import json, sys
-try:
-    d = json.load(sys.stdin)
-    # tilth doctor --json has two formats:
-    # Old: {hosts: {name: {registered, command, command_ok}}}
-    # New: {overall, checks: [{name, status, detail}], mcp_hosts: ...}
-    hosts = d.get('hosts', {})
-    found_any = bool(hosts)
-    if not found_any and 'checks' in d:
-        # New format: extract mcp_hosts from the checks array
-        for check in d.get('checks', []):
-            if check.get('name') == 'mcp_hosts':
-                detail = check.get('detail', '')
-                if 'registered in:' in detail:
-                    host_list = detail.split('registered in:')[-1].strip()
-                    for h in host_list.split(','):
-                        h = h.strip()
-                        if h:
-                            found_any = True
-                            print(f'    \033[32m\u2713\033[0m  {h:<20} registered')
-                break
-        if not found_any:
-            print('    (no host configs found)')
-    else:
-        for host, info in sorted(hosts.items()):
-            found_any = True
-            if info.get('registered'):
-                cmd = info.get('command', '')
-                ok_flag = info.get('command_ok', True)
-                mark = '\033[32m\u2713\033[0m' if ok_flag else '\033[33m!\033[0m'
-                label = 'registered' if ok_flag else 'registered but command missing:'
-                print(f'    {mark}  {host:<20} {label}   {cmd}')
-            else:
-                print(f'    \033[2m\u2013\033[0m  {host:<20} config exists \u2014 not registered')
-        if not found_any:
-            print('    (no host configs found)')
-except Exception as e:
-    print(f'    (could not parse tilth doctor output: {e})')
-"
-        echo ""
-      fi
-      # Feed issues from tilth doctor into our findings only when explicitly unhealthy
-      # Handle both formats: old uses "healthy", new uses "overall":"pass"
-      local _tilth_healthy; _tilth_healthy=$(echo "$tilth_doctor_json" | python3 -c "
-import json,sys; d=json.load(sys.stdin)
-healthy = d.get('healthy') or d.get('overall') == 'pass'
-print('true' if healthy else 'false')" 2>/dev/null || echo "unknown")
-      if [ "$_tilth_healthy" = "false" ]; then
-        _issue "tilth: not registered in any MCP host (run: tilth install <host>)"
-      fi
-    else
-      # Fallback for older tilth versions without `doctor --json`.
-      $json_mode || dim "  tilth   (doctor subcommand not available — using direct MCP config checks)"
-      if ! $json_mode; then
-        echo -e "  ${BOLD}tilth${NC}"
-      fi
-      _doctor_check_mcp_json "tilth" "claude-code"    "$cc_cfg"    "tilth_registered_hosts" "silent"
-      if ! printf '%s\n' "${tilth_registered_hosts[@]+"${tilth_registered_hosts[@]}"}" | grep -q "^claude-code$"; then
-        local cc_installed=""; [ -f "$cc_cfg" ] && cc_installed="1"
-        _doctor_check_mcp_json "tilth" "claude-code"    "$cc_global" "tilth_registered_hosts" "" "$cc_installed"
-      else
-        $json_mode || ok "  claude-code   registered"
-      fi
-      _doctor_check_mcp_json "tilth" "claude-desktop" "$cd_mac"    "tilth_registered_hosts"
-      _doctor_check_mcp_json "tilth" "claude-desktop" "$cd_linux"  "tilth_registered_hosts"
-      _doctor_check_mcp_json "tilth" "opencode"       "$oc_cfg"    "tilth_registered_hosts"
-      _doctor_check_mcp_codex "tilth" "tilth_registered_hosts"
-      _doctor_check_mcp_gemini "tilth" "tilth_registered_hosts"
-      $json_mode || echo ""
-    fi
-  else
-    $json_mode || dim "  tilth   (skipped — binary not installed)"
-  fi
 
   # _doctor_check_mcp_json_either: check two files for the same host — only
   # report miss if BOTH miss. Claude Code writes to ~/.claude.json (via
@@ -2487,21 +1787,41 @@ print('true' if healthy else 'false')" 2>/dev/null || echo "unknown")
   _doctor_check_mcp_gemini "icm" "icm_registered_hosts"
   $json_mode || echo ""
 
-  # ── 4. Summary ──────────────────────────────────────────────────────────────
+  # context7: remote HTTP MCP server (https://mcp.context7.com/mcp) — there is
+  # no local binary or per-host command to validate, so a single
+  # registered-in-any-host check via the shared hosts_registered machinery
+  # replaces the per-host walk used for serena/icm.
+  $json_mode || echo -e "  ${BOLD}context7${NC}"
+  local c7_hosts; c7_hosts=$(hosts_registered "context7")
+  if [ "$c7_hosts" != "none" ]; then
+    local _h
+    IFS=',' read -ra context7_registered_hosts <<< "$c7_hosts"
+    for _h in "${context7_registered_hosts[@]}"; do
+      $json_mode || ok "  ${_h}   registered   ${DIM}https://mcp.context7.com/mcp${NC}"
+    done
+  else
+    $json_mode || warn "  not registered in any MCP host  →  register via install.sh (optional CONTEXT7_API_KEY; the key is appended to the URL at registration time and never echoed)"
+    _issue "context7: not registered in any MCP host"
+  fi
+  $json_mode || echo ""
+
+  # ── 3. Summary ──────────────────────────────────────────────────────────────
   if $json_mode; then
-        python3 - "$issues" "$tilth_doctor_json" \
+    python3 - "$issues" \
       "FINDINGS_SEP" "${findings[@]+"${findings[@]}"}" \
       "COMPAT_SEP"   "${compat_results[@]+"${compat_results[@]}"}" \
       "SERENA_HOSTS_SEP" "${serena_registered_hosts[@]+"${serena_registered_hosts[@]}"}" \
-      "ICM_HOSTS_SEP"    "${icm_registered_hosts[@]+"${icm_registered_hosts[@]}"}" << 'PY'
+      "ICM_HOSTS_SEP"    "${icm_registered_hosts[@]+"${icm_registered_hosts[@]}"}" \
+      "CONTEXT7_HOSTS_SEP" "${context7_registered_hosts[@]+"${context7_registered_hosts[@]}"}" << 'PY'
 import json, sys
-args = sys.argv[1:]; issues = int(args[0]); tilth_doctor_raw = args[1]
-findings, compat_raw, serena_hosts, icm_hosts, current = [], [], [], [], None
-for a in args[2:]:
+args = sys.argv[1:]; issues = int(args[0])
+findings, compat_raw, serena_hosts, icm_hosts, context7_hosts, current = [], [], [], [], [], None
+for a in args[1:]:
     if a == "FINDINGS_SEP": current = findings; continue
     if a == "COMPAT_SEP": current = compat_raw; continue
     if a == "SERENA_HOSTS_SEP": current = serena_hosts; continue
     if a == "ICM_HOSTS_SEP": current = icm_hosts; continue
+    if a == "CONTEXT7_HOSTS_SEP": current = context7_hosts; continue
     if current is not None: current.append(a)
 compat = {}
 for entry in compat_raw:
@@ -2509,12 +1829,7 @@ for entry in compat_raw:
     if len(parts) == 4:
         tool, status, ver, min_ver = parts
         compat[tool] = {"status": status, "version": ver, "min": min_ver}
-tilth_mcp = None
-if tilth_doctor_raw:
-    try: tilth_mcp = json.loads(tilth_doctor_raw)
-    except: pass
-out = {"issues": issues, "healthy": issues == 0, "findings": findings, "compat": compat, "serena_mcp": { "registered_hosts": serena_hosts }, "icm_mcp": { "registered_hosts": icm_hosts }}
-if tilth_mcp is not None: out["tilth_mcp"] = tilth_mcp
+out = {"issues": issues, "healthy": issues == 0, "findings": findings, "compat": compat, "serena_mcp": { "registered_hosts": serena_hosts }, "icm_mcp": { "registered_hosts": icm_hosts }, "context7_mcp": { "registered_hosts": context7_hosts }}
 print(json.dumps(out, indent=2))
 PY
   else
@@ -2644,43 +1959,35 @@ USAGE
   token-diet [command]
 
 COMMANDS
-  gain              Show token savings dashboard across RTK + tilth + Serena + ICM  (default)
-  health            Quick health check: tools responding + MCP host registrations
-  doctor            Deep configuration and hook diagnosis  [--json]
-  repair            Fix what doctor finds: RTK hooks, stale MCP commands  [--dry-run] [--json]
+  status            Show component status dashboard  (default)
+  health            Quick health check: components responding + MCP host registrations
+  doctor            Deep configuration diagnosis  [--json]
+  repair            Fix what doctor finds: stale MCP commands  [--dry-run] [--json]
   mcp               Manage MCP server registrations  [install|list]
-  clean             Archive and reset RTK history to speed up dashboard
   upstream          Manage and verify original repository updates  [setup|check|diff]
-  hook              Toggle RTK hook  [on|off]
-  breakdown         Top commands by tokens saved  [--limit N]
-  explain <cmd>     Token cost breakdown for a specific command
   budget <init|status|hubs> Per-project token budget with hubs discovery
-  extract <file>    Extract a document (pdf/csv/html/txt) to a cached plain-text file
-  loops             Detect agent loop patterns (commands run 3+ times)
-  route <task>      Suggest which tool (tilth/Serena/RTK/ICM) best fits the task
+  route <task>      Suggest which component (Serena/context7/ICM) best fits the task
   icm <sub>         ICM memory: warmup (download model), status  [warmup|status]
-  leaks             Detect files read multiple times in RTK history
+  extract <file>    Extract a document (pdf/csv/html/txt) to a cached plain-text file
   test-first <file> Suggest test file counterpart for an implementation file
   strip [--stats] <file>  Strip comments from source file to reduce tokens
   diff-reads <file> Suggest line ranges to read based on recent git diff
   serena-gc         Detect and kill orphaned Serena/LSP processes  [--force]
   dashboard         Open live browser dashboard  [--no-open]
   service <sub>     Manage always-on dashboard daemon  (install|uninstall|start|stop|status)
-  version           Show installed versions of all four tools
-  update            Update tools  [--fresh] [installer flags]
+  version           Show installed versions of the components
+  update            Update components  [--fresh] [installer flags]
   uninstall         Remove all token-diet components  [--dry-run] [--force]
   --help            Show this help
 
-TOOLS
-  RTK    Command output compression   60-90% output reduction, measured live
-                                      from your own rtk history (see: gain)
-  tilth  AST-aware code reading       -38% to -44% cost per correct answer,
-                                      benchmarked (see: docs/benchmarks.md)
-  Serena LSP symbol navigation        fewer prompt turns; not separately measured
-  ICM    Persistent cross-tool memory recall replaces re-reading; not measured
+COMPONENTS
+  Serena   LSP symbol navigation        fewer prompt turns; not separately measured
+  ICM      Persistent cross-tool memory recall replaces re-reading; not measured
+  context7 Remote library-docs MCP      https://mcp.context7.com/mcp; optional
+                                        CONTEXT7_API_KEY (never displayed)
 
 INSTALL
-  bash install.sh             Install all tools
+  bash install.sh             Install all components
   bash install.sh --dry-run   Preview what would be installed
 
 helpEOF
@@ -2694,26 +2001,20 @@ if [ "${BASH_SOURCE[0]}" != "${0}" ]; then
   return 0 2>/dev/null || true
 fi
 
-case "${1:-gain}" in
-  gain)              cmd_gain ;;
+case "${1:-status}" in
+  status|gain)       cmd_status ;;
   health)            cmd_health ;;
   doctor|verify)     shift; cmd_doctor "$@" ;;
   repair)            shift; cmd_repair "$@" ;;
   mcp)               shift; cmd_mcp "$@" ;;
-  clean)             cmd_clean ;;
   upstream)          shift; cmd_upstream "$@" ;;
-  hook)              shift; cmd_hook "$@" ;;
-  breakdown)         shift; cmd_breakdown "$@" ;;
-  explain)           shift; cmd_explain "$@" ;;
   budget)            shift; cmd_budget "$@" ;;
   extract)           shift; cmd_extract "$@" ;;
-  loops)             cmd_loops ;;
   dashboard)         shift; cmd_dashboard "$@" ;;
   service)           shift; cmd_service "$@" ;;
   version|versions)  cmd_version ;;
   route)             shift; cmd_route "$@" ;;
   icm)               shift; cmd_icm "$@" ;;
-  leaks)             cmd_leaks ;;
   test-first)        shift; cmd_test_first "$@" ;;
   strip)             shift; cmd_strip "$@" ;;
   diff-reads)        shift; cmd_diff_reads "$@" ;;
@@ -2722,8 +2023,6 @@ case "${1:-gain}" in
   update)            shift; cmd_update "$@" ;;
   reinstall)         echo "Warning: 'reinstall' is deprecated. Use 'token-diet update --fresh' instead."; shift; cmd_update --fresh "$@" ;;
   uninstall)         shift; cmd_uninstall "$@" ;;
-  no-rtk)            echo "Warning: 'no-rtk' is deprecated. Use 'token-diet hook off' instead."; cmd_no_rtk ;;
-  use-rtk)           echo "Warning: 'use-rtk' is deprecated. Use 'token-diet hook on' instead."; cmd_use_rtk ;;
   --help|-h|help)    cmd_help ;;
   --version)         echo "token-diet $TD_VERSION" ;;
   *)  echo "Unknown command: $1"; cmd_help; exit 1 ;;

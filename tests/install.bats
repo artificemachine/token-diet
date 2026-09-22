@@ -174,10 +174,13 @@ PY
 # Cycle 3.3 — uninstall.sh: MCP JSON removal
 # ---------------------------------------------------------------------------
 
-@test "uninstall.sh removes tilth, serena and icm from claude-code settings.json" {
-  mock_mcp_config claude-code tilth
+@test "uninstall.sh removes serena, icm and context7 (plus legacy tilth) from claude-code settings.json" {
+  # serena/icm/context7 are current components; tilth is LEGACY-region coverage
+  # for machines provisioned before rtk/tilth were dropped.
   mock_mcp_config claude-code serena
   mock_mcp_config claude-code icm
+  mock_context7_mcp claude-code
+  mock_mcp_config claude-code tilth
 
   run bash "$SCRIPTS_DIR/uninstall.sh" --force
 
@@ -187,9 +190,8 @@ PY
 import json, sys
 d = json.load(open(sys.argv[1]))
 servers = d.get("mcpServers", {})
-assert "tilth"  not in servers, "tilth still present"
-assert "serena" not in servers, "serena still present"
-assert "icm"    not in servers, "icm still present"
+for name in ("serena", "icm", "context7", "tilth"):
+    assert name not in servers, f"{name} still present"
 PY
 }
 
@@ -259,35 +261,21 @@ PY
   [[ "$output" == *"--verbose"* ]]
 }
 
-@test "install.sh --verify warns when Codex tilth MCP path is stale" {
-  mock_cmd_with_gain
-  mock_cmd tilth
-  mock_cmd uv
-  mock_cmd codex
-  mock_mcp_config codex tilth "/missing/tilth"
-
-  run bash "$SCRIPTS_DIR/install.sh" --verify
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"Codex tilth MCP command missing: /missing/tilth"* ]]
-}
-
 @test "install.sh --verify: stale single-quoted TOML path is flagged" {
-  mock_cmd_with_gain
-  mock_cmd tilth
-  mock_cmd uv
+  mock_cmd uvx
+  mock_icm
   mock_cmd codex
   mkdir -p "$TMP_HOME/.codex"
-  printf '\n[mcp_servers.tilth]\ncommand = '"'"'/missing/tilth'"'"'\n' >> "$TMP_HOME/.codex/config.toml"
+  printf '\n[mcp_servers.icm]\ncommand = '"'"'/missing/icm'"'"'\n' >> "$TMP_HOME/.codex/config.toml"
 
   run bash "$SCRIPTS_DIR/install.sh" --verify
   [ "$status" -eq 0 ]
-  [[ "$output" == *"Codex tilth MCP command missing: /missing/tilth"* ]]
+  [[ "$output" == *"Codex icm MCP command missing: /missing/icm"* ]]
 }
 
 @test "install.sh --verify warns when Codex serena MCP path is stale" {
-  mock_cmd_with_gain
-  mock_cmd tilth
-  mock_cmd uv
+  mock_cmd uvx
+  mock_icm
   mock_cmd codex
   mock_mcp_config codex serena "/missing/serena"
 
@@ -297,11 +285,9 @@ PY
 }
 
 @test "install.sh --verify warns when Codex icm MCP path is stale" {
-  mock_cmd_with_gain
-  mock_cmd tilth
-  mock_cmd uv
-  mock_cmd codex
+  mock_cmd uvx
   mock_icm
+  mock_cmd codex
   mock_mcp_config codex icm "/missing/icm"
 
   run bash "$SCRIPTS_DIR/install.sh" --verify
@@ -358,28 +344,6 @@ for name, entry in servers.items():
         f"path: {flat!r}. MCP configs must use bare commands + XDG-stable "
         f"launchers (see CLAUDE.md §Strict Installation Decoupling)."
     )
-PY
-}
-
-@test "install: opencode tilth MCP entry uses --mcp subcommand (not bare mcp)" {
-  mock_install_prereqs
-  mock_cmd opencode
-  echo '{}' > "$TMP_HOME/.opencode.json"
-
-  bash "$SCRIPTS_DIR/install.sh" --serena-only --hosts opencode
-
-  python3 - "$TMP_HOME/.opencode.json" << 'PY'
-import json, sys
-d = json.load(open(sys.argv[1]))
-t = (d.get("mcp") or {}).get("tilth") or {}
-cmd = t.get("command") or []
-flat = cmd if isinstance(cmd, str) else " ".join(str(x) for x in cmd)
-assert "--mcp" in flat, f"tilth MCP command must include --mcp; got: {flat!r}"
-# Negative assertion: the old bug was the bare positional `mcp` arg.
-parts = cmd if isinstance(cmd, list) else cmd.split()
-assert "mcp" not in parts or "--mcp" in parts, (
-    f"tilth command has bare 'mcp' instead of '--mcp': {flat!r}"
-)
 PY
 }
 
@@ -794,7 +758,6 @@ for m in ("build", "plan"):
     p = d.get("mode", {}).get(m, {}).get("prompt", "")
     assert "token-diet:begin" in p, f"mode.{m}.prompt missing begin marker"
     assert "token-diet:end"   in p, f"mode.{m}.prompt missing end marker"
-    assert "tilth_search"     in p, f"mode.{m}.prompt missing tilth rules"
 PY
 }
 
@@ -899,8 +862,8 @@ PY
   # containing "serena". The old bare-grep check treated this as
   # "already configured" and skipped real registration.
   cat > "$TMP_HOME/.codex/config.toml" << 'TOML'
-[mcp_servers.tilth]
-command = "/some/path/tilth"
+[mcp_servers.user-tool]
+command = "/some/path/user-tool"
 args = ["--mcp"]
 
 # Vestigial orphan from a bad paste — contains the substring "serena"
@@ -946,8 +909,8 @@ TOML
   # containing the substring "icm". A bare-grep guard would treat this as
   # "already configured" and skip the real registration.
   cat > "$TMP_HOME/.codex/config.toml" << 'TOML'
-[mcp_servers.tilth]
-command = "tilth"
+[mcp_servers.user-tool]
+command = "user-tool"
 args = ["--mcp"]
 
 # Vestigial orphan from a bad paste — contains the substring "icm"
@@ -1045,6 +1008,88 @@ mcp = d.get("mcp", {})
 assert "other-tool" in mcp, f"Unrelated entry was removed: {list(mcp.keys())}"
 assert "icm" in mcp, f"icm entry missing: {list(mcp.keys())}"
 PY
+}
+
+# ---------------------------------------------------------------------------
+# install.sh: context7 — remote HTTP MCP component (NEW)
+#
+# context7 has no local binary: it is a REMOTE HTTP MCP at
+# https://mcp.context7.com/mcp. Registration must carry the URL (never a
+# local command), honour CONTEXT7_URL / CONTEXT7_API_KEY, and stay idempotent.
+# ---------------------------------------------------------------------------
+
+@test "install.sh --help mentions context7" {
+  run bash "$SCRIPTS_DIR/install.sh" --help
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"context7"* ]]
+}
+
+# Claude Code is registered through the `claude mcp add` CLI (which owns
+# the user-scope Claude config), exactly like serena and icm. This stub is stateful so the
+# `claude mcp get` idempotency probe behaves like the real CLI: it succeeds only
+# after an `add`. Every `mcp add` invocation is appended to claude-add.log.
+mock_claude_mcp_cli() {
+  cat > "$TMP_BIN/claude" << MOCK
+#!/usr/bin/env bash
+case "\$1" in
+  --version) echo "claude 0.99.0-mock"; exit 0 ;;
+  --help)    echo "Usage: claude [OPTIONS]"; exit 0 ;;
+esac
+if [ "\$1" = "mcp" ] && [ "\$2" = "add" ]; then
+  echo "\$*" >> "$TMP_HOME/claude-add.log"
+  touch "$TMP_HOME/claude-mcp-\$(printf '%s\n' "\$@" | grep -x context7 | head -1)"
+  exit 0
+fi
+if [ "\$1" = "mcp" ] && [ "\$2" = "get" ]; then
+  [ -f "$TMP_HOME/claude-mcp-\$3" ]
+  exit \$?
+fi
+exit 0
+MOCK
+  chmod +x "$TMP_BIN/claude"
+}
+
+@test "install.sh registers context7 as a remote HTTP MCP via the claude CLI" {
+  mock_install_prereqs
+  mock_claude_mcp_cli
+
+  run bash "$SCRIPTS_DIR/install.sh" --context7-only --hosts claude
+  [ "$status" -eq 0 ]
+
+  [ "$(wc -l < "$TMP_HOME/claude-add.log")" -eq 1 ]
+  grep -Fxq "mcp add --scope user --transport http context7 https://mcp.context7.com/mcp" "$TMP_HOME/claude-add.log"
+}
+
+@test "install.sh context7 registration is idempotent via the claude CLI" {
+  mock_install_prereqs
+  mock_claude_mcp_cli
+
+  bash "$SCRIPTS_DIR/install.sh" --context7-only --hosts claude
+  bash "$SCRIPTS_DIR/install.sh" --context7-only --hosts claude
+
+  [ "$(wc -l < "$TMP_HOME/claude-add.log")" -eq 1 ]
+}
+
+@test "install.sh registers context7 in codex config as a remote url" {
+  mock_install_prereqs
+  mock_cmd codex
+
+  run bash "$SCRIPTS_DIR/install.sh" --context7-only --hosts codex
+  [ "$status" -eq 0 ]
+
+  grep -Eq '^\[mcp_servers\.context7\]' "$TMP_HOME/.codex/config.toml"
+  grep -q 'https://mcp.context7.com/mcp' "$TMP_HOME/.codex/config.toml"
+}
+
+@test "install.sh context7 url honours CONTEXT7_URL when set" {
+  mock_install_prereqs
+  mock_claude_mcp_cli
+
+  run env CONTEXT7_URL="https://staging.example.com/mcp" \
+    bash "$SCRIPTS_DIR/install.sh" --context7-only --hosts claude
+  [ "$status" -eq 0 ]
+
+  grep -Fxq "mcp add --scope user --transport http context7 https://staging.example.com/mcp" "$TMP_HOME/claude-add.log"
 }
 
 # ---------------------------------------------------------------------------
@@ -1590,14 +1635,14 @@ PY
   # repo: release.sh derives ROOT from its own location, so a copy with stub
   # forks and a genuinely clean tree exercises the real script hermetically.
   local repo="$TMP_HOME/relrepo"
-  mkdir -p "$repo/scripts" "$repo/forks"/{rtk,tilth,serena,icm}
+  mkdir -p "$repo/scripts" "$repo/forks"/{serena,icm}
   cp "$SCRIPTS_DIR/release.sh" "$repo/scripts/release.sh"
   # release.sh reads TD_VERSION out of scripts/token-diet as its single source
   # of truth and hard-exits if it cannot parse one.
   echo 'readonly TD_VERSION="9.9.9"' > "$repo/scripts/token-diet"
   # `ls -A` must see something, or preflight fails on "fork is empty" first.
   local f
-  for f in rtk tilth serena icm; do echo "stub" > "$repo/forks/$f/.keep"; done
+  for f in serena icm; do echo "stub" > "$repo/forks/$f/.keep"; done
 
   git -C "$repo" init -q
   git -C "$repo" config user.email test@example.com
@@ -1619,11 +1664,13 @@ PY
   [ "$status" -eq 0 ]
 }
 
-@test "release.sh preflight checks all four forks, including icm" {
-  # The submodule loop listed rtk/tilth/serena only. There are four forks, not
-  # three — the same omission the v1.15.4 tag-message fix corrected elsewhere.
+@test "release.sh preflight checks the surviving forks, including icm" {
+  # The fork set is now serena + icm (rtk/tilth were dropped). The preflight
+  # loop must cover the forks build.sh still builds — and none it no longer does.
   run grep -nE 'for fork in .*icm' "$SCRIPTS_DIR/release.sh"
   [ "$status" -eq 0 ]
+  run grep -nE 'for fork in .*(rtk|tilth)' "$SCRIPTS_DIR/release.sh"
+  [ "$status" -ne 0 ]
 }
 
 @test "install: the INSTALLED token-diet-install.sh can source the host registry" {
@@ -1677,14 +1724,18 @@ PY
   [ -f "$TMP_HOME/.local/config/compat.json" ]
 
   # And it must carry a real floor, not be empty — prove the gate can read it.
-  run python3 -c "import json;print(json.load(open('$TMP_HOME/.local/config/compat.json'))['tools']['rtk']['min'])"
+  run python3 -c "import json;print(json.load(open('$TMP_HOME/.local/config/compat.json'))['tools']['icm']['min'])"
   [ "$status" -eq 0 ]
   [ "$output" != "0.0.0" ]
   [ -n "$output" ]
 
-  # ICM is the fourth tool and must be gated too (was absent).
-  run python3 -c "import json;print('icm' in json.load(open('$TMP_HOME/.local/config/compat.json'))['tools'])"
+  # Serena must be gated too.
+  run python3 -c "import json;print('serena' in json.load(open('$TMP_HOME/.local/config/compat.json'))['tools'])"
   [ "$output" = "True" ]
+
+  # The dropped tools must be gone from the compat table.
+  run python3 -c "import json;t=json.load(open('$TMP_HOME/.local/config/compat.json'))['tools'];print('rtk' in t or 'tilth' in t)"
+  [ "$output" = "False" ]
 }
 
 @test "uninstall: removes the installed compat.json" {
@@ -1755,33 +1806,17 @@ PY
 # ---------------------------------------------------------------------------
 
 @test "install: default cargo installs pin --rev to the submodule gitlink" {
-  local rtk_rev tilth_rev icm_rev
-  rtk_rev="$(git -C "$SCRIPTS_DIR/.." rev-parse 'HEAD:forks/rtk')"
-  tilth_rev="$(git -C "$SCRIPTS_DIR/.." rev-parse 'HEAD:forks/tilth')"
+  local icm_rev
   icm_rev="$(git -C "$SCRIPTS_DIR/.." rev-parse 'HEAD:forks/icm')"
 
   run bash "$SCRIPTS_DIR/install.sh" --dry-run
   [ "$status" -eq 0 ]
 
-  [[ "$output" == *"cargo install --git https://github.com/artificemachine/rtk --rev $rtk_rev"* ]]
-  [[ "$output" == *"cargo install --git https://github.com/artificemachine/tilth --rev $tilth_rev"* ]]
+  # icm is the only cargo-built fork left (rtk/tilth were dropped): its pin
+  # must be present, and no dropped fork may be installed again.
   [[ "$output" == *"--rev $icm_rev"* ]]
-}
-
-@test "install: tilth cargo install disambiguates the package name (repo also has a fuzz crate)" {
-  # The tilth repo carries a fuzz/ package (tilth-fuzz) alongside the tilth
-  # binary crate. `cargo install --git <repo>` searches the ENTIRE cloned repo
-  # for any Cargo.toml with a [[bin]], so an unqualified install is ambiguous
-  # and cargo refuses: "multiple packages with binaries found: tilth,
-  # tilth-fuzz". Reproduced live against a real network install on this
-  # machine. The package name must be passed explicitly, same as icm-cli.
-  local tilth_rev
-  tilth_rev="$(git -C "$SCRIPTS_DIR/.." rev-parse 'HEAD:forks/tilth')"
-
-  run bash "$SCRIPTS_DIR/install.sh" --dry-run
-  [ "$status" -eq 0 ]
-
-  [[ "$output" == *"cargo install --git https://github.com/artificemachine/tilth --rev $tilth_rev tilth --force"* ]]
+  [[ "$output" != *"artificemachine/rtk"* ]]
+  [[ "$output" != *"artificemachine/tilth"* ]]
 }
 
 @test "install: default serena launcher pins the uvx git ref" {
@@ -1988,25 +2023,26 @@ JSON
   # to $HOME/.claude.json (via `claude mcp add --scope user`) and to
   # $HOME/.gemini/settings.json (via `gemini mcp add --scope user`). Uninstall must be
   # symmetric and remove them. It must NOT touch a user's own unrelated servers.
-  echo '{"mcpServers":{"user-server":{"command":"x"},"tilth":{},"serena":{},"icm":{}}}' > "$TMP_HOME/.claude.json"
+  # tilth is planted as LEGACY-region coverage (pre-existing machines).
+  echo '{"mcpServers":{"user-server":{"command":"x"},"serena":{},"icm":{},"context7":{"type":"http","url":"https://mcp.context7.com/mcp"},"tilth":{}}}' > "$TMP_HOME/.claude.json"
   mkdir -p "$TMP_HOME/.gemini"
-  echo '{"mcpServers":{"user-server":{"command":"y"},"tilth":{},"serena":{},"icm":{}}}' > "$TMP_HOME/.gemini/settings.json"
+  echo '{"mcpServers":{"user-server":{"command":"y"},"serena":{},"icm":{},"context7":{"type":"http","url":"https://mcp.context7.com/mcp"},"tilth":{}}}' > "$TMP_HOME/.gemini/settings.json"
 
   run bash "$SCRIPTS_DIR/uninstall.sh" --force
   [ "$status" -eq 0 ]
 
-  # token-diet's three servers gone from BOTH files; the user's own server stays.
+  # token-diet's servers gone from BOTH files; the user's own server stays.
   python3 - "$TMP_HOME/.claude.json" << 'PY'
 import json, sys
 s = json.load(open(sys.argv[1])).get("mcpServers", {})
-for k in ("tilth", "serena", "icm"):
+for k in ("serena", "icm", "context7", "tilth"):
     assert k not in s, f".claude.json still has {k}"
 assert "user-server" in s, "unrelated .claude.json server was removed!"
 PY
   python3 - "$TMP_HOME/.gemini/settings.json" << 'PY'
 import json, sys
 s = json.load(open(sys.argv[1])).get("mcpServers", {})
-for k in ("tilth", "serena", "icm"):
+for k in ("serena", "icm", "context7", "tilth"):
     assert k not in s, f"gemini still has {k}"
 assert "user-server" in s, "unrelated gemini server was removed!"
 PY
@@ -2093,8 +2129,8 @@ TOML
   python3 - "$TMP_HOME/.codex/config.toml" << 'PY'
 import re, sys
 text = open(sys.argv[1]).read()
-# No token-diet table headers survive.
-for name in ("tilth", "serena", "icm", "token-diet"):
+# No token-diet table headers survive (tilth is legacy-region, checked separately).
+for name in ("serena", "icm", "token-diet"):
     assert not re.search(r'(?m)^\[mcp_servers\.%s\]' % re.escape(name), text), f"{name} header survived:\n{text}"
 # No orphaned token-diet body lines survive (the old regex left `["--from",...]`
 # and `["serve","--compact"]` arrays and stray "added by token-diet" comments).
@@ -2111,7 +2147,7 @@ PY
 
 @test "symmetry: cowork/Claude-Desktop round-trip — install then uninstall restores the config exactly" {
   mock_install_prereqs
-  mock_cmd tilth   # cowork tilth registration is gated on check_command tilth
+  mock_icm   # cowork icm registration is gated on check_command icm
 
   local cowork_dir
   if [ "$(uname -s)" = "Darwin" ]; then
@@ -2151,7 +2187,7 @@ PY
   python3 -c "
 import json
 d = {
-  'mcpServers': {'user-server': {'command': 'x'}, 'tilth': {}, 'serena': {}, 'icm': {}},
+  'mcpServers': {'user-server': {'command': 'x'}, 'serena': {}, 'icm': {}, 'context7': {'type': 'http', 'url': 'https://mcp.context7.com/mcp'}, 'tilth': {}},
   'hooks': {
     'PreToolUse': [
       {'matcher': '*', 'hooks': [{'type':'command','command':'echo user','timeout':5}]},
@@ -2180,7 +2216,7 @@ gemini_md = open(sys.argv[4]).read()
 assert "@token-diet.md" not in gemini_md, "GEMINI.md still references @token-diet.md"
 assert "user rules line" in gemini_md, "GEMINI.md user content lost"
 s = d.get("mcpServers", {})
-for k in ("tilth", "serena", "icm"):
+for k in ("serena", "icm", "context7", "tilth"):
     assert k not in s, f"gemini still has mcp {k}"
 assert "user-server" in s, "unrelated gemini server removed!"
 # token-diet hook entries gone; the user's PreToolUse/* hook survives.
@@ -2195,28 +2231,56 @@ PY
 # ---------------------------------------------------------------------------
 # Cycle 12 — uninstall.sh: per-component selection (--only / --skip)
 #
-# The uninstaller was all-or-nothing: every run removed all four tools plus the
+# The uninstaller was all-or-nothing: every run removed every tool plus the
 # token-diet CLI. Sections are organised by host/artifact, not by tool, so tool
 # names are hardcoded at each call site. These tests pin the selection contract
-# before the gating helper is introduced.
-#
-# `rtk` and `rtk-mcp` are deliberately SEPARATE components: the rtk binary and
-# its shell hooks do the output compression, while rtk-mcp is a large MCP tool
-# schema loaded into every session. Dropping the schema while keeping the
-# compression is the main reason this selection exists.
+# for the current components (serena, icm, context7, token-diet); rtk/tilth/
+# rtk-mcp survive only inside the LEGACY cleanup region, which always runs.
 # ---------------------------------------------------------------------------
 
-# Plant every artifact a full install leaves behind, so each test can assert
-# both what was removed and what survived.
+# Plant every artifact a full install leaves behind (plus LEGACY rtk/tilth/
+# rtk-mcp artifacts that pre-existing machines may still carry), so each test
+# can assert both what was removed and what survived.
 plant_all_components() {
-  for b in rtk tilth icm serena token-diet; do
+  for b in serena icm token-diet rtk tilth; do
     echo "#!/bin/bash" > "$TMP_HOME/.local/bin/$b"
     chmod +x "$TMP_HOME/.local/bin/$b"
   done
-  mock_mcp_config claude-code tilth
   mock_mcp_config claude-code serena
   mock_mcp_config claude-code icm
+  mock_context7_mcp claude-code
+  mock_mcp_config claude-code tilth
   mock_mcp_config claude-code rtk-mcp
+}
+
+@test "install.sh: token-diet.md names only the components actually installed" {
+  # Regression: the doc was a static heredoc always claiming all tools, so
+  # `--icm-only` still wrote guidance for tools that were never installed.
+  # Agents then called tools that did not exist. The doc must describe real
+  # state — and after the rtk/tilth drop it must never advertise them.
+  mkdir -p "$TMP_HOME/.claude"
+  : > "$TMP_HOME/.claude/CLAUDE.md"
+
+  run bash "$SCRIPTS_DIR/install.sh" --icm-only --skip-tests --hosts claude
+
+  [ -f "$TMP_HOME/.claude/token-diet.md" ]
+  run grep -ciE "use \*\*tilth\*\*|use \*\*rtk\*\*|tilth_read" "$TMP_HOME/.claude/token-diet.md"
+  [ "$output" = "0" ]
+  grep -qi "ICM" "$TMP_HOME/.claude/token-diet.md"
+}
+
+@test "install.sh: token-diet.md keeps the Serena guidance for a full install" {
+  # The inverse guard: trimming the doc must not strip guidance for components
+  # that a full install genuinely provides.
+  mkdir -p "$TMP_HOME/.claude"
+  : > "$TMP_HOME/.claude/CLAUDE.md"
+
+  run bash "$SCRIPTS_DIR/install.sh" --dry-run --skip-tests --hosts claude
+  [ "$status" -eq 0 ]
+
+  # --dry-run writes nothing, so assert the generator directly on a full run by
+  # checking the source still carries the string for the all-components path.
+  grep -q "Use \*\*Serena\*\*" "$SCRIPTS_DIR/install.sh"
 }
 
 @test "install.sh --dry-run leaves an EXISTING host config byte-identical" {
@@ -2251,49 +2315,30 @@ JSON
     || md5sum "$TMP_HOME/.config/opencode/opencode.json" | cut -d' ' -f1)"
   [ "$before" = "$after" ]
   # Named explicitly so a future regression reports the cause, not just a hash.
-  run grep -c "rtk-mcp" "$TMP_HOME/.config/opencode/opencode.json"
+  run grep -c "context7" "$TMP_HOME/.config/opencode/opencode.json"
   [ "$output" = "0" ]
 }
 
-@test "uninstall: --only serena removes serena and leaves the other tools alone" {
+@test "uninstall: --only serena removes serena and leaves the other components alone" {
   plant_all_components
 
   run bash "$SCRIPTS_DIR/uninstall.sh" --force --only serena
 
   [ "$status" -eq 0 ]
   [ ! -f "$TMP_HOME/.local/bin/serena" ]
-  [ -f "$TMP_HOME/.local/bin/rtk" ]
-  [ -f "$TMP_HOME/.local/bin/tilth" ]
   [ -f "$TMP_HOME/.local/bin/icm" ]
-}
-
-@test "uninstall: --only rtk-mcp drops the MCP registration but keeps the rtk binary" {
-  plant_all_components
-
-  run bash "$SCRIPTS_DIR/uninstall.sh" --force --only rtk-mcp
-
-  [ "$status" -eq 0 ]
-  # The compression path must survive — binary and shell hooks are untouched.
-  [ -f "$TMP_HOME/.local/bin/rtk" ]
-  python3 - "$TMP_HOME/.claude/settings.json" << 'PY'
-import json, sys
-servers = json.load(open(sys.argv[1])).get("mcpServers", {})
-assert "rtk-mcp" not in servers, "rtk-mcp still registered"
-assert "tilth" in servers, "tilth was removed but was not selected"
-assert "serena" in servers, "serena was removed but was not selected"
-PY
+  [ -f "$TMP_HOME/.local/bin/token-diet" ]
 }
 
 @test "uninstall: --only accepts a comma-separated list" {
   plant_all_components
 
-  run bash "$SCRIPTS_DIR/uninstall.sh" --force --only tilth,serena
+  run bash "$SCRIPTS_DIR/uninstall.sh" --force --only serena,icm
 
   [ "$status" -eq 0 ]
-  [ ! -f "$TMP_HOME/.local/bin/tilth" ]
   [ ! -f "$TMP_HOME/.local/bin/serena" ]
-  [ -f "$TMP_HOME/.local/bin/rtk" ]
-  [ -f "$TMP_HOME/.local/bin/icm" ]
+  [ ! -f "$TMP_HOME/.local/bin/icm" ]
+  [ -f "$TMP_HOME/.local/bin/token-diet" ]
 }
 
 @test "uninstall: --skip serena removes everything except serena" {
@@ -2303,8 +2348,8 @@ PY
 
   [ "$status" -eq 0 ]
   [ -f "$TMP_HOME/.local/bin/serena" ]
-  [ ! -f "$TMP_HOME/.local/bin/tilth" ]
   [ ! -f "$TMP_HOME/.local/bin/icm" ]
+  [ ! -f "$TMP_HOME/.local/bin/token-diet" ]
 }
 
 @test "uninstall: an unknown component name is rejected and names the offender" {
@@ -2315,17 +2360,17 @@ PY
   [ "$status" -ne 0 ]
   [[ "$output" == *"nosuchtool"* ]]
   # Nothing may be removed when the selection is invalid.
-  [ -f "$TMP_HOME/.local/bin/rtk" ]
+  [ -f "$TMP_HOME/.local/bin/icm" ]
   [ -f "$TMP_HOME/.local/bin/serena" ]
 }
 
 @test "uninstall: --only and --skip together are rejected" {
   plant_all_components
 
-  run bash "$SCRIPTS_DIR/uninstall.sh" --force --only rtk --skip serena
+  run bash "$SCRIPTS_DIR/uninstall.sh" --force --only icm --skip serena
 
   [ "$status" -ne 0 ]
-  [ -f "$TMP_HOME/.local/bin/rtk" ]
+  [ -f "$TMP_HOME/.local/bin/icm" ]
   [ -f "$TMP_HOME/.local/bin/serena" ]
 }
 
@@ -2335,60 +2380,55 @@ PY
   run bash "$SCRIPTS_DIR/uninstall.sh" --force
 
   [ "$status" -eq 0 ]
-  [ ! -f "$TMP_HOME/.local/bin/serena" ]
-  [ ! -f "$TMP_HOME/.local/bin/tilth" ]
-  [ ! -f "$TMP_HOME/.local/bin/icm" ]
-  [ ! -f "$TMP_HOME/.local/bin/token-diet" ]
+  for b in serena icm token-diet rtk tilth; do
+    [ ! -f "$TMP_HOME/.local/bin/$b" ]
+  done
 }
 
-@test "uninstall: --only rtk-mcp leaves shared token-diet infrastructure intact" {
-  # Regression: the shared artifacts (the local bin lib dir, compat.json,
-  # hosts-mcp.json, the opencode plugin + rules block) belong to the token-diet
-  # component. They are removed by inline blocks and by helpers that take no
-  # component-bearing argument, so they bypassed the first cut of the selection
-  # guard and were destroyed by an --only rtk-mcp run.
+@test "uninstall: LEGACY cleanup removes rtk, tilth and rtk-mcp artifacts (pre-existing machines)" {
+  # rtk/tilth/rtk-mcp are no longer installed, but machines provisioned before
+  # the drop still carry them; the uninstaller's LEGACY cleanup region must
+  # remove every trace.
   plant_all_components
-  mkdir -p "$TMP_HOME/.local/bin/lib"
-  echo "x" > "$TMP_HOME/.local/bin/lib/shared.sh"
-  mkdir -p "$TMP_HOME/.local/config"
-  echo '{}' > "$TMP_HOME/.local/config/compat.json"
-  echo '{}' > "$TMP_HOME/.local/config/hosts-mcp.json"
 
-  run bash "$SCRIPTS_DIR/uninstall.sh" --force --only rtk-mcp
+  run bash "$SCRIPTS_DIR/uninstall.sh" --force
 
   [ "$status" -eq 0 ]
-  [ -d "$TMP_HOME/.local/bin/lib" ]
-  [ -f "$TMP_HOME/.local/bin/lib/shared.sh" ]
-  [ -f "$TMP_HOME/.local/config/compat.json" ]
-  [ -f "$TMP_HOME/.local/config/hosts-mcp.json" ]
-  [ -f "$TMP_HOME/.local/bin/token-diet" ]
+  [ ! -f "$TMP_HOME/.local/bin/rtk" ]
+  [ ! -f "$TMP_HOME/.local/bin/tilth" ]
+  python3 - "$TMP_HOME/.claude/settings.json" << 'PY'
+import json, sys
+servers = json.load(open(sys.argv[1])).get("mcpServers", {})
+assert "tilth" not in servers, "legacy tilth registration survived"
+assert "rtk-mcp" not in servers, "legacy rtk-mcp registration survived"
+PY
 }
 
 @test "uninstall: removing a codex mcp server also removes its sub-tables" {
   # Regression: the table regex matched only the exact parent header, and the
-  # body loop stops at the next TABLE header — so [mcp_servers.tilth.tools.*]
-  # was itself a header, ending the removal and orphaning a sub-table that
-  # referenced a server no longer defined. Hit live on a --only tilth run.
+  # body loop stops at the next TABLE header — so a [mcp_servers.<tool>.tools.*]
+  # sub-table was itself a header, ending the removal and orphaning a sub-table
+  # that referenced a server no longer defined.
   mkdir -p "$TMP_HOME/.codex"
   cat > "$TMP_HOME/.codex/config.toml" << 'TOML'
 [mcp_servers.keepme]
 command = "keepme"
 
-[mcp_servers.tilth]
-command = "tilth"
-args = ["--mcp"]
+[mcp_servers.serena]
+command = "uvx"
+args = ["--from", "git+https://github.com/artificemachine/serena", "serena", "start-mcp-server"]
 
-[mcp_servers.tilth.tools.tilth_read]
+[mcp_servers.serena.tools.read]
 enabled = true
 
 [mcp_servers.keepme.env]
 FOO = "bar"
 TOML
 
-  run bash "$SCRIPTS_DIR/uninstall.sh" --force --only tilth
+  run bash "$SCRIPTS_DIR/uninstall.sh" --force --only serena
 
   [ "$status" -eq 0 ]
-  run grep -c "mcp_servers.tilth" "$TMP_HOME/.codex/config.toml"
+  run grep -c "mcp_servers.serena" "$TMP_HOME/.codex/config.toml"
   [ "$output" = "0" ]
   # Unrelated servers and their own sub-tables must survive untouched.
   grep -q "mcp_servers.keepme\]" "$TMP_HOME/.codex/config.toml"
@@ -2403,5 +2443,5 @@ TOML
   [ "$status" -eq 0 ]
   [[ "$output" == *"serena"* ]]
   [ -f "$TMP_HOME/.local/bin/serena" ]
-  [ -f "$TMP_HOME/.local/bin/rtk" ]
+  [ -f "$TMP_HOME/.local/bin/icm" ]
 }

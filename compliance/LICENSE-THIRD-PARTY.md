@@ -1,24 +1,23 @@
 # Third-Party Licenses
 
-The token-diet stack bundles four tools: RTK, tilth, and Serena are MIT-licensed; ICM is Apache-2.0.
+The token-diet stack bundles two tools: Serena is MIT-licensed; ICM is
+Apache-2.0. Context7 is a remote service registered by the installer — no
+Context7 code is bundled or vendored.
 
 ## Direct Dependencies
 
 | Component | Version | License | Source |
 |---|---|---|---|
-| RTK (Rust Token Killer) | 0.34.3 | MIT | https://github.com/rtk-ai/rtk |
-| tilth | 0.5.7 | MIT | https://github.com/jahala/tilth |
 | Serena | 0.1.4 | MIT | https://github.com/oraios/serena |
-| ICM (Infinite Context Memory) | 0.10.50 | Apache-2.0 | https://github.com/rtk-ai/icm |
+| ICM (Infinite Context Memory) | 0.10.50 | Apache-2.0 | https://github.com/artificemachine/icm |
 
 ## Transitive Dependencies
 
 Generate full dependency lists with:
 
 ```bash
-# Rust (RTK + tilth)
-cd forks/rtk && cargo license --json > ../../compliance/rtk-licenses.json
-cd forks/tilth && cargo license --json > ../../compliance/tilth-licenses.json
+# Rust (ICM)
+cd forks/icm && cargo license --json > ../../compliance/icm-licenses.json
 
 # Python (Serena)
 cd forks/serena && pip-licenses --format=json > ../../compliance/serena-licenses.json
@@ -30,8 +29,7 @@ Review before enterprise deployment:
 
 ```bash
 # Check for GPL/LGPL/AGPL in Rust deps
-cd forks/rtk && cargo license | grep -i "gpl"
-cd forks/tilth && cargo license | grep -i "gpl"
+cd forks/icm && cargo license | grep -i "gpl"
 
 # Check Python deps
 cd forks/serena && pip-licenses | grep -i "gpl"
@@ -44,5 +42,5 @@ cd forks/serena && pip-licenses | grep -i "gpl"
 - [ ] No GPL/AGPL — no copyleft contamination
 - [ ] No proprietary — all source available
 - [ ] SBOM generated and reviewed (compliance/SBOM.template.json)
-- [ ] `cargo license` clean for both Rust projects
+- [ ] `cargo license` clean for the Rust project
 - [ ] `pip-licenses` clean for Serena

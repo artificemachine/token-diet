@@ -1,34 +1,13 @@
 # Security Audit Checklist — token-diet
 
-Pre-deployment security review for the RTK + tilth + Serena stack.
+Pre-deployment security review for the Serena + ICM + Context7 stack.
+
+RTK and tilth were removed from the product (see CLAUDE.md) and their audit
+sections are gone with them. Context7 is a remote MCP service: no code is
+bundled, so its surface is the registration URL and the optional
+CONTEXT7_API_KEY the installer appends to it.
 
 ## Per-Tool Audit
-
-### RTK
-
-| Check | Command | Pass? |
-|---|---|---|
-| No known vulnerabilities | `cargo audit --file forks/rtk/Cargo.lock` | ✅ 0 vulnerabilities (164 deps scanned, 2026-04-01) |
-| No telemetry/analytics | `grep -r "telemetry\|analytics\|ping" forks/rtk/src/` | ⚠️ **Present but inert in a token-diet build.** `analytics` = local token savings only (`rtk gain`). Telemetry is **not** stripped: `forks/rtk/src/core/telemetry.rs` implements a documented usage ping with a real `ureq::post` (see `forks/rtk/docs/TELEMETRY.md`). Three independent gates keep it off here: (1) the endpoint comes from `option_env!("RTK_TELEMETRY_URL")` at compile time, and `install.sh` never sets it, so `TELEMETRY_URL` is `None` and the call is unreachable dead code; (2) `RTK_TELEMETRY_DISABLED=1` env opt-out; (3) `TelemetryConfig` defaults to `enabled=false`/`consent_given=None`, and `rtk init -g` never prompts non-interactively. Corrected 2026-08-19 — the prior "stripped" claim described a since-reverted upstream state. |
-| No hardcoded URLs | `grep -rn "http:/\|https:/" forks/rtk/src/ --include="*.rs"` | ✅ All URL matches are in test assertions or docstring examples — not production code |
-| No unwrap in production | `grep -rn "\.unwrap()" forks/rtk/src/ --include="*.rs"` (exclude tests) | ✅ All `.unwrap()` in `lazy_static!` regex init (established RTK pattern — panics on startup, not silently); remainder in `#[cfg(test)]` blocks |
-| No unsafe blocks | `grep -rn "unsafe" forks/rtk/src/ --include="*.rs"` | ✅ No `unsafe { }` blocks — matches are comments and a log message |
-| Shell injection review | Review `execute_command` and `Command::new` usage | ✅ `execute_command` takes `&[&str]` (no shell interpolation); `Command::new` uses literal tool names |
-| Exit code propagation | Verify child process exit codes are forwarded | ✅ `std::process::exit(code)` in run() functions |
-| All tests pass | `cargo test --manifest-path forks/rtk/Cargo.toml` | ⬜ Not run (requires full build) |
-| Clippy clean | `cargo clippy --manifest-path forks/rtk/Cargo.toml --all-targets` | ⬜ Not run (requires full build) |
-
-### tilth
-
-| Check | Command | Pass? |
-|---|---|---|
-| No known vulnerabilities | `cargo audit --file forks/tilth/Cargo.lock` | ✅ 0 vulnerabilities (93 deps scanned, 2026-04-01) |
-| No network calls | `grep -rn "reqwest\|hyper\|TcpStream\|http::" forks/tilth/src/` | ✅ No matches |
-| No telemetry | `grep -rn "telemetry\|analytics\|tracking" forks/tilth/src/` | ✅ Single match is in a code comment about cycle detection — not tracking code |
-| tree-sitter grammar review | Check compiled C grammars for injection | ⬜ Upstream tree-sitter grammars — review against upstream |
-| File access scoping | Verify reads are scoped to project directory | ⬜ Not verified in this pass |
-| Memory safety (mmap) | Review memmap2 usage for bounds checking | ⬜ Not verified in this pass |
-| All tests pass | `cargo test --manifest-path forks/tilth/Cargo.toml` | ⬜ Not run (requires full build) |
 
 ### Serena
 
@@ -64,7 +43,7 @@ Pre-deployment security review for the RTK + tilth + Serena stack.
 | Forks on internal Git server (no GitHub dependency) | ⬜ Submodule URLs still point to github.com/celstnblacc — update for air-gapped deploy |
 | Submodule URLs point to internal server | ⬜ Same as above |
 | ICM fork on internal Git server | ⬜ `forks/icm` submodule URL still points to github.com/celstnblacc/icm (pinned tag icm-v0.10.50) — needs internal mirror for air-gapped deploy |
-| Cargo.lock committed (pinned Rust deps) | ✅ Both `forks/rtk/Cargo.lock` and `forks/tilth/Cargo.lock` committed |
+| Cargo.lock committed (pinned Rust deps) | ✅ `forks/icm/Cargo.lock` committed |
 | Python deps pinned in requirements.txt | ✅ `forks/serena/uv.lock` committed |
 | Docker image built from pinned base (python:3.12-slim) | ⬜ Not verified in this pass |
 | No `latest` tags in production | ⬜ Not verified in this pass |
@@ -74,8 +53,6 @@ Pre-deployment security review for the RTK + tilth + Serena stack.
 
 | Check | Status |
 |---|---|
-| RTK: no outbound connections | ⚠️ Reachable: none. `ureq` **is** a compiled dependency (`forks/rtk/Cargo.toml`) and `telemetry.rs`/`telemetry_cmd.rs` contain real `ureq::post` calls, but token-diet never sets `RTK_TELEMETRY_URL` at build time, so both call sites compile to unreachable dead code in the shipped binary. Not "no network crates" — corrected 2026-08-19. |
-| tilth: no outbound connections | ✅ No network crates found in source |
 | Serena Docker: `network_mode: none` | ✅ Confirmed in compose.yml |
 | ICM: no outbound connections (`--local` build) | ✅ `--no-default-features --features tui` omits `fastembed`; binary cannot fetch a model. ⚠️ Online/default build downloads ~270 MB from HF Hub on `token-diet icm warmup` — disabled by default via `[embeddings] enabled=false` in the ICM config file |
 | LSP servers pre-installed (no auto-download) | ⬜ Requires smoke-test of Docker image |

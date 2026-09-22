@@ -72,11 +72,15 @@ def test_mcp_tools_list():
     assert "result" in resp
     assert "tools" in resp["result"]
     tools = {t["name"] for t in resp["result"]["tools"]}
-    assert "token_diet_health" in tools
-    assert "token_diet_savings" in tools
-    assert "token_diet_budget" in tools
-    assert "token_diet_loops" in tools
-    assert "token_diet_route" in tools
+    # Exact set, not membership: the two removed tools (token_diet_savings,
+    # token_diet_loops) backed the retired compression counter. Pinning the set
+    # makes a re-introduction or a silent removal fail here.
+    assert tools == {
+        "token_diet_health",
+        "token_diet_status",
+        "token_diet_budget",
+        "token_diet_route",
+    }
 
 def test_mcp_tools_call_health():
     req = {

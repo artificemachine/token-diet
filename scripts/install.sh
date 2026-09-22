@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# token-diet installer — RTK + tilth + Serena + ICM on macOS/Linux
+# token-diet installer — Serena + ICM + Context7 + token-diet CLI on macOS/Linux
 # Supports: Claude Code, Codex CLI, OpenCode, Copilot CLI, VS Code, Gemini CLI
 # Modes: --online (default, installs from fork repos) or --local (builds from forks/ submodules, no internet)
 #
 # Usage:
-#   bash install.sh                   # install all from upstream
-#   bash install.sh --local           # install from local forks/dist
-#   bash install.sh --rtk-only        # install one tool
-#   bash install.sh --verify          # check status
+#   bash install.sh                      # install all from upstream
+#   bash install.sh --local              # install from local forks/dist
+#   bash install.sh --context7-only      # install one component
+#   bash install.sh --verify             # check status
 
 set -euo pipefail
 
@@ -62,8 +62,6 @@ _td_on_error() {
 trap '_td_on_error $? $LINENO' ERR
 
 # --- Configuration -----------------------------------------------------------
-RTK_REPO="https://github.com/artificemachine/rtk"
-TILTH_REPO="https://github.com/artificemachine/tilth"
 SERENA_REPO="https://github.com/artificemachine/serena"
 ICM_REPO="https://github.com/artificemachine/icm"
 
@@ -74,8 +72,6 @@ ICM_REPO="https://github.com/artificemachine/icm"
 # install.sh runs outside the git checkout (curl|sh of the bare script); each
 # use site falls back to floating HEAD with a warning.
 _pin_rev() { git -C "$PROJECT_ROOT" rev-parse "HEAD:forks/$1" 2>/dev/null || true; }
-RTK_REV="$(_pin_rev rtk)"
-TILTH_REV="$(_pin_rev tilth)"
 SERENA_REV="$(_pin_rev serena)"
 ICM_REV="$(_pin_rev icm)"
 # uvx/pip git ref used across every Serena launcher + MCP registration site.
@@ -123,7 +119,7 @@ rotate_log() {
 # Runs clippy + tests before cargo install to catch broken builds early.
 # Skipped when SKIP_TESTS=true (--skip-tests flag).
 verify_local_build() {
-  local name="$1"        # display name, e.g. "RTK"
+  local name="$1"        # display name, e.g. "ICM"
   local manifest="$2"    # path to Cargo.toml
 
   if [ "${SKIP_TESTS:-false}" = "true" ]; then
@@ -253,7 +249,7 @@ ensure_git() {
 
   # Initialize submodules so forks/ is populated for --local builds
   if [ -f "$PROJECT_ROOT/.gitmodules" ]; then
-    info "Initializing submodules (forks/rtk, forks/tilth, forks/serena, forks/icm)..."
+    info "Initializing submodules (forks/serena, forks/icm)..."
     git -C "$PROJECT_ROOT" submodule update --init --recursive 2>&1 \
       | grep -E "Cloning|already|error" || true
     ok "Submodules ready"
@@ -506,276 +502,14 @@ confirm_hosts() {
   fi
 }
 
-# --- RTK ----------------------------------------------------------------------
-install_rtk() {
-  header "RTK (Rust Token Killer)"
-
-  if check_command rtk && rtk gain --help &>/dev/null; then
-    ok "RTK already installed: $(rtk --version 2>/dev/null)"
-    info "Upgrading..."
-  elif check_command rtk; then
-    warn "Wrong 'rtk' detected (Rust Type Kit?). Reinstalling."
-  fi
-
-  if $LOCAL_MODE; then
-    verify_local_build "RTK" "$PROJECT_ROOT/forks/rtk/Cargo.toml"
-    if [ "${DRY_RUN:-false}" = "true" ]; then
-      dryrun "cargo install --path $PROJECT_ROOT/forks/rtk --force"
-    else
-      info "Building RTK from fork (no internet)..."
-      cargo install --path "$PROJECT_ROOT/forks/rtk" --force 2>&1 | show_output
-      ok "RTK built and installed from fork"
-    fi
-  else
-    if [ -n "$RTK_REV" ]; then
-      if [ "${DRY_RUN:-false}" = "true" ]; then
-        dryrun "cargo install --git $RTK_REPO --rev $RTK_REV --force"
-      else
-        cargo install --git "$RTK_REPO" --rev "$RTK_REV" --force 2>&1 | show_output
-        ok "RTK installed (pinned $RTK_REV): $(rtk --version 2>/dev/null)"
-      fi
-    else
-      warn "RTK: no pinned rev (not a git checkout) — installing from upstream HEAD"
-      if [ "${DRY_RUN:-false}" = "true" ]; then
-        dryrun "cargo install --git $RTK_REPO --force"
-      else
-        cargo install --git "$RTK_REPO" --force 2>&1 | show_output
-        ok "RTK installed: $(rtk --version 2>/dev/null)"
-      fi
-    fi
-  fi
-
-  # Symlink cargo binary into ~/.local/bin so it takes effect on PATH without
-  # restarting the shell. macOS security policy kills copied Rust binaries in
-  # ~/.local/bin (SIGKILL) but honours symlinks into ~/.cargo/bin.
-  local cargo_rtk="$HOME/.cargo/bin/rtk"
-  local local_rtk="$HOME/.local/bin/rtk"
-  if [ -f "$cargo_rtk" ] && [ "${DRY_RUN:-false}" != "true" ]; then
-    mkdir -p "$HOME/.local/bin"
-    ln -sf "$cargo_rtk" "$local_rtk"
-    ok "RTK symlinked: $local_rtk → $cargo_rtk"
-  fi
-
-  # Verify
-  if ! rtk gain --help &>/dev/null; then
-    warn "RTK verification failed"
-    return
-  fi
-  ok "RTK verification passed"
-
-  # Host integration
-  info "Configuring RTK for detected hosts..."
-
-  if $HAS_CLAUDE && $HAS_OPENCODE; then
-    [ "${DRY_RUN:-false}" = "true" ] \
-      && dryrun "rtk init -g --opencode" \
-      || { rtk init -g --opencode 2>/dev/null && ok "RTK: Claude Code + Codex + OpenCode (global)" || warn "RTK init failed (may already be configured)"; }
-  elif $HAS_CLAUDE; then
-    [ "${DRY_RUN:-false}" = "true" ] \
-      && dryrun "rtk init -g" \
-      || { rtk init -g 2>/dev/null && ok "RTK: Claude Code + Codex (global)" || warn "RTK init failed (may already be configured)"; }
-  fi
-
-  if $HAS_CODEX && ! $HAS_CLAUDE; then
-    [ "${DRY_RUN:-false}" = "true" ] \
-      && dryrun "rtk init --codex" \
-      || { rtk init --codex 2>/dev/null && ok "RTK: Codex CLI" || warn "RTK Codex init failed"; }
-  fi
-
-  if $HAS_OPENCODE && ! $HAS_CLAUDE; then
-    [ "${DRY_RUN:-false}" = "true" ] \
-      && dryrun "rtk init -g --opencode" \
-      || { rtk init -g --opencode 2>/dev/null && ok "RTK: OpenCode" || warn "RTK OpenCode init failed"; }
-  fi
-
-  # Copilot CLI uses the same hook system as Claude Code
-  if $HAS_COPILOT; then
-    ok "RTK: Copilot CLI (uses same hooks as Claude Code)"
-  fi
-
-  # Cowork (Claude Desktop) — no hook mechanism; write an awareness doc instead.
-  # RTK works via shell hooks that rewrite Bash tool calls. Claude Desktop does not
-  # support the same hook dispatch, so we write a markdown doc that instructs the
-  # LLM to manually prefix commands with `rtk`.
-  if $HAS_COWORK; then
-    local cowork_dir
-    cowork_dir="$(dirname "$COWORK_CFG")"
-    local rtk_doc="$cowork_dir/rtk-awareness.md"
-    if [ "${DRY_RUN:-false}" = "true" ]; then
-      dryrun "Write RTK awareness doc to $rtk_doc"
-    else
-      mkdir -p "$cowork_dir"
-      cat > "$rtk_doc" << 'RTKDOC'
-# RTK - Rust Token Killer (Cowork / Claude Desktop)
-
-**Usage**: Token-optimized CLI proxy for shell commands (60-90% savings).
-
-## Rule
-
-Always prefix shell commands with `rtk`. RTK compresses output to save tokens.
-If RTK has no filter for a command, it passes through unchanged — always safe to use.
-
-Examples:
-
-```bash
-rtk git status
-rtk cargo test
-rtk npm run build
-rtk pytest -q
-rtk docker ps
-rtk ls -la
-```
-
-Even in command chains with `&&`, prefix each command:
-```bash
-rtk git add . && rtk git commit -m "msg" && rtk git push
-```
-
-## Meta Commands
-
-```bash
-rtk gain            # Token savings analytics
-rtk gain --history  # Recent command savings history
-rtk discover        # Analyze sessions for missed RTK usage
-rtk proxy <cmd>     # Run raw command without filtering (debugging)
-```
-
-## Verification
-
-```bash
-rtk --version
-rtk gain
-which rtk
-```
-RTKDOC
-      ok "RTK: Cowork awareness doc written ($rtk_doc)"
-      info "  Cowork has no hook support — LLM instructed to prefix commands with 'rtk'"
-    fi
-  fi
-
-  # Gemini CLI — rtk init --gemini registers the shell hook natively
-  if $HAS_GEMINI; then
-    if [ "${DRY_RUN:-false}" = "true" ]; then
-      dryrun "rtk init --gemini"
-    else
-      rtk init --gemini 2>/dev/null \
-        && ok "RTK: Gemini CLI" \
-        || warn "RTK: Gemini CLI init failed (may already be configured)"
-    fi
-  fi
-}
-
-# --- tilth --------------------------------------------------------------------
-install_tilth() {
-  header "tilth (smart code reader)"
-
-  if check_command tilth; then
-    ok "tilth already installed: $(tilth --version 2>/dev/null || echo 'unknown')"
-    info "Upgrading..."
-  fi
-
-  if $LOCAL_MODE; then
-    verify_local_build "tilth" "$PROJECT_ROOT/forks/tilth/Cargo.toml"
-    if [ "${DRY_RUN:-false}" = "true" ]; then
-      dryrun "cargo install --path $PROJECT_ROOT/forks/tilth --force"
-    else
-      info "Building tilth from fork (no internet)..."
-      cargo install --path "$PROJECT_ROOT/forks/tilth" --force 2>&1 | show_output
-      ok "tilth built and installed from fork"
-    fi
-  else
-    if [ -n "$TILTH_REV" ]; then
-      if [ "${DRY_RUN:-false}" = "true" ]; then
-        dryrun "cargo install --git $TILTH_REPO --rev $TILTH_REV tilth --force"
-      else
-        # The tilth repo also carries a fuzz/ package (tilth-fuzz); cargo install
-        # --git searches the whole cloned repo for any Cargo.toml with a [[bin]],
-        # so an unqualified install is ambiguous between the two. Pin the package
-        # name explicitly, same as the icm-cli install below.
-        cargo install --git "$TILTH_REPO" --rev "$TILTH_REV" tilth --force 2>&1 | show_output
-        ok "tilth installed (pinned $TILTH_REV): $(tilth --version 2>/dev/null)"
-      fi
-    else
-      warn "tilth: no pinned rev (not a git checkout) — installing from upstream HEAD"
-      if [ "${DRY_RUN:-false}" = "true" ]; then
-        dryrun "cargo install --git $TILTH_REPO tilth --force"
-      else
-        cargo install --git "$TILTH_REPO" tilth --force 2>&1 | show_output
-        ok "tilth installed: $(tilth --version 2>/dev/null)"
-      fi
-    fi
-  fi
-
-  # Symlink cargo binary into ~/.local/bin — same reason as RTK above.
-  local cargo_tilth="$HOME/.cargo/bin/tilth"
-  local local_tilth="$HOME/.local/bin/tilth"
-  if [ -f "$cargo_tilth" ] && [ "${DRY_RUN:-false}" != "true" ]; then
-    mkdir -p "$HOME/.local/bin"
-    ln -sf "$cargo_tilth" "$local_tilth"
-    ok "tilth symlinked: $local_tilth → $cargo_tilth"
-  fi
-
-  # Host integration — tilth install <host>
-  # Note: Cowork (Claude Desktop) is handled via JSON injection in install_serena,
-  # not via tilth install, as it lacks a CLI integration path.
-  local hosts=()
-  $HAS_CLAUDE   && hosts+=("claude-code")
-  $HAS_CODEX    && hosts+=("codex")
-  $HAS_OPENCODE && hosts+=("opencode")
-  $HAS_COPILOT  && hosts+=("copilot")
-  $HAS_VSCODE   && hosts+=("vscode")
-
-  # TILTH_KEYLOGGER_WRAPPER makes tilth install write its MCP entry as
-  # `keylogger-mcp-wrapper --name tilth -- <original cmd>` instead of the bare
-  # binary — keeps every host's tilth entry traffic-captured by the bridge.
-  # The env var is optional (upstream tilth ignores it when unset), so users
-  # who run tilth install manually without the wrapper still get a working MCP.
-  local tilth_keylogger_wrapper
-  tilth_keylogger_wrapper="$(command -v keylogger-mcp-wrapper 2>/dev/null || true)"
-  if [ -n "$tilth_keylogger_wrapper" ]; then
-    export TILTH_KEYLOGGER_WRAPPER="$tilth_keylogger_wrapper"
-  fi
-
-  for host in "${hosts[@]}"; do
-    if [ "${DRY_RUN:-false}" = "true" ]; then
-      dryrun "tilth install $host (wrapped via $tilth_keylogger_wrapper)"
-    else
-      tilth install "$host" 2>/dev/null \
-        && ok "tilth MCP: $host" \
-        || warn "tilth MCP: $host failed (may already exist)"
-    fi
-done
-
-  unset TILTH_KEYLOGGER_WRAPPER
-
-  # Gemini CLI — gemini mcp add --scope user
-  # NOTE: tilth MCP subcommand is --mcp (not `mcp`); see forks/tilth/ARCHITECTURE.md §143.
-  if $HAS_GEMINI; then
-    if [ "${DRY_RUN:-false}" = "true" ]; then
-      dryrun "gemini mcp add --scope user tilth -- tilth --mcp"
-    elif gemini mcp list 2>/dev/null | grep -q '"tilth"'; then
-      ok "tilth MCP: Gemini CLI (already configured)"
-    else
-      gemini mcp add --scope user tilth -- tilth --mcp 2>/dev/null \
-        && ok "tilth MCP: Gemini CLI" \
-        || warn "tilth MCP: Gemini CLI setup failed"
-    fi
-  fi
-
-  if [ ${#hosts[@]} -eq 0 ] && ! $HAS_GEMINI; then
-    warn "tilth: no AI host detected, skipping MCP registration"
-  fi
-}
-
 # --- Serena -------------------------------------------------------------------
 install_serena() {
   header "Serena (IDE-like symbol navigation)"
 
-  # SERENA_KEYLOGGER_WRAPPER makes install write serena + tilth MCP entries as
-  # `keylogger-mcp-wrapper --name X -- <original cmd>` instead of the bare
-  # binary — keeps every host's entries traffic-captured by the bridge (same
-  # pattern as TILTH_KEYLOGGER_WRAPPER in install_tilth). The env var is
-  # optional: unset → bare commands (upstream-compatible).
+  # SERENA_KEYLOGGER_WRAPPER makes install write the serena MCP entry as
+  # `keylogger-mcp-wrapper --name serena -- <original cmd>` instead of the bare
+  # binary — keeps the host's entry traffic-captured by the bridge. The env var
+  # is optional: unset → bare command (upstream-compatible).
   local serena_keylogger_wrapper
   serena_keylogger_wrapper="$(command -v keylogger-mcp-wrapper 2>/dev/null || true)"
   if [ -n "$serena_keylogger_wrapper" ]; then
@@ -961,10 +695,6 @@ TOML
     "serena": {
       "command": "uvx",
       "args": ["--from", "${SERENA_SRC}", "serena", "start-mcp-server", "--context=ide", "--open-web-dashboard", "false", "--project-from-cwd"]
-    },
-    "tilth": {
-      "command": "tilth",
-      "args": ["--mcp"]
     }
   }
 }
@@ -989,7 +719,7 @@ JSON
       oc_cfg="$HOME/.config/opencode/opencode.json"
     fi
     if [ "${DRY_RUN:-false}" = "true" ]; then
-      dryrun "Write mcp.serena + mcp.tilth entries to $oc_cfg"
+      dryrun "Write mcp.serena entry to $oc_cfg"
     elif $LOCAL_MODE; then
       TD_LIB_DIR="$SCRIPT_DIR/lib" python3 - "$oc_cfg" "$PROJECT_ROOT" <<'PYEOF'
 import os, sys
@@ -999,9 +729,9 @@ import tdconfig
 cfg, project_root = sys.argv[1], sys.argv[2]
 
 # SERENA_KEYLOGGER_WRAPPER (exported by install.sh when the keylogger-mcp-wrapper
-# binary exists) makes install write MCP entries as
-#   {type: local, command: <wrapper>, args: [--name, X, --, <inner...>]}
-# instead of the bare unwrapped command — keeps every host's serena/tilth entry
+# binary exists) makes install write the MCP entry as
+#   {type: local, command: [<wrapper>, --name, serena, --, <inner...>]}
+# instead of the bare unwrapped command — keeps the host's serena entry
 # traffic-captured by the langfuse-bridge. Unset → bare command (backward compat).
 WRAPPER = os.environ.get("SERENA_KEYLOGGER_WRAPPER", "")
 
@@ -1023,15 +753,14 @@ def mutate(data):
     data.setdefault("mcp", {})
     # Strict Installation Decoupling (CLAUDE.md §"Strict Installation Decoupling"):
     # NEVER write forks/-relative absolute paths into a host MCP config. The
-    # install_serena() and install_tilth() functions above already provision
-    # bare commands at XDG-stable paths (~/.local/bin/serena, ~/.local/bin/tilth).
-    # We register the bare names + their MCP subcommand arguments only.
+    # install_serena() function above already provisions the bare command at
+    # the XDG-stable path ~/.local/bin/serena. We register the bare name + its
+    # MCP subcommand arguments only.
     data["mcp"]["serena"] = mcp_entry(
         "serena",
         ["serena", "start-mcp-server",
          "--context=ide", "--open-web-dashboard", "false", "--project-from-cwd"],
     )
-    data["mcp"]["tilth"] = mcp_entry("tilth", ["tilth", "--mcp"])
 
 try:
     tdconfig.update_json(cfg, mutate)
@@ -1040,7 +769,7 @@ except tdconfig.ConfigError as _e:
     print(f"[token-diet] ABORT: {cfg} is malformed JSON ({_e}); backed up to {_q}. Refusing to overwrite existing config — fix it and re-run.", file=sys.stderr)
     sys.exit(3)
 PYEOF
-      ok "Serena + tilth MCP: OpenCode local ($oc_cfg)"
+      ok "Serena MCP: OpenCode local ($oc_cfg)"
     else
       TD_LIB_DIR="$SCRIPT_DIR/lib" python3 - "$oc_cfg" "${SERENA_SRC}" <<'PYEOF'
 import os, sys
@@ -1076,7 +805,6 @@ def mutate(data):
         ["uvx", "--from", serena_src, "serena", "start-mcp-server",
          "--context=ide", "--open-web-dashboard", "false", "--project-from-cwd"],
     )
-    data["mcp"]["tilth"] = mcp_entry("tilth", ["tilth", "--mcp"])
 
 try:
     tdconfig.update_json(cfg, mutate)
@@ -1085,7 +813,7 @@ except tdconfig.ConfigError as _e:
     print(f"[token-diet] ABORT: {cfg} is malformed JSON ({_e}); backed up to {_q}. Refusing to overwrite existing config — fix it and re-run.", file=sys.stderr)
     sys.exit(3)
 PYEOF
-      ok "Serena + tilth MCP: OpenCode ($oc_cfg)"
+      ok "Serena MCP: OpenCode ($oc_cfg)"
     fi
     inject_opencode_rules
   fi
@@ -1093,10 +821,10 @@ PYEOF
     ok "Serena: Copilot CLI uses VS Code MCP config (shared)"
   fi
 
-  # Cowork (Claude Desktop) — inject mcpServers.serena + mcpServers.tilth
+  # Cowork (Claude Desktop) — inject mcpServers.serena
   if $HAS_COWORK; then
     if [ "${DRY_RUN:-false}" = "true" ]; then
-      dryrun "Write mcpServers.serena + mcpServers.tilth to $COWORK_CFG"
+      dryrun "Write mcpServers.serena to $COWORK_CFG"
     else
       if $LOCAL_MODE; then
         TD_LIB_DIR="$SCRIPT_DIR/lib" python3 - "$COWORK_CFG" <<'PYEOF'
@@ -1153,31 +881,7 @@ except tdconfig.ConfigError as _e:
     sys.exit(3)
 PYEOF
       fi
-
-      # Also register tilth if installed
-      if check_command tilth; then
-        TD_LIB_DIR="$SCRIPT_DIR/lib" python3 - "$COWORK_CFG" <<'PYEOF'
-import os, sys
-sys.path.insert(0, os.environ["TD_LIB_DIR"])
-import tdconfig
-
-cfg = sys.argv[1]
-
-def mutate(data):
-    data.setdefault("mcpServers", {})
-    data["mcpServers"]["tilth"] = {"command": "tilth", "args": ["--mcp"]}
-
-try:
-    tdconfig.update_json(cfg, mutate)
-except tdconfig.ConfigError as _e:
-    _q = tdconfig.quarantine(cfg)
-    print(f"[token-diet] ABORT: {cfg} is malformed JSON ({_e}); backed up to {_q}. Refusing to overwrite existing config — fix it and re-run.", file=sys.stderr)
-    sys.exit(3)
-PYEOF
-        ok "Serena + tilth MCP: Cowork / Claude Desktop ($COWORK_CFG)"
-      else
-        ok "Serena MCP: Cowork / Claude Desktop ($COWORK_CFG)"
-      fi
+      ok "Serena MCP: Cowork / Claude Desktop ($COWORK_CFG)"
     fi
   fi
 
@@ -1228,8 +932,8 @@ PYEOF
 
 # --- ICM ----------------------------------------------------------------------
 # ICM (Infinite Context Memory) — cross-tool persistent memory MCP server.
-# Build/install mirrors RTK (cargo + ~/.local/bin symlink for the macOS SIGKILL
-# issue). MCP registration mirrors Serena (self-written config entries). We never
+# Build/install uses cargo + a ~/.local/bin symlink (works around the macOS
+# SIGKILL issue for ~/.cargo binaries copied out of place). MCP registration mirrors Serena (self-written config entries). We never
 # call `icm init`: it bakes absolute current_exe() paths into ~20 host configs and
 # would violate the install-decoupling rule. We register the bare-PATH command
 # `icm serve --compact` ourselves instead.
@@ -1276,7 +980,8 @@ install_icm() {
     fi
   fi
 
-  # Symlink cargo binary into ~/.local/bin — same macOS SIGKILL reason as RTK.
+  # Symlink cargo binary into ~/.local/bin — macOS SIGKILL mitigation (see
+  # verify_local_build consumers above).
   local cargo_icm="$HOME/.cargo/bin/icm"
   local local_icm="$HOME/.local/bin/icm"
   if [ -f "$cargo_icm" ] && [ "${DRY_RUN:-false}" != "true" ]; then
@@ -1520,14 +1225,198 @@ PYEOF
   fi
 }
 
+# --- Context7 -----------------------------------------------------------------
+# Context7 — up-to-date library documentation, served as a REMOTE HTTP MCP
+# server. No binary, no build: registration only. The endpoint defaults to
+# https://mcp.context7.com/mcp and is overridable via CONTEXT7_URL; when
+# CONTEXT7_API_KEY is set it is appended as a query parameter. The key is
+# written into host configs (that is where it must live) but is never echoed
+# to the terminal — every user-visible message uses a <context7-url> placeholder.
+install_context7() {
+  header "Context7 (up-to-date library docs MCP)"
+
+  local context7_url="${CONTEXT7_URL:-https://mcp.context7.com/mcp}"
+  if [ -n "${CONTEXT7_API_KEY:-}" ]; then
+    context7_url="${context7_url}?apiKey=${CONTEXT7_API_KEY}"
+  fi
+
+  info "Registering Context7 MCP server for detected hosts..."
+
+  # Claude Code — `claude mcp add --transport http` (idempotent via `claude mcp get`)
+  if $HAS_CLAUDE; then
+    if [ "${DRY_RUN:-false}" = "true" ]; then
+      dryrun "claude mcp add --scope user --transport http context7 <context7-url>"
+    elif claude mcp get context7 &>/dev/null; then
+      ok "Context7 MCP: Claude Code (already configured)"
+    else
+      claude mcp add --scope user --transport http context7 "$context7_url" 2>/dev/null \
+        && ok "Context7 MCP: Claude Code" \
+        || warn "Context7 MCP: Claude Code setup failed"
+    fi
+  fi
+
+  # Codex CLI — anchor to the actual TOML table header, never a loose substring.
+  if $HAS_CODEX; then
+    local codex_config="$HOME/.codex/config.toml"
+    if [ -f "$codex_config" ] && grep -Eq '^\[mcp_servers\.context7\]' "$codex_config" 2>/dev/null; then
+      ok "Context7 MCP: Codex CLI (already configured)"
+    elif [ "${DRY_RUN:-false}" = "true" ]; then
+      dryrun "Append [mcp_servers.context7] block to $codex_config"
+    else
+      mkdir -p "$HOME/.codex"
+      {
+        printf '\n# Context7 MCP server (added by token-diet)\n[mcp_servers.context7]\nurl = "%s"\n' "$context7_url"
+      } >> "$codex_config"
+      td_record_mutation "$codex_config"
+      ok "Context7 MCP: Codex CLI"
+    fi
+  fi
+
+  # VS Code — merge into the shared template (servers.context7). A merge (not a
+  # heredoc) so --context7-only populates it even when Serena did not create it.
+  if $HAS_VSCODE; then
+    local vscode_template="$HOME/.config/token-diet/vscode-mcp.template.json"
+    if [ "${DRY_RUN:-false}" = "true" ]; then
+      dryrun "Merge servers.context7 into $vscode_template"
+    else
+      mkdir -p "$(dirname "$vscode_template")"
+      python3 - "$vscode_template" "$context7_url" <<'PYEOF'
+import json, os, sys, pathlib, tempfile
+def atomic_write(path, text):
+    d = os.path.dirname(path) or "."
+    fd, tmp = tempfile.mkstemp(dir=d, prefix=".td-", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w") as f:
+            f.write(text)
+            f.flush()
+            os.fsync(f.fileno())
+        try:
+            os.chmod(tmp, os.stat(path).st_mode & 0o7777)
+        except OSError:
+            pass
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+p = pathlib.Path(sys.argv[1])
+url = sys.argv[2]
+try:
+    data = json.loads(p.read_text())
+except FileNotFoundError:
+    data = {}
+except (json.JSONDecodeError, ValueError) as _e:
+    import shutil, time
+    _bak = str(p) + ".corrupt-" + time.strftime("%Y%m%d-%H%M%S")
+    shutil.copy2(str(p), _bak)
+    print(f"[token-diet] ABORT: {p} is malformed JSON ({_e}); backed up to {_bak}. Refusing to overwrite existing config — fix it and re-run.", file=sys.stderr)
+    sys.exit(3)
+data.setdefault("servers", {})
+data["servers"]["context7"] = {"type": "http", "url": url}
+atomic_write(str(p), json.dumps(data, indent=2) + "\n")
+PYEOF
+      td_record_mutation "$vscode_template"
+      ok "Context7 MCP: VS Code template ($vscode_template)"
+    fi
+  fi
+
+  # OpenCode — remote HTTP entry in the "mcp" map.
+  if $HAS_OPENCODE; then
+    local oc_cfg
+    if [ -f "$HOME/.config/opencode/opencode.json" ]; then
+      oc_cfg="$HOME/.config/opencode/opencode.json"
+    elif [ -f "$HOME/.opencode.json" ]; then
+      oc_cfg="$HOME/.opencode.json"
+    else
+      mkdir -p "$HOME/.config/opencode"
+      oc_cfg="$HOME/.config/opencode/opencode.json"
+    fi
+    if [ "${DRY_RUN:-false}" = "true" ]; then
+      dryrun "Write mcp.context7 to $oc_cfg"
+    else
+      TD_LIB_DIR="$SCRIPT_DIR/lib" python3 - "$oc_cfg" "$context7_url" <<'PYEOF'
+import os, sys
+sys.path.insert(0, os.environ["TD_LIB_DIR"])
+import tdconfig
+
+cfg, url = sys.argv[1], sys.argv[2]
+
+def mutate(data):
+    data.setdefault("mcp", {})
+    data["mcp"]["context7"] = {"type": "http", "url": url, "enabled": True}
+
+try:
+    tdconfig.update_json(cfg, mutate)
+except tdconfig.ConfigError as _e:
+    _q = tdconfig.quarantine(cfg)
+    print(f"[token-diet] ABORT: {cfg} is malformed JSON ({_e}); backed up to {_q}. Refusing to overwrite existing config — fix it and re-run.", file=sys.stderr)
+    sys.exit(3)
+PYEOF
+      td_record_mutation "$oc_cfg"
+      ok "Context7 MCP: OpenCode ($oc_cfg)"
+    fi
+  fi
+
+  # Cowork (Claude Desktop) — remote HTTP entry in the "mcpServers" map.
+  if $HAS_COWORK; then
+    if [ "${DRY_RUN:-false}" = "true" ]; then
+      dryrun "Write mcpServers.context7 to $COWORK_CFG"
+    else
+      TD_LIB_DIR="$SCRIPT_DIR/lib" python3 - "$COWORK_CFG" "$context7_url" <<'PYEOF'
+import os, sys
+sys.path.insert(0, os.environ["TD_LIB_DIR"])
+import tdconfig
+
+cfg, url = sys.argv[1], sys.argv[2]
+
+def mutate(data):
+    data.setdefault("mcpServers", {})
+    data["mcpServers"]["context7"] = {"type": "http", "url": url}
+
+try:
+    tdconfig.update_json(cfg, mutate)
+except tdconfig.ConfigError as _e:
+    _q = tdconfig.quarantine(cfg)
+    print(f"[token-diet] ABORT: {cfg} is malformed JSON ({_e}); backed up to {_q}. Refusing to overwrite existing config — fix it and re-run.", file=sys.stderr)
+    sys.exit(3)
+PYEOF
+      td_record_mutation "$COWORK_CFG"
+      ok "Context7 MCP: Cowork / Claude Desktop ($COWORK_CFG)"
+    fi
+  fi
+
+  if $HAS_COPILOT; then
+    ok "Context7: Copilot CLI uses VS Code MCP config (shared)"
+  fi
+
+  # Gemini CLI — same `gemini mcp add --scope user` pattern as Serena/ICM,
+  # adapted for a remote HTTP endpoint.
+  if $HAS_GEMINI; then
+    if [ "${DRY_RUN:-false}" = "true" ]; then
+      dryrun "gemini mcp add --scope user --transport http context7 <context7-url>"
+    elif gemini mcp list 2>/dev/null | grep -q '"context7"'; then
+      ok "Context7 MCP: Gemini CLI (already configured)"
+    else
+      gemini mcp add --scope user --transport http context7 "$context7_url" 2>/dev/null \
+        && ok "Context7 MCP: Gemini CLI" \
+        || warn "Context7 MCP: Gemini CLI setup failed"
+    fi
+  fi
+
+  if ! $HAS_CLAUDE && ! $HAS_CODEX && ! $HAS_OPENCODE && ! $HAS_COPILOT && ! $HAS_VSCODE && ! $HAS_COWORK && ! $HAS_GEMINI; then
+    warn "Context7: no AI host detected, skipping MCP registration"
+  fi
+}
+
 # --- Overlap fix --------------------------------------------------------------
+# Writes Serena's project template with the tool-overlap rules that keep agents
+# off duplicate code-reading paths (historically these rules stripped entries
+# overlapping the retired code-reader; the template now only trims Serena's own
+# redundant read path).
 configure_dedup() {
   header "Overlap fix (Serena dedup)"
-
-  if ! check_command tilth; then
-    info "tilth not installed — skipping dedup config"
-    return 0
-  fi
 
   local template_dir="$HOME/.config/serena"
   local template_file="$template_dir/project.local.template.yml"
@@ -1563,26 +1452,6 @@ verify_stack() {
   local all_ok=true
 
   # Tools
-  if check_command rtk && rtk gain --help &>/dev/null; then
-    ok "RTK ............. $(rtk --version 2>/dev/null)"
-  else
-    warn "RTK ............. not installed or wrong version"
-    all_ok=false
-  fi
-
-  if check_command tilth; then
-    ok "tilth ........... $(tilth --version 2>/dev/null || echo 'installed')"
-    local tilth_codex_issue
-    tilth_codex_issue="$(codex_mcp_issue "tilth")"
-    if [ -n "$tilth_codex_issue" ]; then
-      warn "$tilth_codex_issue"
-      all_ok=false
-    fi
-  else
-    warn "tilth ........... not installed"
-    all_ok=false
-  fi
-
   if check_command icm; then
     ok "ICM ............. $(icm --version 2>/dev/null || echo 'installed')"
     local icm_codex_issue
@@ -1619,6 +1488,31 @@ verify_stack() {
     all_ok=false
   fi
 
+  # Context7 — registration-only component (remote HTTP MCP; no binary).
+  # Verify the registration landed in a host config file. Local grep only —
+  # never a network call to the Context7 URL.
+  local context7_registered=false
+  local _c7cfg
+  for _c7cfg in \
+      "$HOME/.claude.json" \
+      "$HOME/.codex/config.toml" \
+      "$HOME/.config/opencode/opencode.json" \
+      "$HOME/.opencode.json" \
+      "$HOME/.config/token-diet/vscode-mcp.template.json" \
+      "$COWORK_CFG" \
+      "$HOME/.gemini/settings.json"; do
+    if [ -f "$_c7cfg" ] && grep -q 'context7' "$_c7cfg" 2>/dev/null; then
+      context7_registered=true
+      break
+    fi
+  done
+  if $context7_registered; then
+    ok "Context7 ........ registered"
+  else
+    warn "Context7 ........ not registered in any host config"
+    all_ok=false
+  fi
+
   echo ""
 
   # Hosts
@@ -1645,173 +1539,16 @@ verify_stack() {
   |  Claude Code / Codex / OpenCode / Copilot CLI / VS Code          |
   |            + Cowork (Claude Desktop) + Gemini CLI                 |
   +-------------------------------------------------------------------+
-         |              |              |               |
-    Code reading   Refactoring   Command output   Persistent memory
-         |              |              |               |
-    +--------+    +---------+    +--------+      +--------+
-    | tilth  |    | Serena  |    |  RTK   |      |  ICM   |
-    | (fast) |    |  (deep) |    |(filter)|      |(memory)|
-    +--------+    +---------+    +--------+      +--------+
-    tree-sitter      LSP        regex/trunc      vec+FTS5
+         |                    |                    |
+    Code reading        Persistent memory    Library docs
+         |                    |                    |
+    +-----------+        +--------+         +----------+
+    |   Serena  |        |  ICM   |         | Context7 |
+    |   (LSP)   |        |(memory)|         | (remote) |
+    +-----------+        +--------+         +----------+
+     symbols+refs          vec+FTS5          HTTP MCP
 
 EOF
-}
-
-# --- token-diet dashboard command ----------------------------------------------------
-install_rtk_mcp() {
-  header "rtk-mcp (rtk CLI as MCP tools)"
-
-  local src_dir="$SCRIPT_DIR/rtk-mcp"
-  if [ ! -d "$src_dir" ]; then
-    warn "scripts/rtk-mcp not found — skipping rtk-mcp install"
-    return 0
-  fi
-
-  # Resolve the binary path we'll register with each host. pip install -e puts
-  # the console script on PATH; we capture the absolute path so the MCP config
-  # blocks reference the exact interpreter+entry-point rather than relying on
-  # the host's PATH lookup at launch (which varies by host).
-  local rtk_mcp_bin
-  rtk_mcp_bin="$(command -v rtk-mcp 2>/dev/null || true)"
-
-  if [ "${DRY_RUN:-false}" = "true" ]; then
-    dryrun "pip install -e $src_dir"
-    dryrun "register rtk-mcp MCP server across detected hosts"
-    # Return, do NOT fall through. The per-host registration below writes real
-    # config files and is not itself DRY_RUN-guarded, so without this a dry run
-    # printed "would register" and then actually registered. The project
-    # pre-commit hook runs `install.sh --dry-run --skip-tests`, so every commit
-    # silently re-added rtk-mcp to the developer's own hosts.
-    return 0
-  else
-    info "Installing rtk-mcp (editable) from $src_dir..."
-    if pip install -e "$src_dir" 2>&1 | show_output; then
-      rtk_mcp_bin="$(command -v rtk-mcp 2>/dev/null || echo "rtk-mcp")"
-      ok "rtk-mcp installed: $rtk_mcp_bin"
-    else
-      warn "rtk-mcp pip install failed — skipping host registration"
-      return 0
-    fi
-  fi
-
-  export RTK_MCP_BIN="$rtk_mcp_bin"
-
-  # Codex — append [mcp_servers.rtk-mcp] block to config.toml
-  if $HAS_CODEX && [ -f "$HOME/.codex/config.toml" ]; then
-    if grep -q '\[mcp_servers\.rtk-mcp\]' "$HOME/.codex/config.toml"; then
-      ok "rtk-mcp MCP: codex (already configured)"
-    else
-      if ! python3 - "$HOME/.codex/config.toml" << 'PYEOF'
-import os, pathlib, sys, tempfile
-def atomic_write(path, text):
-    d = os.path.dirname(path) or "."
-    fd, tmp = tempfile.mkstemp(dir=d, prefix=".td-", suffix=".tmp")
-    try:
-        with os.fdopen(fd, "w") as f:
-            f.write(text); f.flush(); os.fsync(f.fileno())
-        try:
-            os.chmod(tmp, os.stat(path).st_mode & 0o7777)
-        except OSError:
-            pass
-        os.replace(tmp, path)
-    except BaseException:
-        try: os.unlink(tmp)
-        except OSError: pass
-        raise
-cfg = pathlib.Path(sys.argv[1])
-if cfg.exists():
-    text = cfg.read_text()
-    if '[mcp_servers.rtk-mcp]' not in text:
-        atomic_write(str(cfg), text + f'\n[mcp_servers.rtk-mcp]\ncommand = "{os.environ["RTK_MCP_BIN"]}"\nargs = []\n')
-PYEOF
-      then
-        warn "rtk-mcp MCP: codex (see message above)"
-      else
-        td_record_mutation "$HOME/.codex/config.toml"
-        ok "rtk-mcp MCP: codex"
-      fi
-    fi
-  fi
-
-  # Claude / Cowork / OpenCode — use tdconfig (atomic JSON merge with backup)
-  # OpenCode 1.x uses "mcp" key with shape {type:local, command:[array]};
-  # Claude/Cowork use "mcpServers" with shape {command:string, args:[]}.
-  # Each Python heredoc is wrapped in `if ! ... then ... else ... fi` so a malformed
-  # config (ConfigError) skips the host without killing the script under `set -e`.
-  if $HAS_CLAUDE || $HAS_COWORK || $HAS_OPENCODE; then
-    for cfg in \
-        "$HOME/.claude/settings.json" \
-        "$HOME/Library/Application Support/Claude/claude_desktop_config.json" \
-        "$HOME/.config/Claude/claude_desktop_config.json" \
-        "$COWORK_CFG" \
-        "$HOME/.config/opencode/opencode.json" \
-        "$HOME/.opencode.json"; do
-      [ -f "$cfg" ] || continue
-      case "$cfg" in
-        *opencode/opencode.json|*opencode.json)
-          if ! TD_LIB_DIR="$SCRIPT_DIR/lib" python3 - "$cfg" << 'PYEOF'
-import os, sys
-sys.path.insert(0, os.environ["TD_LIB_DIR"])
-import tdconfig
-cfg = sys.argv[1]
-try:
-    tdconfig.update_json(
-        cfg,
-        lambda d: d.setdefault("mcp", {}).update(
-            {"rtk-mcp": {"type": "local", "command": [os.environ["RTK_MCP_BIN"]], "enabled": True}}
-        ),
-    )
-except tdconfig.ConfigError as e:
-    print(f"skipped: {e}", file=sys.stderr); sys.exit(1)
-PYEOF
-          then
-            warn "rtk-mcp MCP: $cfg (opencode dialect)"
-          else
-            td_record_mutation "$cfg"
-            ok "rtk-mcp MCP: $cfg (opencode dialect)"
-          fi
-          ;;
-        *)
-          if ! TD_LIB_DIR="$SCRIPT_DIR/lib" python3 - "$cfg" << 'PYEOF'
-import os, sys
-sys.path.insert(0, os.environ["TD_LIB_DIR"])
-import tdconfig
-cfg = sys.argv[1]
-try:
-    tdconfig.update_json(
-        cfg,
-        lambda d: d.setdefault("mcpServers", {}).update(
-            {"rtk-mcp": {"command": os.environ["RTK_MCP_BIN"], "args": []}}
-        ),
-    )
-except tdconfig.ConfigError as e:
-    print(f"skipped: {e}", file=sys.stderr); sys.exit(1)
-PYEOF
-          then
-            warn "rtk-mcp MCP: $cfg (see message above)"
-          else
-            td_record_mutation "$cfg"
-            ok "rtk-mcp MCP: $cfg"
-          fi
-          ;;
-      esac
-    done
-  fi
-
-  # Gemini CLI — uses `gemini mcp add --scope user`
-  if $HAS_GEMINI; then
-    if [ "${DRY_RUN:-false}" = "true" ]; then
-      dryrun "gemini mcp add --scope user rtk-mcp -- $rtk_mcp_bin"
-    elif gemini mcp list 2>/dev/null | grep -q '"rtk-mcp"'; then
-      ok "rtk-mcp MCP: gemini (already configured)"
-    else
-      gemini mcp add --scope user rtk-mcp -- "$rtk_mcp_bin" 2>/dev/null \
-        && ok "rtk-mcp MCP: gemini" \
-        || warn "rtk-mcp MCP: gemini setup failed"
-    fi
-  fi
-
-  unset RTK_MCP_BIN
 }
 
 # --- token-diet dashboard command ----------------------------------------------------
@@ -2010,17 +1747,46 @@ PYEOF
     [ -d "$config_dir" ] || return 0  # host not installed — skip silently
 
     local tkd_doc_file="$config_dir/token-diet.md"
-    cat > "$tkd_doc_file" << 'TKDDOC'
+
+    # Describe only what this run actually installed. A static list made
+    # `--icm-only` still tell agents to call Serena tools that were never
+    # installed, and a reinstall silently reverted any local edit correcting
+    # it. The doc must reflect real state, not the full catalogue.
+    local tkd_tools=() tkd_absent=()
+    $do_serena   && tkd_tools+=("Serena")   || tkd_absent+=("Serena")
+    $do_icm      && tkd_tools+=("ICM")      || tkd_absent+=("ICM")
+    $do_context7 && tkd_tools+=("Context7") || tkd_absent+=("Context7")
+
+    local tkd_list
+    tkd_list="$(printf '%s, ' "${tkd_tools[@]}")"
+    tkd_list="${tkd_list%, }"
+    [ "${#tkd_tools[@]}" -gt 1 ] && tkd_list="$(sed 's/, \([^,]*\)$/ and \1/' <<< "$tkd_list")"
+
+    cat > "$tkd_doc_file" << TKDHEAD
 # Token Diet — AI Context Optimization
 
-`token-diet` is a unified optimization layer for AI agents. It orchestrates RTK, tilth, Serena, and ICM to maximize context efficiency.
+\`token-diet\` is a unified optimization layer for AI agents. It orchestrates
+${tkd_list:-no tools} to maximize context efficiency.
+TKDHEAD
+
+    # Name what is NOT installed, so an agent never reaches for a missing tool.
+    if [ "${#tkd_absent[@]}" -gt 0 ]; then
+      local tkd_miss
+      tkd_miss="$(printf '%s, ' "${tkd_absent[@]}")"; tkd_miss="${tkd_miss%, }"
+      cat >> "$tkd_doc_file" << TKDMISS
+
+> **Not installed on this host: ${tkd_miss}.** Do not call their MCP tools —
+> they are not registered. Install with \`install.sh\` and the matching
+> \`--<tool>-only\` flag if you need them.
+TKDMISS
+    fi
+
+    cat >> "$tkd_doc_file" << 'TKDDOC'
 
 ## Core Commands
 
 - `token-diet gain`: Current token savings and efficiency stats.
 - `token-diet mcp list`: Check which hosts are currently optimized.
-- `token-diet hook off`: Disable RTK (raw output) for troubleshooting.
-- `token-diet hook on`: Re-enable RTK optimization.
 - `token-diet budget status`: Check project-specific token consumption.
 - `token-diet route <task>`: Ask `token-diet` which tool is best for your current task.
 - `token-diet doctor`: Run diagnostics if tools are unresponsive.
@@ -2029,24 +1795,28 @@ PYEOF
 
 1. **Self-Monitor**: Regularly run `token-diet budget status` to stay within thresholds.
 2. **Tool Selection**:
-   - Use **tilth** for code reading and symbol search.
-   - Use **Serena** for complex refactoring and diagnostics.
-   - Use **RTK** for running commands and builds.
-   - Use **ICM** for persistent cross-session memory: recall past decisions and store new facts.
-3. **Be Precise**: Use `tilth_read` with line ranges (found via `token-diet diff-reads`) to minimize context waste.
-4. **Optimization**: If you detect you are looping or wasting tokens, run `token-diet loops` or `token-diet leaks` to self-audit.
 TKDDOC
+
+    # One bullet per installed tool only. An absent tool gets no bullet, so the
+    # doc can never instruct an agent to call something that is not there.
+    $do_serena   && echo '   - Use **Serena** for complex refactoring and diagnostics.' >> "$tkd_doc_file"
+    $do_icm      && echo '   - Use **ICM** for persistent cross-session memory: recall past decisions and store new facts.' >> "$tkd_doc_file"
+    $do_context7 && echo '   - Use **Context7** for up-to-date library documentation instead of trusting training-data APIs.' >> "$tkd_doc_file"
+    if ! $do_serena; then
+      echo '   - Use the built-in file-reading and search tools for code reading and symbol search.' >> "$tkd_doc_file"
+    fi
+
+    echo '3. **Be Precise**: Read with explicit line ranges rather than whole files, and use `token-diet diff-reads` to find the ranges worth reading.' >> "$tkd_doc_file"
+
+    cat >> "$tkd_doc_file" << 'TKDTAIL'
+4. **Optimization**: If you detect you are looping or wasting tokens, run `token-diet loops` or `token-diet leaks` to self-audit.
+TKDTAIL
 
     ok "token-diet.md written: $tkd_doc_file"
 
     # Add @token-diet.md reference to instruction file if not already present
     if [ -f "$instruction_file" ] && ! grep -q "@token-diet.md" "$instruction_file"; then
-      # Insert before @RTK.md if present, otherwise append
-      if grep -q "@RTK.md" "$instruction_file"; then
-        awk '/^@RTK\.md$/{print "@token-diet.md"}1' "$instruction_file" > "${instruction_file}.tmp" && mv "${instruction_file}.tmp" "$instruction_file"
-      else
-        printf "\n@token-diet.md\n" >> "$instruction_file"
-      fi
+      printf "\n@token-diet.md\n" >> "$instruction_file"
       ok "@token-diet.md added to: $instruction_file"
     fi
   }
@@ -2287,24 +2057,22 @@ Usage: $0 [OPTIONS]
 token-diet: AI token optimization stack installer
 
 Tools:
-  RTK      CLI output compression (60-90% token savings)
-  tilth    Smart code reading via tree-sitter AST
-  Serena   IDE-like symbol navigation via LSP
-  ICM      Persistent cross-tool memory (MCP server)
+  Serena    IDE-like symbol navigation via LSP
+  ICM       Persistent cross-tool memory (MCP server)
+  Context7  Up-to-date library documentation (remote HTTP MCP)
 
 Hosts (auto-detected):
   Claude Code, Codex CLI, OpenCode, Copilot CLI, VS Code, Cowork (Claude Desktop), Gemini CLI
 
 Options:
-  --all          Install all three tools (default)
-  --local        Install from local forks/dist (air-gapped)
-  --rtk-only     Install only RTK
-  --tilth-only   Install only tilth
-  --serena-only  Install only Serena
-  --icm-only     Install only ICM
-  --verify       Only verify current installation
-  --no-dedup     Skip overlap fix configuration
-  --skip-tests   Skip clippy + tests in --local mode (faster install)
+  --all            Install all three tools (default)
+  --local          Install from local forks/dist (air-gapped)
+  --serena-only    Install only Serena
+  --icm-only       Install only ICM
+  --context7-only  Install only Context7
+  --verify         Only verify current installation
+  --no-dedup       Skip overlap fix configuration
+  --skip-tests     Skip clippy + tests in --local mode (faster install)
   --hosts LIST   Comma-separated list of AI hosts to wire integrations for.
                  Valid: claude, codex, opencode, copilot, vscode, cowork, gemini
                  Default: prompt when multiple hosts detected.
@@ -2325,18 +2093,10 @@ EOF
 run_wizard() {
   echo ""
   echo -e "${BOLD}  token-diet interactive installer${NC}"
-  echo -e "${BLUE}  RTK + tilth + Serena + ICM — security-patched forks${NC}"
+  echo -e "${BLUE}  Serena + ICM + Context7 — token-optimized stack${NC}"
   echo ""
-  echo "  The stack — each tool is independent; install any subset:"
+  echo "  The stack — each component is independent; install any subset:"
   echo ""
-  echo -e "  ${BOLD}RTK${NC}     command output compression"
-  echo    "          What: a CLI proxy that filters verbose command output."
-  echo    "          Why:  long build / test / git output floods the context window."
-  echo    "          Gain: 60-90% fewer tokens on tracked commands (measured)."
-  echo -e "  ${BOLD}tilth${NC}   AST-aware code reading"
-  echo    "          What: tree-sitter reader returning symbols/structure, not whole files."
-  echo    "          Why:  reading entire files to find one function wastes context."
-  echo    "          Gain: ~38-44% smaller reads on average."
   echo -e "  ${BOLD}Serena${NC}  LSP symbol navigation"
   echo    "          What: language-server rename / find-references / diagnostics."
   echo    "          Why:  precise refactors without re-reading files."
@@ -2345,29 +2105,31 @@ run_wizard() {
   echo    "          What: a memory MCP server shared across Claude, Codex, Gemini, OpenCode"
   echo    "          Why:  recall past decisions and facts instead of re-explaining each session."
   echo    "          Gain: cross-session, cross-tool continuity — recall replaces re-reading."
+  echo -e "  ${BOLD}Context7${NC} up-to-date library docs"
+  echo    "          What: a remote HTTP MCP server serving current library documentation."
+  echo    "          Why:  models hallucinate APIs from stale training data."
+  echo    "          Gain: version-correct API answers with no local install (registration only)."
   echo ""
 
   local answer
-  read -rp "  Install the full stack (all 4)? [Y/n]  (n = choose individually) " answer
+  read -rp "  Install the full stack (all 3)? [Y/n]  (n = choose individually) " answer
   if [[ "$answer" =~ ^[Nn] ]]; then
     echo ""
-    local r t s i
-    read -rp "    + RTK    — output compression, 60-90% fewer tokens?     [Y/n] " r
-    read -rp "    + tilth  — AST code reading, ~40% smaller reads?         [Y/n] " t
-    read -rp "    + Serena — rename / find-refs / diagnostics (LSP)?       [Y/n] " s
-    read -rp "    + ICM    — cross-tool memory, recall not re-explain?     [Y/n] " i
-    [[ ! "$r" =~ ^[Nn] ]] && WIZ_RTK=true    || WIZ_RTK=false
-    [[ ! "$t" =~ ^[Nn] ]] && WIZ_TILTH=true  || WIZ_TILTH=false
-    [[ ! "$s" =~ ^[Nn] ]] && WIZ_SERENA=true || WIZ_SERENA=false
-    [[ ! "$i" =~ ^[Nn] ]] && WIZ_ICM=true    || WIZ_ICM=false
+    local s i c
+    read -rp "    + Serena   — rename / find-refs / diagnostics (LSP)?       [Y/n] " s
+    read -rp "    + ICM      — cross-tool memory, recall not re-explain?     [Y/n] " i
+    read -rp "    + Context7 — current library docs via remote MCP?          [Y/n] " c
+    [[ ! "$s" =~ ^[Nn] ]] && WIZ_SERENA=true   || WIZ_SERENA=false
+    [[ ! "$i" =~ ^[Nn] ]] && WIZ_ICM=true      || WIZ_ICM=false
+    [[ ! "$c" =~ ^[Nn] ]] && WIZ_CONTEXT7=true || WIZ_CONTEXT7=false
   else
-    WIZ_RTK=true; WIZ_TILTH=true; WIZ_SERENA=true; WIZ_ICM=true
+    WIZ_SERENA=true; WIZ_ICM=true; WIZ_CONTEXT7=true
   fi
 
   WIZ_DEDUP=false
-  if $WIZ_TILTH && $WIZ_SERENA; then
+  if $WIZ_SERENA; then
     local d
-    read -rp "  Configure Serena/tilth overlap fix? [Y/n] " d
+    read -rp "  Configure Serena dedup (overlap-fix rules)? [Y/n] " d
     [[ ! "$d" =~ ^[Nn] ]] && WIZ_DEDUP=true
   fi
 
@@ -2384,11 +2146,10 @@ run_wizard() {
 
   echo ""
   echo -e "${BOLD}  Ready to install:${NC}"
-  $WIZ_RTK    && echo -e "  ${GREEN}+ RTK${NC}"
-  $WIZ_TILTH  && echo -e "  ${GREEN}+ tilth${NC}"
-  $WIZ_SERENA && echo -e "  ${GREEN}+ Serena${NC}"
-  $WIZ_ICM    && echo -e "  ${GREEN}+ ICM${NC}"
-  $WIZ_DEDUP  && echo -e "  ${GREEN}+ Overlap fix${NC}"
+  $WIZ_SERENA   && echo -e "  ${GREEN}+ Serena${NC}"
+  $WIZ_ICM      && echo -e "  ${GREEN}+ ICM${NC}"
+  $WIZ_CONTEXT7 && echo -e "  ${GREEN}+ Context7${NC}"
+  $WIZ_DEDUP    && echo -e "  ${GREEN}+ Overlap fix${NC}"
   $WIZ_LOCAL  && echo -e "  ${YELLOW}  Mode: LOCAL (air-gapped)${NC}"
   echo ""
 
@@ -2402,7 +2163,7 @@ run_wizard() {
 
 # --- Main ---------------------------------------------------------------------
 main() {
-  local do_rtk=false do_tilth=false do_serena=false do_icm=false
+  local do_serena=false do_icm=false do_context7=false
   local do_dedup=true verify_only=false has_args=false
   LOCAL_MODE=false
   SKIP_TESTS=false
@@ -2410,19 +2171,19 @@ main() {
   VERBOSE=false
   WITH_CONTEXT_HOOKS=false
 
-  # has_args tracks *intent* flags (--all, --rtk-only, --tilth-only, --serena-only,
-  # --verify). Modifier-only flags (--skip-tests, --local, --verbose, --hosts, etc.)
-  # leave has_args=false so the wizard still runs and picks install targets.
+  # has_args tracks *intent* flags (--all, --serena-only, --icm-only,
+  # --context7-only, --verify). Modifier-only flags (--skip-tests, --local,
+  # --verbose, --hosts, etc.) leave has_args=false so the wizard still runs and
+  # picks install targets.
   # Regression fix (issue #38): previously has_args was set for any flag, so a bare
   # `install.sh --skip-tests` skipped the wizard AND left do_* false, leading to
   # a silent no-op that only updated the token-diet CLI binary.
   while [ $# -gt 0 ]; do
     case "$1" in
-      --all)          has_args=true; do_rtk=true; do_tilth=true; do_serena=true ;;
-      --rtk-only)     has_args=true; do_rtk=true ;;
-      --tilth-only)   has_args=true; do_tilth=true ;;
-      --serena-only)  has_args=true; do_serena=true ;;
-      --icm-only)     has_args=true; do_icm=true ;;
+      --all)           has_args=true; do_serena=true; do_icm=true; do_context7=true ;;
+      --serena-only)   has_args=true; do_serena=true ;;
+      --icm-only)      has_args=true; do_icm=true ;;
+      --context7-only) has_args=true; do_context7=true ;;
       --verify)       has_args=true; verify_only=true ;;
       --local)        LOCAL_MODE=true ;;
       --no-dedup)     do_dedup=false ;;
@@ -2443,7 +2204,7 @@ main() {
   fi
 
   echo -e "\n${BOLD}=== token-diet ===${NC}"
-  echo -e "${BOLD}    RTK + tilth + Serena + ICM${NC}"
+  echo -e "${BOLD}    Serena + ICM + Context7 + token-diet${NC}"
   echo ""
   if [ "${DRY_RUN:-false}" = "true" ]; then
     echo -e "${MAGENTA}    *** DRY-RUN MODE — no changes will be made ***${NC}\n"
@@ -2464,16 +2225,16 @@ main() {
   if $has_args; then
     any_arg=true
     # If user provided ONLY a modifier (like --local) but NO tool flags, we default to ALL tools.
-    if ! $do_rtk && ! $do_tilth && ! $do_serena && ! $do_icm; then
-      do_rtk=true; do_tilth=true; do_serena=true; do_icm=true
+    if ! $do_serena && ! $do_icm && ! $do_context7; then
+      do_serena=true; do_icm=true; do_context7=true
     fi
   elif $LOCAL_MODE || $SKIP_TESTS || $DRY_RUN || $VERBOSE || [ -n "${HOSTS_FILTER:-}" ] || ! $do_dedup; then
     any_arg=true
-    do_rtk=true; do_tilth=true; do_serena=true; do_icm=true
+    do_serena=true; do_icm=true; do_context7=true
   fi
   if ! $any_arg; then
     run_wizard
-    do_rtk=$WIZ_RTK; do_tilth=$WIZ_TILTH; do_serena=$WIZ_SERENA; do_icm=$WIZ_ICM
+    do_serena=$WIZ_SERENA; do_icm=$WIZ_ICM; do_context7=$WIZ_CONTEXT7
     do_dedup=$WIZ_DEDUP; LOCAL_MODE=$WIZ_LOCAL; SKIP_TESTS=$WIZ_SKIP_TESTS
   fi
 
@@ -2483,7 +2244,7 @@ main() {
   header "Prerequisites"
   ensure_git
   if ! $LOCAL_MODE; then ensure_curl; fi
-  if $do_rtk || $do_tilth || $do_icm; then ensure_rust; fi
+  if $do_icm; then ensure_rust; fi
   if $do_serena && ! $LOCAL_MODE; then ensure_uv; fi
   if $do_serena && $LOCAL_MODE; then ensure_docker; fi
 
@@ -2493,14 +2254,12 @@ main() {
   confirm_hosts
 
   # Install tools
-  $do_rtk    && install_rtk
-  $do_tilth  && install_tilth
-  $do_serena && install_serena
-  $do_icm    && install_icm
-  install_rtk_mcp
+  $do_serena   && install_serena
+  $do_icm      && install_icm
+  $do_context7 && install_context7
 
   # Overlap fix
-  if $do_dedup && $do_tilth && $do_serena; then
+  if $do_dedup && $do_serena; then
     configure_dedup
   fi
 

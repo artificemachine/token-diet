@@ -27,16 +27,16 @@ run inside AI coding sessions. The interesting surface is therefore:
   run on every matching tool call. They receive file paths and transcript
   contents. Injection or path-traversal there is in scope.
 - **Install-time code execution.** The default path fetches and runs installers
-  for `rustup` and `uv`, and `--local` builds four pinned forks from source.
+  for `rustup` and `uv`, and `--local` builds two pinned forks from source.
 - **Document extraction.** `token-diet extract` parses PDF, CSV, and HTML,
   including files an agent was asked to read. Parser-level issues reachable
   through that path are in scope.
 
 ## Out of scope
 
-- Vulnerabilities in the upstream tools themselves (RTK, tilth, Serena, ICM).
-  Report those to their projects; if the issue is in how token-diet *invokes*
-  them, that is in scope here.
+- Vulnerabilities in the upstream tools themselves (Serena, ICM) and the
+  Context7 service. Report those to their projects; if the issue is in how
+  token-diet *invokes* them, that is in scope here.
 - Anything requiring an attacker who already has local shell access as the
   user. At that point the config files are theirs regardless.
 - The pinned forks in `forks/` being behind upstream. That is a maintenance

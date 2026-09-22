@@ -1,100 +1,63 @@
 # Benchmarks — where the numbers come from
 
-Short version: **one of the four tools has a real benchmark, one is measured
-live on your own machine, and two are not quantified.** This page says which is
-which, because a number without a method behind it is just a claim.
+Short version: **this stack no longer publishes a tracked savings figure.** The
+metric the stack used to lead with was removed along with the tools that produced
+it, because independent benchmarks showed it did not measure what it claimed.
 
-## Summary
+## Why there is no headline number
+
+The old stack led with a compression figure (e.g. "83.9% saved") computed by
+RTK's `rtk gain` from command history. Two independent evaluations found that
+figure does not translate into real cost savings:
+
+- **Quesma** (Sept 2026, ~$1,500 of real spend, 1,740 attempts on
+  Terminal-Bench 2.1, Claude Code/Fable 5 and OpenCode/DeepSeek V4): no
+  reliable saving. Fable's total was −5% but per-task cost was +1%; DeepSeek's
+  per-task cost rose **17%** on average. Their conclusion: *"We do not recommend
+  RTK as a generic cost-saving tool."* They also documented that `rtk gain`
+  counts removed output bytes ÷ 4 — not billed tokens — and once credited
+  120.5M tokens "saved" on a `head -1` command that would never have returned
+  the whole file (69% of that comparison's savings counter).
+- **JetBrains SkillsBench**: found no savings and extra turns.
+
+The mechanism explains the result: terminal output is only ~7–11% of a frontier
+model's input, models already self-limit with `head`/`tail`, and file-read tools
+bypass the filter entirely. Extra turns can cost more than the compression saves.
+
+So this page no longer repeats the retired figures. [docs/comparison.md](comparison.md)
+records the removal decision in full.
+
+## What is claimed today
 
 | Tool | Claim | Basis |
 |---|---|---|
-| tilth | -38% to -44% cost per correct answer | Benchmarked, 160 runs across 3 models |
-| RTK | 60-90% output reduction | Measured live from your own command history |
-| Serena | Fewer prompt turns | Not separately measured |
-| ICM | Recall replaces re-reading | Not separately measured |
+| Serena | Fewer prompt turns on symbol-level work | Not separately measured |
+| ICM | Recall replaces re-reading across sessions | Not separately measured |
+| Context7 | Current library docs instead of guessed APIs | Not separately measured |
 
-## tilth — benchmarked
+All three are in the stack on a structural argument, not a measurement:
 
-The full benchmark lives in [`forks/tilth/benchmark/`](../forks/tilth/benchmark/README.md).
-26 code-navigation tasks, 160 runs, three models:
-
-| Model | Runs | Baseline $/correct | tilth $/correct | Change | Baseline acc | tilth acc |
-|---|---|---|---|---|---|---|
-| Sonnet 4.6 | 86 | $0.26 | $0.15 | **-44%** | 84% | 94% |
-| Opus 4.6 | 25 | $0.22 | $0.14 | **-39%** | 91% | 92% |
-| Haiku 4.5 | 49 | $0.12 | $0.08 | **-38%** | 54% | 73% |
-| **Average** | **160** | **$0.20** | **$0.12** | **-40%** | **76%** | **86%** |
-
-### Why "cost per correct answer" and not raw tokens
-
-Raw cost comparison treats a wrong answer as a cheap success. It isn't: you paid
-for a response you can't use and you still need the answer.
-
-If accuracy is `p`, you need `1/p` attempts on average before one succeeds, so
-the expected spend is `cost_per_attempt × (1 / accuracy)`. Cost per correct
-answer (`total_spend / correct_answers`) computes exactly that. It is not an
-arbitrary penalty term; it is the expected cost under retry.
-
-This metric is also why the Haiku row matters. Haiku's raw cost is lowest of the
-three, but its baseline accuracy is 54%, so nearly half of what you spend buys
-an answer you have to throw away.
-
-### Caveats
-
-- Measured against tilth v0.5.0. The pinned fork is ahead of that.
-- 26 tasks on a fixed set of repositories. Navigation-shaped work, which is what
-  tilth targets; it is not a general coding benchmark.
-- Run counts are uneven across models (86 / 25 / 49).
-
-## RTK — measured live, not benchmarked
-
-RTK's savings are not an estimate from a study. They are computed from your own
-`~/.rtk/history.json`: for each proxied command, the raw output size against the
-filtered size. `token-diet gain` reads that history and reports your actual
-numbers.
-
-Two honest qualifications:
-
-1. It measures **output compression**, meaning bytes RTK removed before the text
-   reached the model. That is a real saving, but it is not the same as
-   end-to-end session cost, which depends on how the agent behaves afterward.
-2. Token counts use a `chars / 4` heuristic, not a tokenizer. Good enough for a
-   ratio, not exact.
-
-The 60-90% range reflects that compressible commands (test runs, builds, verbose
-logs) sit near the top and already-terse commands near the bottom. Run
-`token-diet gain` to see your own figure rather than trusting the range.
-
-## Serena and ICM — not quantified
-
-Both are in the stack on a structural argument, not a measurement:
-
-- **Serena** provides LSP-grade navigation, so an agent can jump to a definition
-  instead of reading whole files to find it. Fewer turns, less context consumed.
+- **Serena** provides LSP-grade navigation — definitions, references, renames —
+  so an agent jumps to a symbol instead of reading files to find it.
 - **ICM** persists decisions and resolved errors across sessions, so an agent
   recalls a fact instead of re-deriving it.
+- **Context7** serves current library documentation, so the agent stops
+  inventing function names that were renamed two versions ago.
 
-Both are plausible and both match day-to-day experience, but neither has a
-benchmark in this repository. They are listed as "structural" rather than given
-a percentage, and no aggregate stack-wide number is published, because summing
-a benchmarked figure with two unmeasured ones would produce a number with no
-method behind it.
+These are plausible and match day-to-day experience, but none has a benchmark in
+this repository. They are listed as "structural" rather than given a percentage,
+and no aggregate stack-wide number is published — summing measured and unmeasured
+components would produce a number with no method behind it.
 
-## Reproducing
+## What would make a number publishable
 
-```bash
-# tilth: full harness and per-task breakdown
-cat forks/tilth/benchmark/README.md
-
-# RTK: your own measured savings
-token-diet gain
-token-diet breakdown        # top commands by tokens saved
-token-diet explain <cmd>    # per-command cost breakdown
-```
+A claim belongs here only with: the model and harness, the task set, the number
+of runs, and a cost basis in money or billed tokens rather than bytes. A
+compression ratio measured on stdout is not that. The Quesma methodology
+(cost per passed task, both platforms, N runs per task, task-level means) is the
+bar this project would hold itself to before publishing anything.
 
 ## What this page is not
 
 There is no single headline "token-diet saves X%" figure, and this page will not
-invent one. The tools compose, their savings are not independent, and combining
-one benchmark with two unmeasured components into a single percentage would be
-a guess wearing a decimal point.
+invent one.

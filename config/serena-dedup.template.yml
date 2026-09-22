@@ -1,14 +1,16 @@
-# Serena project.local.yml — overlap fix when tilth is also installed
+# Serena project.local.yml — overlap fix for harness-native tooling
 # Copy this file to your project root as project.local.yml
 #
-# Disables Serena tools that tilth handles faster (Rust + tree-sitter < LSP)
+# Disables Serena tools that duplicate what the coding agent's built-in
+# Read/Grep/Glob already do well, so the agent reaches for Serena only where
+# it is strictly better (LSP-grade symbol work).
 #
 # Serena keeps: rename_symbol, find_referencing_symbols (LSP-grade),
 #               diagnostics, memory, workflow tools
-# tilth handles: file reading, symbol search, structural outlines
+# Built-ins handle: file reading, text search, structural outlines
 
 context: claude-code
 disabled_tools:
-  - get_symbols_overview    # tilth outline is faster (Rust, no LSP)
-  - find_symbol             # tilth definition search is faster
-  - read_file               # tilth adaptive read is smarter
+  - get_symbols_overview    # built-in file reads / outlines cover this
+  - find_symbol             # built-in definition search covers this
+  - read_file               # built-in adaptive read covers this

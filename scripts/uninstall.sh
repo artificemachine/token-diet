@@ -13,15 +13,16 @@
 #   --only LIST      Remove ONLY these components (comma-separated)
 #   --skip LIST      Remove everything EXCEPT these components
 #
-# Components: rtk, rtk-mcp, tilth, serena, icm, token-diet
-#   Default is every component. `rtk` and `rtk-mcp` are separate: rtk is the
-#   binary and shell hooks that do the output compression, rtk-mcp is the MCP
-#   tool schema loaded into every session. `--only rtk-mcp` drops the schema and
-#   keeps the compression.
+# Components: serena, icm, context7, token-diet
+#   Default is every component. RTK, rtk-mcp and tilth were removed from the
+#   stack (deprecated after independent benchmarks found no real savings); the
+#   LEGACY CLEANUP region below still removes them so machines with pre-existing
+#   installs can be cleaned. Legacy targets are not selectable via --only/--skip
+#   — they are always cleaned when present.
 #
 # Examples:
-#   bash uninstall.sh --only rtk-mcp            # reclaim MCP context, keep RTK
-#   bash uninstall.sh --only serena,tilth       # drop two tools
+#   bash uninstall.sh --only context7           # drop Context7 registrations
+#   bash uninstall.sh --only serena,icm         # drop the two local tools
 #   bash uninstall.sh --skip icm                # remove all but ICM
 
 set -euo pipefail
@@ -33,12 +34,13 @@ INCLUDE_DOCKER=false
 ONLY=""
 SKIP=""
 
-# Selectable components. `rtk` (binary + shell hooks, the actual output
-# compression) and `rtk-mcp` (a large MCP tool schema loaded into every session)
-# are deliberately separate so the schema can be dropped without losing the
-# compression. `token-diet` covers the CLI plus shared infrastructure
+# Selectable components. `token-diet` covers the CLI plus shared infrastructure
 # (the local bin lib dir, compat.json, hosts-mcp.json) not tied to one tool.
-TD_ALL_COMPONENTS="rtk rtk-mcp tilth serena icm token-diet"
+# TD_LEGACY_COMPONENTS (rtk, rtk-mcp, tilth) are NOT selectable: their cleanup
+# always runs when present, so machines installed before they were dropped from
+# the stack still get fully cleaned.
+TD_ALL_COMPONENTS="serena icm context7 token-diet"
+TD_LEGACY_COMPONENTS="rtk rtk-mcp tilth"
 COMPONENTS="$TD_ALL_COMPONENTS"
 
 # --- Host registry ------------------------------------------------------------
@@ -216,6 +218,7 @@ td_component_of() {
     *rtk-mcp*)     echo "rtk-mcp" ;;
     *rtk*)         echo "rtk" ;;
     *tilth*)       echo "tilth" ;;
+    *context7*)    echo "context7" ;;
     *serena*)      echo "serena" ;;
     *icm*)         echo "icm" ;;
     *)             echo "token-diet" ;;
@@ -223,9 +226,12 @@ td_component_of() {
 }
 
 # td_selected <path-or-key> — true when this target's component is in scope.
+# Legacy components (rtk, rtk-mcp, tilth) are always in scope: they are not
+# selectable, and their leftovers should be cleaned on every uninstall run.
 td_selected() {
   local comp
   comp="$(td_component_of "$1")"
+  case " $TD_LEGACY_COMPONENTS " in *" $comp "*) return 0 ;; esac
   case " $COMPONENTS " in *" $comp "*) return 0 ;; *) return 1 ;; esac
 }
 
@@ -674,21 +680,22 @@ main() {
   # Canonical MCP-host registry the installer copies to ~/.local/config/.
   remove_file "$HOME/.local/config/hosts-mcp.json"
   # Symlinks the installer leaves in ~/.local/bin (→ ~/.cargo/bin/<tool>).
-  # The install step creates these for rtk, tilth and icm but earlier uninstall
-  # versions only ran `cargo uninstall`, orphaning the symlinks. Remove them here.
-  remove_file "$HOME/.local/bin/rtk"
-  remove_file "$HOME/.local/bin/tilth"
+  # The install step creates these for icm but earlier uninstall versions only
+  # ran `cargo uninstall`, orphaning the symlinks. Remove them here.
+  # (rtk/tilth symlinks are cleaned in the LEGACY CLEANUP region below.)
   remove_file "$HOME/.local/bin/icm"
   # Serena launcher wrapper the installer generates at ~/.local/bin/serena
   # (install.sh install_serena, uvx- or docker-runtime). It is NOT a cargo
-  # symlink like the three above, so `cargo uninstall` never touches it — earlier
-  # uninstall versions removed rtk/tilth/icm but left this behind (install/
+  # symlink like icm above, so `cargo uninstall` never touches it — earlier
+  # uninstall versions removed the cargo tools but left this behind (install/
   # uninstall asymmetry). Remove it here for symmetry with what install writes.
   remove_file "$HOME/.local/bin/serena"
 
   echo ""
   echo -e "${BOLD}Rust binaries (cargo uninstall)${NC}"
   if command -v cargo &>/dev/null; then
+    # rtk/tilth crates are legacy (see LEGACY CLEANUP below) but their cargo
+    # entries are cleaned here too — always selected, never selectable.
     for _crate in rtk tilth icm; do
       td_selected "$_crate" || continue
       if $DRY_RUN; then
@@ -706,42 +713,38 @@ main() {
 
   # Symmetric with install (Phase 5 DECISION 2). The registry lists TWO
   # claude-code home_configs and install writes to BOTH:
-  #   - ~/.claude.json         <- tilth/serena/icm via `claude mcp add --scope
-  #                               user` and `tilth install claude-code`
+  #   - ~/.claude.json         <- serena/icm/context7 via `claude mcp add --scope
+  #                               user`
   #   - ~/.claude/settings.json <- the token-diet MCP server (install_token_diet)
   # Uninstall now cleans both (closing the 1-path/2-path asymmetry Iter 7 flagged).
   # remove_json_key is key-scoped, so a key install never wrote to a given file is
   # a harmless no-op and unrelated user servers are always preserved.
   echo ""
   echo -e "${BOLD}MCP registrations — Claude Code${NC}"
-  remove_json_key "$HOME/.claude/settings.json" "tilth"
   remove_json_key "$HOME/.claude/settings.json" "serena"
   remove_json_key "$HOME/.claude/settings.json" "icm"
+  remove_json_key "$HOME/.claude/settings.json" "context7"
   remove_json_key "$HOME/.claude/settings.json" "token-diet"
-remove_json_key "$HOME/.claude/settings.json" "rtk-mcp"
-  remove_json_key "$HOME/.claude.json" "tilth"
   remove_json_key "$HOME/.claude.json" "serena"
   remove_json_key "$HOME/.claude.json" "icm"
-remove_json_key "$HOME/.claude.json" "rtk-mcp"
+  remove_json_key "$HOME/.claude.json" "context7"
 
   # Both Claude Desktop paths (macOS first, Linux second) come from the registry
   # via resolve_claude_desktop_paths; the pair matches uninstall's historical
   # targets exactly, so this is byte-identical with the production registry.
   echo ""
   echo -e "${BOLD}MCP registrations — Claude Desktop (macOS)${NC}"
-  remove_json_key "$CD_MAC" "tilth"
   remove_json_key "$CD_MAC" "serena"
   remove_json_key "$CD_MAC" "icm"
+  remove_json_key "$CD_MAC" "context7"
   remove_json_key "$CD_MAC" "token-diet"
-remove_json_key "$CD_MAC" "rtk-mcp"
 
   echo ""
   echo -e "${BOLD}MCP registrations — Claude Desktop (Linux)${NC}"
-  remove_json_key "$CD_LINUX" "tilth"
   remove_json_key "$CD_LINUX" "serena"
   remove_json_key "$CD_LINUX" "icm"
+  remove_json_key "$CD_LINUX" "context7"
   remove_json_key "$CD_LINUX" "token-diet"
-remove_json_key "$CD_LINUX" "rtk-mcp"
 
   # Kept explicit (NOT registry-driven): the registry now records BOTH opencode
   # paths (legacy .opencode.json + XDG .config/opencode/opencode.json), but
@@ -752,16 +755,14 @@ remove_json_key "$CD_LINUX" "rtk-mcp"
   # mechanisms, so the whole block stays explicit.
   echo ""
   echo -e "${BOLD}MCP registrations — OpenCode${NC}"
-  remove_opencode_mcp_key "$HOME/.opencode.json" "tilth"
   remove_opencode_mcp_key "$HOME/.opencode.json" "serena"
   remove_opencode_mcp_key "$HOME/.opencode.json" "icm"
+  remove_opencode_mcp_key "$HOME/.opencode.json" "context7"
   remove_opencode_mcp_key "$HOME/.opencode.json" "token-diet"
-remove_opencode_mcp_key "$HOME/.opencode.json" "rtk-mcp"
-  remove_opencode_mcp_key "$HOME/.config/opencode/opencode.json" "tilth"
   remove_opencode_mcp_key "$HOME/.config/opencode/opencode.json" "serena"
   remove_opencode_mcp_key "$HOME/.config/opencode/opencode.json" "icm"
+  remove_opencode_mcp_key "$HOME/.config/opencode/opencode.json" "context7"
   remove_opencode_mcp_key "$HOME/.config/opencode/opencode.json" "token-diet"
-remove_opencode_mcp_key "$HOME/.config/opencode/opencode.json" "rtk-mcp"
   strip_opencode_rules "$HOME/.config/opencode/opencode.json"
   # Symmetric with install_context_hooks: it installs an OpenCode plugin file and
   # registers its relative path in opencode.json's "plugin" array. Remove both so
@@ -778,21 +779,20 @@ remove_opencode_mcp_key "$HOME/.config/opencode/opencode.json" "rtk-mcp"
   # wrote) AND, as a documented courtesy, strips the same three keys from
   # ~/.config/Code/User/settings.json in case the user performed that manual copy —
   # this is the one intentional "clean slightly more than install directly wrote"
-  # case. It is safe: remove_json_key is key-scoped (serena/tilth/icm only) and
+  # case. It is safe: remove_json_key is key-scoped (serena/icm/context7 only) and
   # never touches unrelated servers. This is a superset of install's own writes by
   # design, mirroring the manual step install documents.
   echo ""
   echo -e "${BOLD}MCP registrations — VS Code${NC}"
-  remove_json_key "$HOME/.config/Code/User/settings.json" "tilth"
   remove_json_key "$HOME/.config/Code/User/settings.json" "serena"
   remove_json_key "$HOME/.config/Code/User/settings.json" "icm"
-  # Serena, tilth AND icm are written to the shared VS Code MCP template under the
-  # top-level "servers" key (not "mcpServers"). install writes all three
-  # (install_serena writes serena+tilth, install_icm merges icm), so uninstall
-  # strips all three for symmetry (previously only icm was removed).
+  remove_json_key "$HOME/.config/Code/User/settings.json" "context7"
+  # Serena, icm AND context7 are written to the shared VS Code MCP template under
+  # the top-level "servers" key (not "mcpServers"). install writes all three, so
+  # uninstall strips all three for symmetry.
   remove_vscode_template_server "$HOME/.config/token-diet/vscode-mcp.template.json" "serena"
-  remove_vscode_template_server "$HOME/.config/token-diet/vscode-mcp.template.json" "tilth"
   remove_vscode_template_server "$HOME/.config/token-diet/vscode-mcp.template.json" "icm"
+  remove_vscode_template_server "$HOME/.config/token-diet/vscode-mcp.template.json" "context7"
 
   echo ""
   echo -e "${BOLD}Codex TOML — MCP block removal${NC}"
@@ -800,9 +800,9 @@ remove_opencode_mcp_key "$HOME/.config/opencode/opencode.json" "rtk-mcp"
   local codex_cfg="$CODEX_CFG_PATH"
   if [ -f "$codex_cfg" ]; then
     if $DRY_RUN; then
-      dry "remove [mcp_servers.{$(echo "$COMPONENTS" | tr ' ' ',')}] blocks from $codex_cfg"
+      dry "remove [mcp_servers.*] blocks ($(echo "$COMPONENTS $TD_LEGACY_COMPONENTS" | tr ' ' ',')) from $codex_cfg"
     else
-      python3 - "$codex_cfg" "$COMPONENTS" << 'PY'
+      python3 - "$codex_cfg" "$COMPONENTS $TD_LEGACY_COMPONENTS" << 'PY'
 import os, re, sys, tempfile
 def atomic_write(path, text):
     d = os.path.dirname(path) or "."
@@ -837,15 +837,14 @@ with open(path) as f:
 # part of the body being removed. User tables are never entered, so their content
 # is preserved verbatim.
 header_re = re.compile(r'^\[[A-Za-z0-9_.\-]+\]$')            # any TOML table header
-# Only the selected components (argv[2], space-separated) are removed, so a
-# --only/--skip run leaves the deselected tables in place. rtk-mcp must be
-# alternated before rtk or the shorter name would shadow it.
+# Live components (argv[2], space-separated) plus legacy ones (rtk, rtk-mcp,
+# tilth) are removed, so a --only/--skip run still cleans legacy tables while
+# leaving deselected live tables in place.
 _selected = sorted(sys.argv[2].split(), key=len, reverse=True)
 # The trailing (\.[^\]]+)? also matches a server's SUB-tables, e.g.
-# [mcp_servers.tilth.tools.tilth_read] or [mcp_servers.icm.env]. Without it the
-# parent table is removed and its children are orphaned: the body loop stops at
-# the child header (a table header in its own right), leaving config that
-# references a server no longer defined. Observed live on a --only tilth run.
+# [mcp_servers.icm.env]. Without it the parent table is removed and its children
+# are orphaned: the body loop stops at the child header (a table header in its
+# own right), leaving config that references a server no longer defined.
 td_re     = re.compile(
     r'^\[mcp_servers\.(' + '|'.join(re.escape(c) for c in _selected) + r')(\.[^\]]+)?\]$'
 )
@@ -865,37 +864,33 @@ while i < len(lines):
 
 atomic_write(path, "".join(out))
 PY
-      ok "Removed mcp_servers.{$(echo "$COMPONENTS" | tr ' ' ',')} from $codex_cfg"
+      ok "Removed mcp_servers blocks ($(echo "$COMPONENTS $TD_LEGACY_COMPONENTS" | tr ' ' ',')) from $codex_cfg"
     fi
   else
     miss "$codex_cfg"
   fi
 
-  # Symmetric with install (Phase 5 DECISION 2): install registers tilth/serena/
-  # icm for Gemini via `gemini mcp add --scope user`, which writes mcpServers
+  # Symmetric with install (Phase 5 DECISION 2): install registers serena/icm/
+  # context7 for Gemini via `gemini mcp add --scope user`, which writes mcpServers
   # entries into ~/.gemini/settings.json. Uninstall never cleaned any of them
   # (Iter 7 gap). remove_json_key is key-scoped, so unrelated user servers stay.
   echo ""
   echo -e "${BOLD}MCP registrations — Gemini CLI${NC}"
-  remove_json_key "$HOME/.gemini/settings.json" "tilth"
   remove_json_key "$HOME/.gemini/settings.json" "serena"
   remove_json_key "$HOME/.gemini/settings.json" "icm"
-  remove_json_key "$HOME/.gemini/settings.json" "rtk-mcp"
+  remove_json_key "$HOME/.gemini/settings.json" "context7"
 
   echo ""
   echo -e "${BOLD}Hooks and docs${NC}"
-  remove_file "$HOME/.claude/hooks/rtk-rewrite.sh"
   remove_file "$HOME/.claude/token-diet.md"
   remove_file "$HOME/.codex/token-diet.md"
-  # Gemini: install writes ~/.gemini/token-diet.md (write_token-diet_md).
+  # Gemini: install writes ~/.gemini/token-diet.md (write_token-diet.md).
   remove_file "$HOME/.gemini/token-diet.md"
-  # Cowork / Claude Desktop: install writes rtk-awareness.md (install_rtk),
-  # token-diet.md (write_token-diet_md) and awareness-docextract.md
-  # (install_context_hooks) into the Claude Desktop config directory. Clean both
-  # the macOS and Linux dirs for symmetry.
+  # Cowork / Claude Desktop: install writes token-diet.md (write_token-diet_md)
+  # and awareness-docextract.md (install_context_hooks) into the Claude Desktop
+  # config directory. Clean both the macOS and Linux dirs for symmetry.
   local _cd
   for _cd in "$(dirname "$CD_MAC")" "$(dirname "$CD_LINUX")"; do
-    remove_file "$_cd/rtk-awareness.md"
     remove_file "$_cd/token-diet.md"
     remove_file "$_cd/awareness-docextract.md"
   done
@@ -943,6 +938,36 @@ PY
   else
     miss "$HOME/.config/token-diet"
   fi
+
+  # --- LEGACY CLEANUP -----------------------------------------------------------
+  # rtk, rtk-mcp and tilth were removed from the stack (deprecated after
+  # independent benchmarks found no real savings). These sections are not
+  # selectable via --only/--skip: td_selected always approves legacy components,
+  # so pre-existing installs are fully cleaned on every uninstall run.
+  echo ""
+  echo -e "${BOLD}Legacy cleanup (rtk / rtk-mcp / tilth from pre-existing installs)${NC}"
+  remove_file "$HOME/.local/bin/rtk"
+  remove_file "$HOME/.local/bin/tilth"
+  remove_file "$HOME/.claude/hooks/rtk-rewrite.sh"
+  remove_json_key "$HOME/.claude/settings.json" "tilth"
+  remove_json_key "$HOME/.claude/settings.json" "rtk-mcp"
+  remove_json_key "$HOME/.claude.json" "tilth"
+  remove_json_key "$HOME/.claude.json" "rtk-mcp"
+  remove_json_key "$CD_MAC" "tilth"
+  remove_json_key "$CD_MAC" "rtk-mcp"
+  remove_json_key "$CD_LINUX" "tilth"
+  remove_json_key "$CD_LINUX" "rtk-mcp"
+  remove_opencode_mcp_key "$HOME/.opencode.json" "tilth"
+  remove_opencode_mcp_key "$HOME/.opencode.json" "rtk-mcp"
+  remove_opencode_mcp_key "$HOME/.config/opencode/opencode.json" "tilth"
+  remove_opencode_mcp_key "$HOME/.config/opencode/opencode.json" "rtk-mcp"
+  remove_json_key "$HOME/.config/Code/User/settings.json" "tilth"
+  remove_vscode_template_server "$HOME/.config/token-diet/vscode-mcp.template.json" "tilth"
+  remove_json_key "$HOME/.gemini/settings.json" "tilth"
+  remove_json_key "$HOME/.gemini/settings.json" "rtk-mcp"
+  for _cd in "$(dirname "$CD_MAC")" "$(dirname "$CD_LINUX")"; do
+    remove_file "$_cd/rtk-awareness.md"
+  done
 
   if $INCLUDE_DATA; then
     echo ""

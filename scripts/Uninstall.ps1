@@ -168,7 +168,7 @@ Remove-TokenDietFile (Join-Path $BinDir "token-diet-mcp")
 # Rust binaries
 Write-Header "Rust binaries (cargo uninstall)"
 if (Get-Command cargo -ErrorAction SilentlyContinue) {
-    foreach ($crate in @("rtk", "tilth", "icm")) {
+    foreach ($crate in @("icm")) {
         if ($DryRun) {
             Write-DryMsg "cargo uninstall $crate"
         } else {
@@ -186,38 +186,96 @@ if (Get-Command cargo -ErrorAction SilentlyContinue) {
 
 # MCP registrations — Claude Desktop
 Write-Header "MCP registrations — Claude Desktop"
-Remove-JsonMcpKey $ClaudeConfig "tilth"
 Remove-JsonMcpKey $ClaudeConfig "serena"
 Remove-JsonMcpKey $ClaudeConfig "icm"
+Remove-JsonMcpKey $ClaudeConfig "context7"
 
 # MCP registrations — OpenCode
 Write-Header "MCP registrations — OpenCode"
-Remove-JsonMcpKey $OpenCode "tilth"
 Remove-JsonMcpKey $OpenCode "serena"
 Remove-JsonMcpKey $OpenCode "icm"
+Remove-JsonMcpKey $OpenCode "context7"
 
 # MCP registrations — VS Code template (uses top-level "servers", not "mcpServers")
 Write-Header "MCP registrations — VS Code template"
 Remove-VsCodeTemplateServer $VsCodeTemplate "icm"
+Remove-VsCodeTemplateServer $VsCodeTemplate "context7"
 
 # MCP registrations — Codex TOML
 Write-Header "MCP registrations — Codex TOML"
 if (Test-Path $CodexToml) {
     if ($DryRun) {
-        Write-DryMsg "Remove [mcp_servers.{tilth,serena,icm}] from $CodexToml"
+        Write-DryMsg "Remove [mcp_servers.{serena,icm,context7}] from $CodexToml"
     } else {
         $content = Get-Content $CodexToml -Raw
-        $content = $content -replace '(?ms)\[mcp_servers\.(tilth|serena|icm)\][^\[]*', ''
+        $content = $content -replace '(?ms)\[mcp_servers\.(serena|icm|context7)\][^\[]*', ''
         Set-Content $CodexToml -Value $content -Encoding UTF8
-        Write-Ok "Removed mcp_servers.{tilth,serena,icm} from $CodexToml"
+        Write-Ok "Removed mcp_servers.{serena,icm,context7} from $CodexToml"
     }
 } else {
     Write-Miss $CodexToml
 }
 
-# Hooks and docs
-Write-Header "Hooks and docs"
+# MCP registrations — Claude Code (registered via `claude mcp add --scope user`).
+# Context7 was added by this installer with the claude CLI, so remove it the same
+# way. (Serena/ICM predate this section and have the same historical gap; left
+# untouched here to keep their removal path intact.)
+Write-Header "MCP registrations — Claude Code"
+if (Get-Command claude -ErrorAction SilentlyContinue) {
+    if ($DryRun) {
+        Write-DryMsg "claude mcp remove --scope user context7"
+    } else {
+        & claude mcp remove --scope user context7 2>$null | Out-Null
+        if ($LASTEXITCODE -eq 0) {
+            Write-Ok "claude mcp remove --scope user context7"
+        } else {
+            Write-Miss "context7 (not registered in Claude Code)"
+        }
+    }
+} else {
+    Write-Miss "claude not found — skipping Claude Code MCP removal"
+}
+
+# Legacy cleanup: rtk/tilth/rtk-mcp were removed from the stack in this release; these sections remain so machines with pre-existing installs can be cleaned.
+Write-Header "Legacy rtk/tilth cleanup (pre-existing installs only)"
+
+# Rust binaries from the old stack
+if (Get-Command cargo -ErrorAction SilentlyContinue) {
+    foreach ($crate in @("rtk", "tilth")) {
+        if ($DryRun) {
+            Write-DryMsg "cargo uninstall $crate"
+        } else {
+            $result = cargo uninstall $crate 2>&1
+            if ($LASTEXITCODE -eq 0) {
+                Write-Ok "cargo uninstall $crate"
+            } else {
+                Write-Miss "$crate (not installed)"
+            }
+        }
+    }
+} else {
+    Write-Miss "cargo not found — skipping legacy Rust binary removal"
+}
+
+# Legacy MCP registrations — Claude Desktop / OpenCode / Codex TOML
+Remove-JsonMcpKey $ClaudeConfig "tilth"
+Remove-JsonMcpKey $OpenCode "tilth"
+if (Test-Path $CodexToml) {
+    if ($DryRun) {
+        Write-DryMsg "Remove [mcp_servers.{rtk,tilth}] from $CodexToml"
+    } else {
+        $content = Get-Content $CodexToml -Raw
+        $content = $content -replace '(?ms)\[mcp_servers\.(rtk|tilth)\][^\[]*', ''
+        Set-Content $CodexToml -Value $content -Encoding UTF8
+        Write-Ok "Removed mcp_servers.{rtk,tilth} from $CodexToml"
+    }
+} else {
+    Write-Miss $CodexToml
+}
+
+# Hooks and docs (legacy rtk hook + current token-diet docs)
 Remove-TokenDietFile (Join-Path $ClaudeDir "hooks\rtk-rewrite.sh")
+Write-Header "Hooks and docs"
 Remove-TokenDietFile $ClaudeMd
 Remove-TokenDietFile $CodexMd
 

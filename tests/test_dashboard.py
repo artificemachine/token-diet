@@ -1,4 +1,5 @@
 import json
+import pathlib
 from unittest.mock import patch
 import pytest
 
@@ -9,90 +10,31 @@ def dashboard_mod():
     return loader.load_module()
 
 def test_collect_returns_required_keys(dashboard_mod):
-    """collect() returns a dict with all expected top-level keys."""
-    with patch.object(dashboard_mod, "_get_rtk_daily", return_value=None), \
-         patch.object(dashboard_mod, "_get_rtk_total", return_value=0):
-        result = dashboard_mod.collect()
-        assert "rtk" in result
-        assert "tilth" in result
-        assert "serena" in result
-        assert "icm" in result
-        assert "budget" in result
-        assert "budgets" in result
-        assert "version" in result
-        assert "alerts" in result
+    """collect() returns a dict with all expected top-level keys.
 
-# --- Alert banner data (loops + leaks) -------------------------------------
-# The dashboard's alert-banner JS reads d.loops.loops[] and d.leaks.leaks[],
-# but collect() never populated either key, so both banners were permanently
-# dead. These pin the backend/frontend contract the JS already expects.
-
-FAKE_GAIN = """RTK Token Savings (Global Scope)
-
-By Command
-────────────────────────────────────────────────────────────────────────
-  #  Command                   Count   Saved    Avg%    Time  Impact
-────────────────────────────────────────────────────────────────────────
- 1.  rtk read                   2811  141.2M   34.6%     5ms  ██████████
- 2.  rtk cat src/main.rs           4   80.0K   50.0%    12ms  ██░░░░░░░░
- 3.  rtk grep                      1   22.2K   22.9%   290ms  ░░░░░░░░░░
-────────────────────────────────────────────────────────────────────────
-"""
-
-def test_loops_stats_flags_commands_at_or_above_threshold(dashboard_mod):
-    """loops_stats() returns the shape the alert JS reads: {'loops': [{cmd,count}]}."""
-    result = dashboard_mod.loops_stats(FAKE_GAIN)
-    cmds = {l["cmd"]: l for l in result["loops"]}
-    assert "rtk read" in cmds
-    assert cmds["rtk read"]["count"] == 2811
-    # count 1 is below the >=3 loop threshold
-    assert "rtk grep" not in cmds
-
-def test_loops_stats_returns_empty_when_no_history(dashboard_mod):
-    assert dashboard_mod.loops_stats("") == {"loops": []}
-
-def test_leaks_stats_detects_repeated_file_reads(dashboard_mod):
-    """leaks_stats() returns the shape the alert JS reads: {'leaks': [{file,count}]}."""
-    result = dashboard_mod.leaks_stats(FAKE_GAIN)
-    files = {l["file"]: l for l in result["leaks"]}
-    assert "src/main.rs" in files
-    assert files["src/main.rs"]["count"] == 4
-
-def test_leaks_stats_returns_empty_when_no_history(dashboard_mod):
-    assert dashboard_mod.leaks_stats("") == {"leaks": []}
-
-def test_collect_populates_loops_and_leaks_keys(dashboard_mod):
-    """Regression: collect() must emit the keys the alert banner reads."""
+    The rtk-gain savings panels are gone (rtk_stats/tilth_stats/_get_rtk_daily/
+    _get_rtk_total removed with the rtk/tilth drop); the dashboard reports
+    per-component status for the surviving stack: serena, icm, context7.
+    run() is patched to None so no subprocess or network call escapes the test;
+    home/cwd are repointed so the budget walk stays hermetic.
+    """
     dashboard_mod._CACHE["data"] = None
     dashboard_mod._CACHE["expires"] = 0
-    with patch.object(dashboard_mod, "_get_rtk_daily", return_value=None), \
-         patch.object(dashboard_mod, "_get_rtk_total", return_value=0), \
-         patch.object(dashboard_mod, "run", return_value=FAKE_GAIN):
+    home = pathlib.Path("/nonexistent-token-diet-test-home")
+    with patch.object(dashboard_mod, "run", return_value=None), \
+         patch("pathlib.Path.home", return_value=home), \
+         patch("pathlib.Path.cwd", return_value=home):
         result = dashboard_mod.collect()
-    assert "loops" in result, "alert banner reads d.loops — collect() must set it"
-    assert "leaks" in result, "alert banner reads d.leaks — collect() must set it"
-    assert "loops" in result["loops"]
-    assert "leaks" in result["leaks"]
-
-def test_rtk_stats_parses_json(dashboard_mod):
-    """rtk_stats() parses the summary and daily fields from data dict."""
-    fake_data = {
-        "summary": {
-            "total_commands": 10,
-            "total_input": 5000,
-            "total_saved": 3500,
-            "avg_savings_pct": 70.0,
-            "total_time_ms": 250,
-        },
-        "daily": [],
-    }
-    result = dashboard_mod.rtk_stats(fake_data)
-    assert result["summary"]["total_saved"] == 3500
-    assert result["summary"]["avg_savings_pct"] == 70.0
-
-def test_rtk_stats_returns_none_when_data_missing(dashboard_mod):
-    """rtk_stats() returns None when data is None."""
-    assert dashboard_mod.rtk_stats(None) is None
+    assert "serena" in result
+    assert "icm" in result
+    assert "context7" in result
+    assert "budget" in result
+    assert "budgets" in result
+    assert "missing_hosts" in result
+    assert "version" in result
+    # Dropped components must not come back.
+    assert "rtk" not in result
+    assert "tilth" not in result
 
 def test_icm_stats_returns_none_when_binary_missing(dashboard_mod):
     """icm_stats() returns None when the icm binary is absent (run() falsy)."""
@@ -131,15 +73,15 @@ def test_registered_hosts_detection(dashboard_mod, tmp_path):
     # 1. Claude settings
     claude_dir = home / ".claude"
     claude_dir.mkdir()
-    (claude_dir / "settings.json").write_text(json.dumps({"mcpServers": {"tilth": {}}}))
+    (claude_dir / "settings.json").write_text(json.dumps({"mcpServers": {"icm": {}}}))
     
     # 2. Codex config
     codex_dir = home / ".codex"
     codex_dir.mkdir()
-    (codex_dir / "config.toml").write_text('[mcp_servers.tilth]\ncommand = "tilth"')
+    (codex_dir / "config.toml").write_text('[mcp_servers.icm]\ncommand = "icm"')
 
     with patch("pathlib.Path.home", return_value=home):
-        hosts = dashboard_mod._registered_hosts("tilth")
+        hosts = dashboard_mod._registered_hosts("icm")
         assert "claude-code" in hosts
         assert "codex" in hosts
 
@@ -207,102 +149,60 @@ def test_real_registry_preserves_default_host_set(dashboard_mod):
     assert reg["mcp_key_dialect"] == ["mcpServers", "mcp", "servers"]
 
 
-def test_budget_stats_calculation(dashboard_mod, tmp_path):
-    """budget_stats() correctly calculates used tokens based on baseline."""
+def test_budget_stats_reads_thresholds_without_usage_tracking(dashboard_mod, tmp_path):
+    """budget_stats() (no args) reports the thresholds from the active budget file.
+
+    Per-command token usage died with RTK and nothing replaced it (Serena/ICM/
+    context7 have no per-command counter), so the entry must say so via
+    usage_tracked=False instead of pretending to measure a burn-down.
+    """
     home = tmp_path / "home"
     home.mkdir()
-    budget_file = home / ".token-budget"
-    # warn at 1000, baseline 5000
-    budget_file.write_text(json.dumps({"warn": 1000, "hard": 2000, "baseline_tokens": 5000}))
-    
+    (home / ".token-budget").write_text(json.dumps({"warn": 1000, "hard": 0}))
+
     with patch("pathlib.Path.home", return_value=home), \
          patch("pathlib.Path.cwd", return_value=home):
-        # total input 5500 -> used 500 (OK)
-        res1 = dashboard_mod.budget_stats(5500)
-        assert res1["used"] == 500
-        assert res1["status"] == "ok"
-        
-        # total input 6500 -> used 1500 (WARN)
-        res2 = dashboard_mod.budget_stats(6500)
-        assert res2["used"] == 1500
-        assert res2["status"] == "warn"
+        res = dashboard_mod.budget_stats()
 
-def test_projection_stats(dashboard_mod):
-    """projection_stats() calculates weekly savings based on daily history."""
-    fake_data = {
-        "daily": [
-            {"date": "2026-04-01", "saved_tokens": 1000},
-            {"date": "2026-04-02", "saved_tokens": 2000}
-        ]
-    }
-    res = dashboard_mod.projection_stats(fake_data)
-    # average saved is 1500. weekly = 1500 * 7 = 10500.
-    assert res["weekly_projection"] == 10500
+    assert res["warn"] == 1000
+    assert res["hard"] == 0
+    assert res["unlimited"] is True
+    assert res["status"] == "ok"
+    assert res["used"] == 0
+    assert res["usage_tracked"] is False
 
+def test_budget_stats_returns_none_when_no_budget_file(dashboard_mod, tmp_path):
+    """budget_stats() reports nothing when no .token-budget exists anywhere."""
+    home = tmp_path / "home"
+    home.mkdir()
+    with patch("pathlib.Path.home", return_value=home), \
+         patch("pathlib.Path.cwd", return_value=home):
+        assert dashboard_mod.budget_stats() is None
 
-# --- Low-volume filtering -----------------------------------------------------
-# An unweighted mean over raw days lets a 2-command day count as much as a
-# 5,000-command day, so a weekend or a day the machine was off drags the
-# projection down by an amount unrelated to the actual savings rate.
+def test_context7_stats_reports_registration_only(dashboard_mod, tmp_path, monkeypatch):
+    """context7_stats() is presence-only: remote URL + registered hosts.
 
-def test_projection_excludes_low_volume_days(dashboard_mod):
-    """A near-idle day must not drag the average down."""
-    fake_data = {
-        "daily": [
-            {"date": "2026-04-01", "saved_tokens": 10000, "commands": 500},
-            {"date": "2026-04-02", "saved_tokens": 10000, "commands": 500},
-            # Machine barely used. Two commands should not count as a full day.
-            {"date": "2026-04-03", "saved_tokens": 10, "commands": 2},
-        ]
-    }
-    res = dashboard_mod.projection_stats(fake_data)
-    # Only the two qualifying days average: 10000, not (10000+10000+10)/3.
-    assert res["avg_daily_saved"] == 10000
-    assert res["weekly_projection"] == 70000
-    assert res["days_sampled"] == 2
-    assert res["days_qualified"] == 2
-    assert res["days_total"] == 3
-
-
-def test_projection_filter_is_noop_without_volume_data(dashboard_mod):
-    """Data with no "commands" key at all keeps its projection.
-
-    Filtering must degrade to a no-op when it has nothing to judge by. Treating
-    a missing field as zero volume would silently drop every day and return
-    None, turning an absent field into "no data".
+    context7 has no local binary or version to probe — registration state is
+    the entire health signal.
     """
-    fake_data = {
-        "daily": [
-            {"date": "2026-04-01", "saved_tokens": 1000},
-            {"date": "2026-04-02", "saved_tokens": 2000},
-        ]
+    reg = {
+        "schema": 1,
+        "mcp_key_dialect": ["mcpServers"],
+        "all_hosts": ["claude-code"],
+        "home_configs": [{"path": ".claude/settings.json", "host": "claude-code", "format": "json"}],
+        "project_configs": [],
+        "presence": {},
     }
-    res = dashboard_mod.projection_stats(fake_data)
-    assert res is not None
-    assert res["weekly_projection"] == 10500
+    reg_file = tmp_path / "hosts-mcp.json"
+    reg_file.write_text(json.dumps(reg))
+    monkeypatch.setattr(dashboard_mod, "_host_registry_path", lambda: reg_file)
 
-
-def test_projection_returns_none_when_all_days_low_volume(dashboard_mod):
-    """If volume data exists and nothing qualifies, report nothing rather than a lie."""
-    fake_data = {
-        "daily": [
-            {"date": "2026-04-01", "saved_tokens": 5, "commands": 1},
-            {"date": "2026-04-02", "saved_tokens": 5, "commands": 2},
-        ]
-    }
-    assert dashboard_mod.projection_stats(fake_data) is None
-
-
-def test_projection_reports_30_day_average(dashboard_mod):
-    """The 30-day baseline is reported alongside the 7-day trend."""
-    daily = [
-        {"date": f"2026-04-{i:02d}", "saved_tokens": 1000, "commands": 100}
-        for i in range(1, 11)
-    ]
-    # Last 7 days run hotter than the preceding stretch.
-    for d in daily[-7:]:
-        d["saved_tokens"] = 2000
-    res = dashboard_mod.projection_stats({"daily": daily})
-    assert res["weekly_projection"] == 14000          # 7-day: 2000 * 7
-    assert res["weekly_proj_30d"] < res["weekly_projection"]
-    assert res["days_qualified"] == 10
+    home = tmp_path / "home"
+    (home / ".claude").mkdir(parents=True)
+    (home / ".claude" / "settings.json").write_text(
+        json.dumps({"mcpServers": {"context7": {"type": "http", "url": "https://mcp.context7.com/mcp"}}})
+    )
+    with patch("pathlib.Path.home", return_value=home):
+        res = dashboard_mod.context7_stats()
+    assert res["url"] == "https://mcp.context7.com/mcp"
+    assert res["hosts"] == ["claude-code"]

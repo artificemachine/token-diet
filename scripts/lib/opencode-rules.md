@@ -1,29 +1,37 @@
-## token-diet stack (RTK + tilth + Serena + ICM)
+## token-diet stack (Serena + ICM + Context7)
 
-RTK = shell command proxy that compresses tool output (60-90% token savings).
-tilth = AST-aware code-intel MCP server (replaces grep/cat/find).
-Serena = semantic symbol MCP server (symbol-level edits, references).
+Serena = LSP symbol navigation MCP server (definitions, references, renames).
 ICM = persistent cross-tool memory MCP server (recall past decisions, store facts).
+Context7 = up-to-date library documentation MCP server (docs, not guesses).
 
 **Reading and searching code:**
-- Use `tilth_read` instead of `cat`/`head`/`tail` — smart outline for large files.
-- Use `tilth_search` instead of `grep`/`rg` — returns definitions and usages in one call.
-- Use `tilth_files` instead of `find`/`ls` — glob with token counts, respects `.gitignore`.
-- Do NOT re-read content already shown inline in a `tilth_search` result.
 
-**Editing code:**
-- For symbol-level changes (rename, find-references, replace-body), prefer Serena MCP tools over manual edits.
-- If unsure whether a symbol exists, call `tilth_search` first rather than reading whole files.
+- Use Serena's symbol tools for navigation: definitions, references, symbol overviews,
+  and symbol-level edits. It is LSP-backed, so it answers precision questions that
+  text search cannot (find-references across modules, type hierarchy, renames).
+- Fall back to your built-in Read/Grep/Glob for prose, configuration, and small edits —
+  Serena earns its cost on symbol work, not on reading a config file.
+- Do not re-read a file you have already read in this session; recall the content instead.
 
 **Persistent memory:**
-- Use ICM to recall past decisions, prior context, and stored facts across sessions and tools instead of re-deriving them.
-- Store durable facts (architecture decisions, conventions, gotchas) in ICM so future sessions can recall them rather than re-reading whole files.
+
+- Use ICM to recall past decisions, prior context, and stored facts across sessions
+  instead of re-deriving them.
+- Store durable facts (architecture decisions, conventions, gotchas) in ICM so future
+  sessions can recall them rather than re-reading whole files.
+
+**Library documentation:**
+
+- When unsure about a library or framework API, query Context7 instead of guessing.
+  It resolves the library and returns current docs, which prevents hallucinated APIs.
+- Prefer Context7 over web search for library usage questions.
 
 **Shell commands:**
-- RTK wraps shell commands transparently — run them normally, RTK intercepts and compresses output.
-- Meta commands: `rtk gain` (RTK savings), `token-diet gain` (combined RTK + tilth + Serena dashboard).
+
+- Run shell commands normally; there is no output-rewriting proxy in this stack.
 
 **Budget discipline:**
+
 - Prefer structured tool output over raw `cat`-style reads.
-- Use `tilth_read --section` when you only need one function or class.
+- Use Serena's symbol overview when you only need one function or class.
 - Avoid recursive directory listings when a glob would do.

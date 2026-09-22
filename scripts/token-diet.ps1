@@ -2,15 +2,15 @@
 .SYNOPSIS
     token-diet — token optimization stack dashboard (Windows)
 .DESCRIPTION
-    Shows combined token savings and health across RTK + tilth + Serena.
+    Shows component and MCP health across Serena, ICM, and Context7.
     Equivalent to the bash token-diet CLI for Windows / PowerShell.
 .EXAMPLE
-    .\token-diet.ps1 gain
+    .\token-diet.ps1 status
     .\token-diet.ps1 health
     .\token-diet.ps1 route 'search for the function'
 #>
 param(
-    [string]$Command = 'gain',
+    [string]$Command = 'status',
     [switch]$Version,
     [Parameter(ValueFromRemainingArguments = $true)]
     [string[]]$SubArgs
@@ -28,7 +28,7 @@ $ErrorActionPreference = 'Stop'
 # and Test-Tool 'icm' is always true (the alias always exists).
 Remove-Item Alias:icm -Force -ErrorAction SilentlyContinue
 
-$script:TD_VERSION = '1.16.0'
+$script:TD_VERSION = '1.16.1'
 if ($Version) { Write-Output "token-diet $script:TD_VERSION"; exit 0 }
 $ScriptDir = $PSScriptRoot
 
@@ -61,15 +61,6 @@ function Format-Tokens([long]$n) {
     return "$n"
 }
 
-function Format-Ms([long]$ms) {
-    if ($ms -ge 60000) {
-        $m = [int]($ms / 60000); $s = [int](($ms % 60000) / 1000)
-        return "${m}m ${s}s"
-    }
-    if ($ms -ge 1000) { return '{0:0.0}s' -f ($ms / 1000) }
-    return "${ms}ms"
-}
-
 # Use Write-Output so output is captured in tests; colour via Write-Host only for TTY
 function Write-Ok  ([string]$Msg) { Write-Host "  [OK] $Msg" -ForegroundColor Green  }
 function Write-Miss([string]$Msg) { Write-Host "  [!]  $Msg" -ForegroundColor Yellow }
@@ -78,11 +69,16 @@ function Write-Err ([string]$Msg) { Write-Host "  [X]  $Msg" -ForegroundColor Re
 
 function Get-HostsRegistered([string]$Tool) {
     $hosts = @()
-    $paths = @(
-        @( (Join-Path $env:USERPROFILE '.claude\settings.json'),                        'claude-code'    ),
-        @( (Join-Path $env:APPDATA 'Claude\claude_desktop_config.json'),                'claude-desktop' ),
-        @( (Join-Path $env:USERPROFILE '.opencode.json'),                               'opencode'       )
-    )
+    # Env vars are guarded so the script degrades to 'none' instead of crashing
+    # when a per-OS path variable is unset (e.g. USERPROFILE/APPDATA on Unix).
+    $paths = @()
+    if ($env:USERPROFILE) {
+        $paths += @( (Join-Path $env:USERPROFILE '.claude\settings.json'), 'claude-code' )
+        $paths += @( (Join-Path $env:USERPROFILE '.opencode.json'),        'opencode'     )
+    }
+    if ($env:APPDATA) {
+        $paths += @( (Join-Path $env:APPDATA 'Claude\claude_desktop_config.json'), 'claude-desktop' )
+    }
     foreach ($pair in $paths) {
         $path, $label = $pair[0], $pair[1]
         if (Test-Path $path) {
@@ -100,7 +96,7 @@ function Get-HostsRegistered([string]$Tool) {
 
 # Extract the configured command for [mcp_servers.<tool>] from Codex TOML.
 function Get-CodexMcpCommand([string]$Tool) {
-    $codexCfg = Join-Path $env:USERPROFILE '.codex\config.toml'
+    $codexCfg = Join-Path (Get-UserHome) '.codex\config.toml'
     if (-not (Test-Path $codexCfg)) { return $null }
     $text = Get-Content $codexCfg -Raw -ErrorAction SilentlyContinue
     if (-not $text) { return $null }
@@ -125,14 +121,26 @@ function Get-CodexMcpCommandIssue([string]$Tool) {
     return $null
 }
 
-function Get-RtkSummary {
-    if (-not (Test-Tool 'rtk')) { return $null }
-    try { return (& rtk gain --format json 2>$null | ConvertFrom-Json).summary } catch { return $null }
+# Context7 endpoint for display — env override, query string (api key) stripped.
+function Get-Context7DisplayUrl {
+    $url = if ($env:CONTEXT7_URL) { $env:CONTEXT7_URL } else { 'https://mcp.context7.com/mcp' }
+    return ($url -replace '\?.*$', '')
 }
 
-function Get-RtkHistory {
-    if (-not (Test-Tool 'rtk')) { return $null }
-    try { return & rtk gain --history 2>$null | ConvertFrom-Json } catch { return $null }
+# True when the context7 HTTP MCP server is registered in at least one host config.
+function Test-Context7Registered {
+    foreach ($path in @(
+        (Join-Path (Get-UserHome) '.claude\settings.json'),
+        (Join-Path (Get-UserHome) '.opencode.json'),
+        (Join-Path (Get-UserHome) '.codex\config.toml')
+    )) {
+        if ((Test-Path $path) -and (Select-String -Path $path -Pattern 'context7' -Quiet)) { return $true }
+    }
+    if ($env:APPDATA) {
+        $coworkCfg = Join-Path $env:APPDATA 'Claude\claude_desktop_config.json'
+        if ((Test-Path $coworkCfg) -and (Select-String -Path $coworkCfg -Pattern 'context7' -Quiet)) { return $true }
+    }
+    return $false
 }
 
 # --- Commands -----------------------------------------------------------------
@@ -143,77 +151,20 @@ function Get-UserHome {
     return $HOME
 }
 
-function Get-ArchivedStats {
-    $arch = Join-Path (Get-UserHome) '.config/token-diet/archived_stats.json'
-    if (-not (Test-Path $arch)) { return $null }
-    try { return Get-Content $arch -Raw | ConvertFrom-Json } catch { return $null }
-}
+function Invoke-Status {
+    Write-Output "`n=== token-diet status ===`n"
 
-function Invoke-Gain {
-    Write-Output "`n=== token-diet gain ===`n"
-    Write-Output 'RTK — command output compression'
-
-    $s = Get-RtkSummary
-    $arch = Get-ArchivedStats
-
-    if ($s -or $arch) {
-        $liveCmds  = if ($s) { [long]$s.total_commands } else { 0 }
-        $liveInput = if ($s) { [long]$s.total_input    } else { 0 }
-        $liveSaved = if ($s) { [long]$s.total_saved    } else { 0 }
-        $liveTime  = if ($s) { [long]$s.total_time_ms  } else { 0 }
-
-        $archCmds  = if ($arch) { [long]$arch.cmds    } else { 0 }
-        $archInput = if ($arch) { [long]$arch.input   } else { 0 }
-        $archSaved = if ($arch) { [long]$arch.saved   } else { 0 }
-        $archTime  = if ($arch) { [long]$arch.time_ms } else { 0 }
-
-        $totalCmds  = $liveCmds  + $archCmds
-        $totalInput = $liveInput + $archInput
-        $totalSaved = $liveSaved + $archSaved
-        $totalTime  = $liveTime  + $archTime
-        $totalPct   = if ($totalInput -gt 0) { [math]::Round(($totalSaved / $totalInput * 100), 1) } else { 0.0 }
-
-        Write-Output ('  Commands filtered:     {0}' -f $totalCmds)
-        Write-Output ('  Tokens in:             {0}' -f (Format-Tokens $totalInput))
-        Write-Output ('  Tokens saved:          {0}  ({1}%)' -f (Format-Tokens $totalSaved), $totalPct)
-        Write-Output ('  Exec time:             {0}' -f (Format-Ms $totalTime))
-        if ($arch -and $s) {
-            Write-Output ('  (includes {0} archived commands from previous rotations)' -f $archCmds)
-        } elseif ($arch -and -not $s) {
-            Write-Output '  (archived-only: RTK not currently installed)'
-        }
-        if ($s) {
-            Write-Ok "RTK $(& rtk --version 2>$null) - active"
-        } else {
-            Write-Miss 'RTK not installed  ->  run: Install.ps1 -RtkOnly'
-        }
-    } else {
-        Write-Miss 'RTK not installed  ->  run: Install.ps1 -RtkOnly'
-    }
-
-    Write-Output ''
-    Write-Output 'tilth — AST-aware code reading (tree-sitter)'
-    if (Test-Tool 'tilth') {
-        $tv = & tilth --version 2>$null
-        Write-Output "  Version:   $tv"
-        Write-Output "  MCP hosts: $(Get-HostsRegistered 'tilth')"
-        Write-Ok "tilth $tv — active"
-    } else {
-        Write-Miss 'tilth not installed  ->  run: Install.ps1 -TilthOnly'
-    }
-
-    Write-Output ''
     Write-Output 'Serena — LSP symbol navigation'
     $serenaMode = Get-SerenaRuntimeMode
     if ($serenaMode -ne 'none') {
-        $memDir = Join-Path $env:USERPROFILE '.serena\memories'
-        $logDir = Join-Path $env:USERPROFILE '.serena\logs'
+        $memDir = Join-Path (Get-UserHome) '.serena\memories'
+        $logDir = Join-Path (Get-UserHome) '.serena\logs'
         Write-Output "  Runtime:      $serenaMode"
         Write-Output "  MCP hosts:    $(Get-HostsRegistered 'serena')"
         Write-Output "  Memories:     $(if (Test-Path $memDir) { @(Get-ChildItem $memDir).Count } else { 0 }) files"
         Write-Ok 'Serena — active'
     } else {
-        Write-Miss 'Serena not installed  ->  run: Install.ps1 -SerenaOnly'
+        Write-Miss 'Serena not installed  ->  run: Install.ps1 -Tool Serena'
     }
 
     Write-Output ''
@@ -225,13 +176,24 @@ function Invoke-Gain {
         Write-Output "  MCP hosts: $(Get-HostsRegistered 'icm')"
         Write-Ok "ICM $iv — active"
     } else {
-        Write-Miss 'ICM not installed  ->  run: Install.ps1 -IcmOnly'
+        Write-Miss 'ICM not installed  ->  run: Install.ps1 -Tool icm'
     }
 
-    $active = ([int][bool]$s) + ([int](Test-Tool 'tilth')) + ([int]($serenaMode -ne 'none')) + ([int]$icmActive)
     Write-Output ''
-    Write-Output "  Tools active: $active/4"
-    if ($active -eq 4)     { Write-Output "`n  Full stack active. Maximum token savings." }
+    Write-Output 'Context7 — up-to-date library docs (remote HTTP MCP)'
+    $ctx7Registered = Test-Context7Registered
+    if ($ctx7Registered) {
+        Write-Output "  Endpoint:  $(Get-Context7DisplayUrl)"
+        Write-Output "  MCP hosts: $(Get-HostsRegistered 'context7')"
+        Write-Ok 'Context7 — registered'
+    } else {
+        Write-Miss 'Context7 not registered  ->  run: Install.ps1 -Tool context7'
+    }
+
+    $active = ([int]($serenaMode -ne 'none')) + ([int]$icmActive) + ([int]$ctx7Registered)
+    Write-Output ''
+    Write-Output "  Tools active: $active/3"
+    if ($active -eq 3)     { Write-Output "`n  Full stack active. Maximum context efficiency." }
     elseif ($active -gt 0) { Write-Output "`n  Partial stack — run Install.ps1 to complete setup." }
     else                   { Write-Output "`n  No tools installed — run Install.ps1 to get started." }
     Write-Output ''
@@ -239,12 +201,12 @@ function Invoke-Gain {
 
 function Invoke-Version {
     Write-Output "`ntoken-diet stack versions`n"
-    if (Test-Tool 'rtk')  { Write-Ok  "RTK    $(& rtk --version 2>$null)" } else { Write-Miss 'RTK    not installed' }
-    if (Test-Tool 'tilth'){ Write-Ok  "tilth  $(& tilth --version 2>$null)" } else { Write-Miss 'tilth  not installed' }
-    
     $mode = Get-SerenaRuntimeMode
     if ($mode -ne 'none') { Write-Ok "Serena (runtime: $mode)" }
     else                  { Write-Miss 'Serena not installed' }
+    if (Test-Tool 'icm')  { Write-Ok "ICM    $(& icm --version 2>$null)" } else { Write-Miss 'ICM    not installed' }
+    if (Test-Context7Registered) { Write-Ok "Context7  $(Get-Context7DisplayUrl) (registered)" }
+    else                         { Write-Miss 'Context7  not registered' }
     Write-Output ''
 }
 
@@ -255,35 +217,29 @@ function Invoke-Doctor([string[]]$Remaining) {
 
     if (-not $jsonMode) { Write-Output "`ntoken-diet doctor`n" }
 
-    # 1. Binaries
+    # 1. Binaries / runtimes
     if (-not $jsonMode) {
         Write-Output "Binaries"
         Write-Output "──────────────────────────────────────────────────"
     }
 
-    $rtkVer = if (Test-Tool 'rtk') { & rtk --version 2>$null } else { $null }
-    if ($rtkVer) { if (-not $jsonMode) { Write-Output "  ✓  rtk     $rtkVer" } }
-    else { if (-not $jsonMode) { Write-Output "  !  rtk     not found" }; $issues++; $findings += "rtk binary missing" }
-
-    $tilthVer = if (Test-Tool 'tilth') { & tilth --version 2>$null } else { $null }
-    if ($tilthVer) { if (-not $jsonMode) { Write-Output "  ✓  tilth   $tilthVer" } }
-    else { if (-not $jsonMode) { Write-Output "  !  tilth   not found" }; $issues++; $findings += "tilth binary missing" }
+    $icmVer = if (Test-Tool 'icm') { & icm --version 2>$null } else { $null }
+    if ($icmVer) { if (-not $jsonMode) { Write-Output "  ✓  icm     $icmVer" } }
+    else { if (-not $jsonMode) { Write-Output "  !  icm     not found" }; $issues++; $findings += "icm binary missing" }
 
     $serenaRuntime = Get-SerenaRuntimeMode
     if ($serenaRuntime -ne 'none') { if (-not $jsonMode) { Write-Output "  ✓  serena  runtime: $serenaRuntime" } }
     else { if (-not $jsonMode) { Write-Output "  !  serena  runtime not found" }; $issues++; $findings += "serena runtime missing" }
 
-    # 2. RTK Hooks (Simplified for Windows)
+    # 2. Context7 registration (remote HTTP MCP — no local binary)
+    $ctx7Registered = Test-Context7Registered
     if (-not $jsonMode) {
-        Write-Output "`nRTK hooks"
+        Write-Output "`nContext7"
         Write-Output "──────────────────────────────────────────────────"
-        $localClaude = Join-Path $PWD 'CLAUDE.md'
-        if (Test-Path $localClaude) {
-            $content = Get-Content $localClaude -Raw
-            if ($content -match 'rtk') { Write-Output "  ✓  Local (./CLAUDE.md): rtk enabled" }
-            else { Write-Output "  –  Local (./CLAUDE.md): rtk not found" }
-        }
+        if ($ctx7Registered) { Write-Output "  ✓  context7  registered ($(Get-Context7DisplayUrl))" }
+        else { Write-Output "  !  context7  not registered in any host" }
     }
+    if (-not $ctx7Registered) { $issues++; $findings += "context7 not registered" }
 
     # 3. MCP Registrations
     if (-not $jsonMode) {
@@ -291,7 +247,7 @@ function Invoke-Doctor([string[]]$Remaining) {
         Write-Output "──────────────────────────────────────────────────"
     }
 
-    $tools = @('tilth', 'serena', 'icm')
+    $tools = @('serena', 'icm')
     foreach ($tool in $tools) {
         if (-not $jsonMode) { Write-Output "  $tool" }
         $issue = Get-CodexMcpCommandIssue $tool
@@ -312,13 +268,15 @@ function Invoke-Doctor([string[]]$Remaining) {
             if ($h -eq 'none') { return @() }
             return @($h -split ',')
         }
+        $ctx7Hosts = @()
+        if ($ctx7Registered) { $ctx7Hosts = @(& $hostsFor 'context7') }
         $out = @{
             issues = $issues
             healthy = ($issues -eq 0)
             findings = $findings
-            tilth_mcp  = @{ registered_hosts = (& $hostsFor 'tilth') }
-            serena_mcp = @{ registered_hosts = (& $hostsFor 'serena') }
-            icm_mcp    = @{ registered_hosts = (& $hostsFor 'icm') }
+            serena_mcp  = @{ registered_hosts = (& $hostsFor 'serena') }
+            icm_mcp     = @{ registered_hosts = (& $hostsFor 'icm') }
+            context7_mcp = @{ registered_hosts = $ctx7Hosts }
         }
         $out | ConvertTo-Json -Depth 5 | Write-Output
     } else {
@@ -341,21 +299,22 @@ function Invoke-Verify {
 function Invoke-Health {
     $issues = 0
     Write-Output "`ntoken-diet health`n"
-    if (Test-Tool 'rtk') {
-        Write-Ok "RTK $(& rtk --version 2>$null)"
-    } else { Write-Miss 'RTK not found'; $issues++ }
-    if (Test-Tool 'tilth') {
-        Write-Ok "tilth $(& tilth --version 2>$null)  (hosts: $(Get-HostsRegistered 'tilth'))"
-        $tilthIssue = Get-CodexMcpCommandIssue 'tilth'
-        if ($tilthIssue) { Write-Warn $tilthIssue; $issues++ }
-    } else { Write-Miss 'tilth not found'; $issues++ }
-    
+    if (Test-Tool 'icm') {
+        Write-Ok "ICM $(& icm --version 2>$null)  (hosts: $(Get-HostsRegistered 'icm'))"
+        $icmIssue = Get-CodexMcpCommandIssue 'icm'
+        if ($icmIssue) { Write-Warn $icmIssue; $issues++ }
+    } else { Write-Miss 'ICM not found'; $issues++ }
+
     $serenaMode = Get-SerenaRuntimeMode
     if ($serenaMode -ne 'none') {
         Write-Ok "Serena (runtime: $serenaMode)  (hosts: $(Get-HostsRegistered 'serena'))"
     } else { Write-Miss 'Serena not found  (uvx or Docker required)'; $issues++ }
     $serenaIssue = Get-CodexMcpCommandIssue 'serena'
     if ($serenaIssue) { Write-Warn $serenaIssue; $issues++ }
+
+    if (Test-Context7Registered) {
+        Write-Ok "Context7 $(Get-Context7DisplayUrl)  (hosts: $(Get-HostsRegistered 'context7'))"
+    } else { Write-Miss 'Context7 not registered in any host'; $issues++ }
     Write-Output ''
     if ($issues -eq 0) { Write-Output '  All tools healthy'; Write-Output ''; return }
     Write-Output "  $issues issue(s) found — reinstall tools or repair MCP registrations"
@@ -488,56 +447,6 @@ Usage: token-diet.ps1 service <subcommand>
     }
 }
 
-function Invoke-Breakdown([string[]]$Remaining) {
-    $limit = 10
-    for ($i = 0; $i -lt $Remaining.Count; $i++) {
-        if ($Remaining[$i] -eq '--limit' -and ($i + 1) -lt $Remaining.Count) { $limit = [int]$Remaining[$i+1]; $i++ }
-    }
-    if (-not (Test-Tool 'rtk')) { Write-Output '  [X] RTK not installed — breakdown requires RTK'; exit 1 }
-    $hist = Get-RtkHistory
-    if (-not $hist -or -not $hist.commands) { Write-Output '  No RTK history yet — run some commands first'; return }
-    Write-Output "`n=== token-diet breakdown ===`n"
-    Write-Output "Top commands by tokens saved  (limit: $limit)"
-    $json = $hist | ConvertTo-Json -Depth 10 -Compress
-    $breakdownCode = @'
-import json, sys
-data  = json.loads(sys.argv[1]); limit = int(sys.argv[2])
-cmds  = sorted(data.get("commands",[]), key=lambda c: c.get("total_saved",0), reverse=True)[:limit]
-for i,c in enumerate(cmds,1):
-    s=c.get("total_saved",0); pct=c.get("avg_pct",0); n=c.get("count",0); inp=c.get("total_input",0)
-    sk=f"{s/1000:.1f}K" if s>=1000 else str(s); ik=f"{inp/1000:.1f}K" if inp>=1000 else str(inp)
-    print(f"  {i:>2}. {c['cmd'][:34]:<36} {sk:>7} saved  {pct:>5.1f}%  ({n}x, {ik} in)")
-'@
-    Invoke-Python -Code $breakdownCode -PyArgs @($json, "$limit")
-    Write-Output ''
-}
-
-function Invoke-Explain([string[]]$Remaining) {
-    $target = if ($Remaining.Count -gt 0) { $Remaining[0] } else { '' }
-    if (-not $target) { Write-Output 'Usage: token-diet explain <command>'; exit 1 }
-    if (-not (Test-Tool 'rtk')) { Write-Output '  [X] RTK not installed'; exit 1 }
-    $hist = Get-RtkHistory
-    if (-not $hist -or -not $hist.commands) { Write-Output '  No RTK history yet'; exit 1 }
-    $json   = $hist | ConvertTo-Json -Depth 10 -Compress
-    $explainCode = @'
-import json,sys
-data=json.loads(sys.argv[1]); target=sys.argv[2]
-m=next((c for c in data.get("commands",[]) if c["cmd"]==target),None)
-if not m: sys.exit(1)
-s=m.get("total_saved",0); inp=m.get("total_input",0); pct=m.get("avg_pct",0); cnt=m.get("count",0)
-print(f"cmd={m['cmd']}\ncount={cnt}\ninput={inp}\noutput={inp-s}\nsaved={s}\npct={pct}")
-'@
-    $result = Invoke-Python -Code $explainCode -PyArgs @($json, $target)
-    if (-not $result) { Write-Output "  No data for '$target' — not found in RTK history"; exit 1 }
-    $kv = @{}; $result | ForEach-Object { $p=$_ -split '=',2; if($p.Count-eq 2){$kv[$p[0]]=$p[1]} }
-    Write-Output "`n=== token-diet explain ===`n"
-    Write-Output "$($kv['cmd'])  ($($kv['count']) runs)"
-    Write-Output ('  Tokens in:    {0}' -f (Format-Tokens [long]$kv['input']))
-    Write-Output ('  Tokens out:   {0}' -f (Format-Tokens [long]$kv['output']))
-    Write-Output ('  Tokens saved: {0}  ({1}%)' -f (Format-Tokens [long]$kv['saved']), $kv['pct'])
-    Write-Output ''
-}
-
 function Invoke-Budget([string[]]$Remaining) {
     $subcmd = if ($Remaining.Count -gt 0) { $Remaining[0] } else { 'status' }
     switch ($subcmd) {
@@ -546,7 +455,6 @@ function Invoke-Budget([string[]]$Remaining) {
             $target   = if ($isGlobal) { Join-Path (Get-UserHome) '.token-budget' } else { Join-Path (Get-Location) '.token-budget' }
             if (Test-Path $target) { Write-Output "  .token-budget already exists at $target"; return }
             $baseline = 0L
-            $s = Get-RtkSummary; if ($s) { $baseline = [long]$s.total_input }
             @{ warn=1500000; hard=0; installed_at=(Get-Date -Format 'yyyy-MM-dd'); baseline_tokens=$baseline } |
                 ConvertTo-Json | Set-Content $target -Encoding UTF8
             $label = if ($isGlobal) { "global $target" } else { $target }
@@ -566,9 +474,8 @@ function Invoke-Budget([string[]]$Remaining) {
         'status' {
             $userHome = Get-UserHome
             $globalBudget = Join-Path $userHome '.token-budget'
-            $rtkSummary   = Get-RtkSummary
             if (-not (Test-Path $globalBudget)) {
-                $bl = if ($rtkSummary) { [long]$rtkSummary.total_input } else { 0L }
+                $bl = 0L
                 @{ warn=1500000; hard=0; installed_at=(Get-Date -Format 'yyyy-MM-dd'); baseline_tokens=$bl } |
                     ConvertTo-Json | Set-Content $globalBudget -Encoding UTF8
             }
@@ -605,7 +512,7 @@ function Invoke-Budget([string[]]$Remaining) {
                 else                                       { Write-Output '  Budget OK' }
             }
 
-            Show-BudgetSection $budgetFile $(if ($isOverride) { 'project' } else { 'global' }) $rtkSummary
+            Show-BudgetSection $budgetFile $(if ($isOverride) { 'project' } else { 'global' }) $null
             if ($isOverride -and (Test-Path $globalBudget)) {
                 $gc = Get-Content $globalBudget -Raw | ConvertFrom-Json
                 $gw = [long]$gc.warn; $gh = [long]$gc.hard
@@ -619,58 +526,6 @@ function Invoke-Budget([string[]]$Remaining) {
     }
 }
 
-function Invoke-Loops {
-    if (-not (Test-Tool 'rtk')) { Write-Output '  [X] RTK not installed — loop detection requires RTK'; exit 1 }
-    $hist = Get-RtkHistory
-    if (-not $hist) { Write-Output '  No RTK history yet'; return }
-    $json  = $hist | ConvertTo-Json -Depth 10 -Compress
-    $loopsCode = @'
-import json,sys
-data=json.loads(sys.argv[1]); t=int(sys.argv[2])
-for c in sorted([c for c in data.get("commands",[]) if c.get("count",0)>=t],key=lambda c:c["count"],reverse=True):
-    print(f'{c["cmd"]}\t{c["count"]}\t{c.get("total_input",0)-c.get("total_saved",0)}')
-'@
-    $found = Invoke-Python -Code $loopsCode -PyArgs @($json, '3')
-    Write-Output "`n=== token-diet loops ===`n"
-    if (-not $found) { Write-Output '  [OK] No loops detected — all commands run < 3 times'; Write-Output ''; return }
-    Write-Output 'Repeated commands  (>=3 runs — potential agent loops)'
-    $found -split "`n" | Where-Object { $_ } | ForEach-Object {
-        $p = $_ -split "`t"
-        Write-Output ("  [X]  {0}  — {1}x  (~{2} tokens lost)" -f $p[0], $p[1], (Format-Tokens [long]$p[2]))
-    }
-    Write-Output ''
-    Write-Output '  Tip: instruct your agent to cache results or use tilth for repeated reads'
-    Write-Output ''; exit 1
-}
-
-function Invoke-Leaks {
-    if (-not (Test-Tool 'rtk')) { Write-Output '  RTK not installed — leaks detection requires RTK history'; exit 1 }
-    $hist = Get-RtkHistory
-    if (-not $hist) { Write-Output '  RTK history unavailable'; exit 1 }
-    $json  = $hist | ConvertTo-Json -Depth 10 -Compress
-    $leaksCode = @'
-import sys,json,re
-data=json.loads(sys.argv[1]); FR=re.compile(r'\b(?:cat|head|tail|tilth\s+read|tilth_read)\s+(\S+\.\w+)')
-found=[]
-for c in data.get("commands",[]):
-    m=FR.search(c.get("cmd",""))
-    if m and c.get("count",0)>=2: found.append((m.group(1),c["count"],c.get("total_input",0)))
-for f,cnt,tok in sorted(found,key=lambda x:x[1],reverse=True):
-    print(f"{f}\t{cnt}\t{tok}")
-'@
-    $leaks = Invoke-Python -Code $leaksCode -PyArgs @($json)
-    if (-not $leaks) { Write-Output '  [OK] No leaks detected — no files read multiple times'; return }
-    Write-Output 'Context leaks — files read multiple times:'
-    Write-Output ''
-    $leaks -split "`n" | Where-Object { $_ } | ForEach-Object {
-        $p = $_ -split "`t"
-        Write-Output ("  [W]  {0}  ({1}x, ~{2} tokens)" -f $p[0], $p[1], (Format-Tokens [long]$p[2]))
-    }
-    Write-Output ''
-    Write-Output '  Tip: use tilth_read with offset/limit to read only changed sections'
-    exit 1
-}
-
 function Invoke-Route([string[]]$Remaining) {
     $task = $Remaining -join ' '
     if (-not $task) { Write-Output 'Usage: token-diet route <task description>'; exit 1 }
@@ -679,24 +534,23 @@ function Invoke-Route([string[]]$Remaining) {
         Write-Output '-> Serena (LSP navigation)'
         Write-Output '  Best for: rename, refactor, find references, diagnostics, symbol search'
         Write-Output '  Command:  use serena MCP tools (rename_symbol, find_referencing_symbols)'
-    } elseif ($lower -match 'run|build|test|install|npm|cargo|make|git|docker|pip|exec|deploy') {
-        Write-Output '-> RTK (output compression)'
-        Write-Output '  Best for: CLI commands whose output would flood context'
-        Write-Output '  Command:  rtk <your-command>'
-    } elseif ($lower -match 'read|search|find|list|outline|grep|cat|show|view|open|import|deps') {
-        Write-Output '-> tilth (AST-aware reading)'
-        Write-Output '  Best for: reading files, searching symbols, exploring structure'
-        Write-Output '  Command:  use tilth MCP tools (tilth_read, tilth_search, tilth_files)'
+    } elseif ($lower -match 'docs|documentation|library|framework|api|version|upgrade|migration|changelog') {
+        Write-Output '-> Context7 (up-to-date library docs)'
+        Write-Output '  Best for: current API references and library usage before writing integration code'
+        Write-Output '  Command:  use context7 MCP tools (resolve-library-id, get-library-docs)'
+    } elseif ($lower -match 'read|search|find|list|outline|grep|show|view|open|import|deps') {
+        Write-Output '-> Serena (symbol navigation)'
+        Write-Output '  Best for: reading structure, searching symbols, exploring code without whole-file reads'
+        Write-Output '  Command:  use serena MCP tools (find_symbol, get_symbols_overview)'
     } elseif ($lower -match 'remember|recall|memory|memoir|forget|persist|what did|last (time|session)|prior (decision|session|work)') {
         Write-Output '-> ICM (persistent memory)'
         Write-Output '  Best for: recalling past decisions, storing facts, cross-session/cross-tool memory'
         Write-Output '  Command:  use icm MCP tools (recall, remember) — shared across Claude/Codex/Gemini/OpenCode'
     } else {
         Write-Output 'No clear match — these tools may apply:'
-        Write-Output ''; Write-Output '  tilth   — reading/searching code (AST-aware, fast)'
-        Write-Output '  Serena  — renaming/navigating symbols (LSP-powered)'
-        Write-Output '  RTK     — running CLI commands (output compression)'
-        Write-Output '  ICM     — recalling/storing memory across sessions and tools'
+        Write-Output ''; Write-Output '  Serena   — renaming/navigating symbols (LSP-powered)'
+        Write-Output '  ICM      — recalling/storing memory across sessions and tools'
+        Write-Output '  Context7 — current library documentation (remote HTTP MCP)'
     }
 }
 
@@ -857,7 +711,7 @@ function Invoke-Mcp([string[]]$Remaining) {
     $sub = if ($Remaining.Count -gt 0) { $Remaining[0] } else { 'help' }
     switch ($sub) {
         { $_ -in 'install','register' } {
-            $args = @('-Tool', 'tilth', '-Tool', 'Serena') + $Remaining[1..($Remaining.Count-1)]
+            $args = @('-Tool', 'Serena', '-Tool', 'icm', '-Tool', 'context7') + $Remaining[1..($Remaining.Count-1)]
             Invoke-Update $args
         }
         { $_ -in 'list','status' } {
@@ -866,40 +720,30 @@ try:
     d = json.load(sys.stdin)
 except Exception:
     d = {}
-t_hosts = d.get("tilth_mcp", {}).get("registered_hosts", [])
-s_hosts = d.get("serena_mcp", {}).get("registered_hosts", [])
-i_hosts = d.get("icm_mcp", {}).get("registered_hosts", [])
-all_hosts = sorted(set(list(t_hosts) + list(s_hosts) + list(i_hosts)))
+def as_list(v):
+    if v is None: return []
+    if isinstance(v, str): return [v]
+    return list(v)
+s_hosts = as_list(d.get("serena_mcp", {}).get("registered_hosts"))
+i_hosts = as_list(d.get("icm_mcp", {}).get("registered_hosts"))
+c_hosts = as_list(d.get("context7_mcp", {}).get("registered_hosts"))
+all_hosts = sorted(set(list(s_hosts) + list(i_hosts) + list(c_hosts)))
 print("\nRegistered MCP Hosts:")
 if not all_hosts:
     print("  (none)")
 for h in all_hosts:
     st = []
-    if h in t_hosts: st.append("tilth")
     if h in s_hosts: st.append("serena")
     if h in i_hosts: st.append("icm")
+    if h in c_hosts: st.append("context7")
     print("  ✓ %-16s (%s)" % (h, ", ".join(st)))'
         }
         default {
             Write-Output "Usage: token-diet mcp [install|list]"
             Write-Output ""
-            Write-Output "  install   Register token-diet MCP servers (tilth/Serena/ICM) in detected AI hosts"
+            Write-Output "  install   Register token-diet MCP servers (Serena/ICM/Context7) in detected AI hosts"
             Write-Output "  list      Show hosts where token-diet MCP is currently registered"
             exit 1
-        }
-    }
-}
-
-function Invoke-Hook([string[]]$Remaining) {
-    $state = if ($Remaining.Count -gt 0) { $Remaining[0] } else { '' }
-    switch ($state) {
-        { $_ -in 'on','enable' }   { Invoke-UseRtk }
-        { $_ -in 'off','disable' } { Invoke-NoRtk }
-        default {
-            $noRtkFile = Join-Path $HOME '.token-diet-no-rtk'
-            if (Test-Path $noRtkFile) { Write-Output "RTK hook is currently: DISABLED" }
-            else { Write-Output "RTK hook is currently: ENABLED" }
-            Write-Output "Usage: token-diet hook [on|off]"
         }
     }
 }
@@ -907,14 +751,12 @@ function Invoke-Hook([string[]]$Remaining) {
 function Invoke-Upstream([string[]]$Remaining) {
     $sub = if ($Remaining.Count -gt 0) { $Remaining[0] } else { 'help' }
     $tool = if ($Remaining.Count -gt 1) { $Remaining[1] } else { '' }
-    $rtkUrl = 'https://github.com/rtk-ai/rtk.git'
-    $tilthUrl = 'https://github.com/jahala/tilth.git'
     $serenaUrl = 'https://github.com/oraios/serena.git'
 
     switch ($sub) {
         'setup' {
             Write-Output "Configuring upstream remotes in forks\..."
-            $forks = @{ rtk=$rtkUrl; tilth=$tilthUrl; serena=$serenaUrl }
+            $forks = @{ serena=$serenaUrl }
             foreach ($f in $forks.Keys) {
                 $dir = Join-Path $script:ScriptDir "..\forks\$f"
                 if (Test-Path $dir) {
@@ -943,10 +785,10 @@ function Invoke-Upstream([string[]]$Remaining) {
             Write-Output "`nMaintenance Advice:"
             Write-Output "1. Run 'token-diet upstream diff <tool>' to audit changes."
             Write-Output "2. If safe, 'cd forks\<tool>; git merge upstream/main'."
-            Write-Output "3. RE-VERIFY SECURITY PATCHES (e.g. tilth path guards) after any merge!"
+            Write-Output "3. RE-VERIFY SECURITY PATCHES after any merge!"
         }
         'diff' {
-            if (-not $tool) { Write-Error "specify tool (rtk|tilth|serena|icm)"; exit 1 }
+            if (-not $tool) { Write-Error "specify tool (serena|icm)"; exit 1 }
             $dir = Join-Path $script:ScriptDir "..\forks\$tool"
             if (-not (Test-Path $dir)) { Write-Error "tool dir not found: $dir"; exit 1 }
             Write-Output "Showing diff: fork vs original author ($tool)"
@@ -971,69 +813,6 @@ function Invoke-Upstream([string[]]$Remaining) {
     }
 }
 
-function Get-RtkHistoryDbPath {
-    # RTK uses Rust's dirs::data_dir() conventions for history.db
-    $userHome = Get-UserHome
-    if ($IsWindows -or $env:OS -eq 'Windows_NT') {
-        $appData = if ($env:APPDATA) { $env:APPDATA } else { Join-Path $userHome 'AppData/Roaming' }
-        return Join-Path $appData 'rtk\history.db'
-    } elseif ($IsMacOS) {
-        return Join-Path $userHome 'Library/Application Support/rtk/history.db'
-    } else {
-        $xdg = if ($env:XDG_DATA_HOME) { $env:XDG_DATA_HOME } else { Join-Path $userHome '.local/share' }
-        return Join-Path $xdg 'rtk/history.db'
-    }
-}
-
-function Invoke-Clean {
-    $userHome = Get-UserHome
-    $histJson = Join-Path $userHome '.rtk/history.json'
-    $histDb   = Get-RtkHistoryDbPath
-    $arch     = Join-Path $userHome '.config/token-diet/archived_stats.json'
-    $archDir  = Split-Path $arch -Parent
-    if (-not (Test-Path $archDir)) { New-Item -ItemType Directory -Path $archDir -Force | Out-Null }
-
-    Write-Output "`n=== token-diet clean ===`n"
-
-    $live = Get-RtkSummary
-    if ($live) {
-        $data = [ordered]@{ cmds = 0; input = 0; saved = 0; time_ms = 0 }
-        if (Test-Path $arch) {
-            try {
-                $existing = Get-Content $arch -Raw | ConvertFrom-Json
-                $data.cmds    = [long]$existing.cmds
-                $data.input   = [long]$existing.input
-                $data.saved   = [long]$existing.saved
-                $data.time_ms = [long]$existing.time_ms
-            } catch { }
-        }
-        $data.cmds    += [long]$live.total_commands
-        $data.input   += [long]$live.total_input
-        $data.saved   += [long]$live.total_saved
-        $data.time_ms += [long]$live.total_time_ms
-        ($data | ConvertTo-Json) + "`n" | Set-Content -Path $arch -NoNewline
-        Write-Output "  Totals carried forward to archived_stats.json"
-    } else {
-        Write-Output "  RTK not available - skipping totals carry-forward"
-    }
-
-    $ts = [int][double]::Parse((Get-Date -UFormat %s))
-    if (Test-Path $histJson) {
-        Move-Item $histJson "$histJson.$ts.bak" -Force
-        Write-Output "  JSON history archived."
-    }
-    if (Test-Path $histDb) {
-        Move-Item $histDb "$histDb.$ts.bak" -Force
-        $walPath = "$histDb-wal"; $shmPath = "$histDb-shm"
-        if (Test-Path $walPath) { Remove-Item $walPath -Force }
-        if (Test-Path $shmPath) { Remove-Item $shmPath -Force }
-        Write-Output "  SQLite history archived."
-    }
-
-    Write-Output "  A fresh, fast history will start on your next command."
-    Write-Output ""
-}
-
 # ICM memory management. `warmup` performs the one-time embedding-model download
 # (kept off by default so nothing is fetched silently behind a firewall); `status`
 # reports version, MCP hosts, and whether semantic search is enabled.
@@ -1045,7 +824,7 @@ function Invoke-Icm([string[]]$Remaining) {
     switch ($sub) {
         'warmup' {
             if (-not (Test-Tool 'icm')) {
-                Write-Miss 'ICM not installed  ->  run: Install.ps1 -IcmOnly'
+                Write-Miss 'ICM not installed  ->  run: Install.ps1 -Tool icm'
                 exit 1
             }
             Write-Output "`n=== ICM warmup — enable semantic memory ===`n"
@@ -1128,37 +907,29 @@ USAGE
   token-diet.ps1 [command]
 
 COMMANDS
-  gain                    Show token savings dashboard across RTK + tilth + Serena  (default)
+  status                  Component and MCP registration status across Serena + ICM + Context7  (default)
   health                  Quick health check: tools responding + MCP host registrations
-  doctor                  Deep configuration and hook diagnosis  [-Json]
-  repair                  Fix what doctor finds: RTK hooks, stale MCP commands  [-DryRun] [-Json]
+  doctor                  Deep configuration diagnosis  [-Json]
   mcp                     Manage MCP server registrations  [install|list]
   upstream                Manage and verify original repository updates  [setup|check|diff]
-  hook                    Toggle RTK hook  [on|off]
-  breakdown               Top commands by tokens saved  [--limit N]
-  explain <cmd>           Token cost breakdown for a specific command
   budget <init|status>    Per-project token budget with warn/hard thresholds
-  loops                   Detect agent loop patterns (commands run 3+ times)
-  route <task>            Suggest which tool (tilth/Serena/RTK/ICM) best fits the task
+  route <task>            Suggest which tool (Serena/ICM/Context7) best fits the task
   icm <sub>               ICM memory: warmup (download model), status  [warmup|status]
-  leaks                   Detect files read multiple times in RTK history
   test-first <file>       Suggest test file counterpart for an implementation file
   strip [--stats] <file>  Strip comments from source file to reduce tokens
   diff-reads <file>       Suggest line ranges to read based on recent git diff
   serena-status           Show Serena runtime details (mode/image/container/uvx)
   dashboard               Open live browser dashboard  [--no-open]
   service <sub>           Always-on dashboard daemon  (install|uninstall|start|stop|status)
-  clean                   Archive RTK history + carry totals forward (frees disk, keeps stats)
-  version                 Show installed versions of all three tools
+  version                 Show installed versions of all tools
   update                  Update tools  [-Fresh] [installer flags]
   uninstall               Remove all token-diet components  [-DryRun] [-Force]
   --help                  Show this help
 
 TOOLS
-  RTK    Command output compression       60-90% savings (tracked)
-  tilth  AST-aware code reading           38-44% savings (structural)
-  Serena LSP symbol navigation            fewer prompt turns (structural)
-  ICM    Persistent cross-tool memory     recall replaces re-reading (structural)
+  Serena   LSP symbol navigation            fewer prompt turns (structural)
+  ICM      Persistent cross-tool memory     recall replaces re-reading (structural)
+  Context7 Up-to-date library docs          remote HTTP MCP, no local install
 
 INSTALL
   .\Install.ps1             Install all tools
@@ -1170,25 +941,18 @@ INSTALL
 
 # --- Dispatch -----------------------------------------------------------------
 switch ($Command) {
-    'gain'                              { Invoke-Gain }
+    { $_ -in 'status','gain' }          { Invoke-Status }
     'health'                            { Invoke-Health }
     'doctor'                            { Invoke-Doctor     $SubArgs }
     'verify'                            { Invoke-Verify }
-    'repair'                            { Invoke-Repair     $SubArgs }
     'mcp'                               { Invoke-Mcp        $SubArgs }
     'upstream'                          { Invoke-Upstream   $SubArgs }
-    'hook'                              { Invoke-Hook       $SubArgs }
-    'breakdown'                         { Invoke-Breakdown  $SubArgs }
-    'explain'                           { Invoke-Explain    $SubArgs }
     'budget'                            { Invoke-Budget     $SubArgs }
-    'loops'                             { Invoke-Loops }
     'dashboard'                         { Invoke-Dashboard  $SubArgs }
     'service'                           { Invoke-Service    $SubArgs }
-    'clean'                             { Invoke-Clean }
     { $_ -in 'version','versions' }     { Invoke-Version }
     'route'                             { Invoke-Route      $SubArgs }
     'icm'                               { Invoke-Icm        $SubArgs }
-    'leaks'                             { Invoke-Leaks }
     'test-first'                        { Invoke-TestFirst  $SubArgs }
     'strip'                             { Invoke-Strip      $SubArgs }
     'diff-reads'                        { Invoke-DiffReads  $SubArgs }
@@ -1196,8 +960,6 @@ switch ($Command) {
     'update'                            { Invoke-Update     $SubArgs }
     'reinstall'                         { Invoke-Reinstall  $SubArgs }
     'uninstall'                         { Invoke-Uninstall  $SubArgs }
-    'no-rtk'                            { Write-Warning "'no-rtk' is deprecated. Use 'token-diet hook off' instead."; Invoke-NoRtk }
-    'use-rtk'                           { Write-Warning "'use-rtk' is deprecated. Use 'token-diet hook on' instead."; Invoke-UseRtk }
     { $_ -in '--help','-h','help' }     { Invoke-Help }
     default {
         Write-Output "Unknown command: $Command"

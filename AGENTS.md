@@ -4,8 +4,8 @@
 You are working for the project owner.
 
 ## This Project
-- What: token-diet — installer and compliance kit for the RTK + tilth + Serena + ICM token optimization stack
-- Stack: Bash (CLI), PowerShell (Windows CLI), Python (dashboard, tests), Rust (RTK + tilth + ICM forks), Docker (Serena)
+- What: token-diet — installer and compliance kit for the Serena + ICM + Context7 token optimization stack
+- Stack: Bash (CLI), PowerShell (Windows CLI), Python (dashboard, tests), Rust (ICM fork), Docker (Serena)
 - Status: active
 
 ## Cross-Agent Protocol

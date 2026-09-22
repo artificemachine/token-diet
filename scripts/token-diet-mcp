@@ -60,7 +60,7 @@ def handle_tools_list():
         "tools": [
             {
                 "name": "token_diet_health",
-                "description": "Quick health check for the token-diet stack (RTK, tilth, Serena). Shows tool status and MCP registrations.",
+                "description": "Quick health check for the token-diet stack (Serena, ICM, context7). Shows component status and MCP registrations.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {},
@@ -68,8 +68,8 @@ def handle_tools_list():
                 }
             },
             {
-                "name": "token_diet_savings",
-                "description": "Show overall token savings and efficiency across the stack.",
+                "name": "token_diet_status",
+                "description": "Show per-component status across the token-diet stack (Serena, ICM, context7).",
                 "inputSchema": {
                     "type": "object",
                     "properties": {},
@@ -86,17 +86,8 @@ def handle_tools_list():
                 }
             },
             {
-                "name": "token_diet_loops",
-                "description": "Analyze recent command history for inefficient loops or repeated executions.",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {},
-                    "required": []
-                }
-            },
-            {
                 "name": "token_diet_route",
-                "description": "Suggest the most token-efficient tool for a given task description (tilth/Serena/RTK).",
+                "description": "Suggest the most token-efficient tool for a given task description (Serena/context7/ICM).",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -116,12 +107,10 @@ def handle_tools_call(params):
     
     if name == "token_diet_health":
         return {"content": [{"type": "text", "text": run_command(["token-diet", "health"])}]}
-    elif name == "token_diet_savings":
-        return {"content": [{"type": "text", "text": run_command(["token-diet", "gain"])}]}
+    elif name == "token_diet_status":
+        return {"content": [{"type": "text", "text": run_command(["token-diet", "status"])}]}
     elif name == "token_diet_budget":
         return {"content": [{"type": "text", "text": run_command(["token-diet", "budget", "status"])}]}
-    elif name == "token_diet_loops":
-        return {"content": [{"type": "text", "text": run_command(["token-diet", "loops"])}]}
     elif name == "token_diet_route":
         task = params.get("arguments", {}).get("task", "")
         if not task:

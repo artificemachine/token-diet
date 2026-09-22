@@ -1,13 +1,24 @@
 # token-diet
 
-Token optimization stack installer and compliance kit for RTK + tilth + Serena + ICM.
+Token optimization stack installer and compliance kit for Serena + ICM + Context7.
 
 ## Identity
 
-- **What:** Unified installer, CLI dashboard, and compliance kit that wires RTK, tilth, Serena, and ICM together to reduce AI agent token costs. Per-tool figures and their methods are in `docs/benchmarks.md`; do not publish a combined stack-wide percentage, since two of the four tools are not separately measured.
-- **Stack:** Bash (CLI entry point), PowerShell (Windows CLI), Python (dashboard, tests), Rust (RTK + tilth + ICM submodule forks), Docker (Serena container)
+- **What:** Unified installer, CLI dashboard, and compliance kit that wires Serena, ICM, and Context7 together to cut AI-agent context waste. Per-tool figures and their methods are in `docs/benchmarks.md`; do not publish a combined stack-wide percentage, since the local tools are not separately measured.
+- **Stack:** Bash (CLI entry point), PowerShell (Windows CLI), Python (dashboard, tests), Rust (ICM submodule fork), Docker (Serena container)
 - **Version:** `TD_VERSION` in `scripts/token-diet` and `$script:TD_VERSION` in `scripts/token-diet.ps1` (current: 1.10.4)
 - **Status:** active
+
+## What is NOT in the stack
+
+RTK and tilth were removed from the product. Independent benchmarks (Quesma,
+Sept 2026, 1,740 attempts on Terminal-Bench 2.1; JetBrains SkillsBench) found
+RTK's reported savings did not translate into real cost savings — its
+`rtk gain` metric counts removed output bytes, not billed tokens, and the
+cheaper the model the worse the net effect. tilth never had independent
+validation. Do not re-add them, and do not publish the retired `rtk gain`
+figures. The uninstallers keep a marked legacy cleanup region so machines with
+pre-existing installs can still be cleaned.
 
 ## Guardrails
 
@@ -25,8 +36,6 @@ Token optimization stack installer and compliance kit for RTK + tilth + Serena +
 ```
 token-diet/
 ├── forks/                    # Git submodules — audited forks
-│   ├── rtk/                  # artificemachine/rtk (Rust CLI proxy)
-│   ├── tilth/                # artificemachine/tilth (Rust MCP server)
 │   ├── serena/               # artificemachine/serena (Python MCP server)
 │   └── icm/                  # artificemachine/icm (Rust MCP server — Infinite Context Memory)
 ├── scripts/
@@ -67,23 +76,19 @@ token-diet/
 ## Key CLI commands (post-install)
 
 ```bash
-token-diet gain          # Token savings dashboard (default)
+token-diet status        # Component + registration dashboard (default)
 token-diet health        # Quick health check: tools + MCP hosts
 token-diet dashboard     # Live browser stats UI
 token-diet mcp list      # Which AI hosts are currently optimized
 token-diet budget status # Check usage against project budget
 token-diet doctor        # Deep diagnostics
-token-diet repair        # Auto-fix hook and registration issues
-token-diet hook off/on   # Temporarily disable/re-enable RTK output filter
-token-diet breakdown     # Top commands by token savings
-token-diet loops         # Detect agent loop patterns
-token-diet leaks         # Detect redundant file reads in history
+token-diet repair        # Auto-fix registration issues
 token-diet route <task>  # Suggest which tool fits a task
 token-diet diff-reads    # Suggest minimal line ranges based on git diff
 token-diet test-first    # Suggest test files to read before implementation
 token-diet icm warmup    # One-time embedding-model download for ICM recall
 token-diet icm status    # ICM integration state
-token-diet version       # Versions of all four tools
+token-diet version       # Installed component versions
 ```
 
 ## Build commands

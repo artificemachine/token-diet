@@ -1,18 +1,16 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-    token-diet: Install RTK + tilth + Serena on Windows.
+    token-diet: Install Serena + ICM + Context7 on Windows.
 
 .DESCRIPTION
-    Installs the AI token optimization stack and configures for
+    Installs the AI context optimization stack (Serena, ICM, Context7,
+    token-diet CLI) and configures for
     Claude Code, Codex CLI, OpenCode (GitHub Copilot), Copilot CLI,
     VS Code, and Cowork (Claude Desktop).
 
 .PARAMETER Tool
-    Which tool(s) to install: All (default), RTK, tilth, Serena
-
-.PARAMETER SkipDedup
-    Skip the Serena/tilth overlap fix.
+    Which tool(s) to install: All (default), Serena, icm, context7
 
 .PARAMETER VerifyOnly
     Only check current installation status.
@@ -31,7 +29,7 @@
 
 .EXAMPLE
     .\Install.ps1                           # install all, prompt for host selection
-    .\Install.ps1 -Tool RTK                 # RTK only
+    .\Install.ps1 -Tool context7            # context7 only
     .\Install.ps1 -VerifyOnly               # check status
     .\Install.ps1 -DryRun                   # simulate install, no changes made
     .\Install.ps1 -Local                    # air-gapped build from forks/
@@ -41,9 +39,8 @@
 
 [CmdletBinding()]
 param(
-    [ValidateSet("All", "RTK", "tilth", "Serena", "icm")]
+    [ValidateSet("All", "Serena", "icm", "context7")]
     [string]$Tool = "All",
-    [switch]$SkipDedup,
     [switch]$VerifyOnly,
     [switch]$DryRun,
     [switch]$FullOutput,
@@ -60,10 +57,14 @@ $ErrorActionPreference = "Stop"
 Remove-Item Alias:icm -Force -ErrorAction SilentlyContinue
 
 # --- Configuration -----------------------------------------------------------
-$RTK_REPO    = "https://github.com/artificemachine/rtk"
-$TILTH_REPO  = "https://github.com/artificemachine/tilth"
 $SERENA_REPO = "https://github.com/artificemachine/serena"
 $ICM_REPO    = "https://github.com/artificemachine/icm"
+
+# Context7: remote HTTP MCP server (no local binary, no cargo prereq).
+# URL and API key come from the environment so firewalled setups can point at
+# an internal gateway. The key is appended to the URL query string and is never
+# printed or logged.
+$Context7DefaultUrl = "https://mcp.context7.com/mcp"
 
 $script:ScriptDir   = Split-Path -Parent $MyInvocation.MyCommand.Path
 $script:ProjectRoot = Split-Path -Parent $script:ScriptDir
@@ -115,6 +116,23 @@ function Show-Output {
 }
 
 function Test-Cmd { param([string]$Name) $null -ne (Get-Command $Name -ErrorAction SilentlyContinue) }
+
+# Resolve the Context7 MCP endpoint. CONTEXT7_URL overrides the default;
+# CONTEXT7_API_KEY is appended as a query parameter. The key is never echoed.
+function Get-Context7Url {
+    $url = if ($env:CONTEXT7_URL) { $env:CONTEXT7_URL } else { $Context7DefaultUrl }
+    if ($env:CONTEXT7_API_KEY) {
+        $sep = if ($url.Contains('?')) { '&' } else { '?' }
+        $url = "$url${sep}apiKey=$([System.Uri]::EscapeDataString($env:CONTEXT7_API_KEY))"
+    }
+    return $url
+}
+
+# Context7 URL safe for display/logs (query string stripped).
+function Get-Context7DisplayUrl {
+    $url = if ($env:CONTEXT7_URL) { $env:CONTEXT7_URL } else { $Context7DefaultUrl }
+    return ($url -replace '\?.*$', '')
+}
 
 function Repair-SubmoduleWorktree {
     param([string]$RelativePath)
@@ -198,11 +216,10 @@ function Ensure-Git {
     # Initialize submodules so forks\ is populated for local builds
     $gitmodules = Join-Path $script:ProjectRoot ".gitmodules"
     if (Test-Path $gitmodules) {
-        Write-Info "Initializing submodules (forks\rtk, forks\tilth, forks\serena)..."
+        Write-Info "Initializing submodules (forks\serena, forks\icm)..."
         git -C $script:ProjectRoot submodule update --init --recursive 2>&1 | Where-Object { $_ -match "Cloning|already|error" }
-        Repair-SubmoduleWorktree "forks\rtk"
-        Repair-SubmoduleWorktree "forks\tilth"
         Repair-SubmoduleWorktree "forks\serena"
+        Repair-SubmoduleWorktree "forks\icm"
         Write-Ok "Submodules ready"
     }
 }
@@ -366,175 +383,6 @@ function Confirm-Hosts {
     }
 }
 
-# --- RTK ----------------------------------------------------------------------
-function Install-RTK {
-    Write-Header "RTK (Rust Token Killer)"
-
-    $rtkGainAvailable = $false
-    if (Test-Cmd "rtk") {
-        rtk gain --help 2>$null | Out-Null
-        $rtkGainAvailable = ($LASTEXITCODE -eq 0)
-    }
-
-    if ($rtkGainAvailable) {
-        Write-Ok "RTK already installed: $(rtk --version 2>$null)"
-        Write-Info "Upgrading..."
-    } elseif (Test-Cmd "rtk") {
-        Write-Warn "Wrong 'rtk' detected. Reinstalling."
-    }
-
-    if ($Local) {
-        $manifest = Join-Path $script:ProjectRoot "forks\rtk\Cargo.toml"
-        if (-not (Test-Path $manifest)) { Write-Fail "forks\rtk\Cargo.toml not found — run: git submodule update --init --recursive" }
-        Verify-LocalBuild "RTK" $manifest
-        if ($DryRun) {
-            Write-DryRun "cargo install --path $($script:ProjectRoot)\forks\rtk --force"
-        } else {
-            Write-Info "Building RTK from fork (air-gapped)..."
-            cargo install --path (Join-Path $script:ProjectRoot "forks\rtk") --force 2>&1 | Show-Output
-            Write-Ok "RTK built and installed from fork"
-        }
-    } else {
-        if ($DryRun) {
-            Write-DryRun "cargo install --git $RTK_REPO --force"
-        } else {
-            cargo install --git $RTK_REPO --force 2>&1 | Show-Output
-            Write-Ok "RTK installed: $(rtk --version 2>$null)"
-        }
-    }
-
-    # Host integration
-    if ($script:HasClaude -and $script:HasOpenCode) {
-        if ($DryRun) { Write-DryRun "rtk init -g --opencode --auto-patch" }
-        else { try { rtk init -g --opencode --auto-patch 2>$null; Write-Ok "RTK: Claude Code + Codex + OpenCode" } catch { Write-Warn "RTK init failed" } }
-    } elseif ($script:HasClaude) {
-        if ($DryRun) { Write-DryRun "rtk init -g --auto-patch" }
-        else { try { rtk init -g --auto-patch 2>$null; Write-Ok "RTK: Claude Code + Codex" } catch { Write-Warn "RTK init failed" } }
-    }
-    if ($script:HasCodex -and -not $script:HasClaude) {
-        if ($DryRun) { Write-DryRun "rtk init --codex" }
-        else { try { rtk init --codex 2>$null; Write-Ok "RTK: Codex CLI" } catch { Write-Warn "RTK Codex init failed" } }
-    }
-    if ($script:HasOpenCode -and -not $script:HasClaude) {
-        if ($DryRun) { Write-DryRun "rtk init -g --opencode --auto-patch" }
-        else { try { rtk init -g --opencode --auto-patch 2>$null; Write-Ok "RTK: OpenCode" } catch { Write-Warn "RTK OpenCode init failed" } }
-    }
-    if ($script:HasCopilot) {
-        Write-Ok "RTK: Copilot CLI (uses same hooks as Claude Code)"
-    }
-
-    # Cowork (Claude Desktop) — no hook mechanism, inject awareness doc instead.
-    # RTK works via shell hooks that rewrite Bash tool calls. Cowork/Claude Desktop
-    # does not support the same hook dispatch, so we write an awareness markdown
-    # that instructs the LLM to manually prefix commands with `rtk`.
-    if ($script:HasCowork) {
-        $coworkRtkDoc = @"
-# RTK - Rust Token Killer (Cowork / Claude Desktop)
-
-**Usage**: Token-optimized CLI proxy for shell commands (60-90% savings).
-
-## Rule
-
-Always prefix shell commands with ``rtk``. RTK compresses output to save tokens.
-If RTK has no filter for a command, it passes through unchanged — always safe to use.
-
-Examples:
-
-``````bash
-rtk git status
-rtk cargo test
-rtk npm run build
-rtk pytest -q
-rtk docker ps
-rtk ls -la
-``````
-
-Even in command chains with ``&&``, prefix each command:
-``````bash
-rtk git add . && rtk git commit -m "msg" && rtk git push
-``````
-
-## Meta Commands
-
-``````bash
-rtk gain            # Token savings analytics
-rtk gain --history  # Recent command savings history
-rtk discover        # Analyze sessions for missed RTK usage
-rtk proxy <cmd>     # Run raw command without filtering (debugging)
-``````
-
-## Verification
-
-``````bash
-rtk --version
-rtk gain
-where.exe rtk
-``````
-"@
-        $coworkConfigDir = Join-Path $env:APPDATA "Claude"
-        $coworkRtkFile = Join-Path $coworkConfigDir "rtk-awareness.md"
-        if ($DryRun) {
-            Write-DryRun "Write RTK awareness doc to $coworkRtkFile"
-        } else {
-            if (-not (Test-Path $coworkConfigDir)) { New-Item -ItemType Directory -Path $coworkConfigDir -Force | Out-Null }
-            Set-Content -Path $coworkRtkFile -Value $coworkRtkDoc -Encoding UTF8
-            Write-Ok "RTK: Cowork awareness doc written ($coworkRtkFile)"
-            Write-Info "  Cowork has no hook support — LLM instructed to prefix commands with 'rtk'"
-        }
-    }
-}
-
-# --- tilth --------------------------------------------------------------------
-function Install-Tilth {
-    Write-Header "tilth (smart code reader)"
-
-    if (Test-Cmd "tilth") {
-        Write-Ok "tilth already installed"
-        Write-Info "Upgrading..."
-    }
-
-    if ($Local) {
-        $manifest = Join-Path $script:ProjectRoot "forks\tilth\Cargo.toml"
-        if (-not (Test-Path $manifest)) { Write-Fail "forks\tilth\Cargo.toml not found — run: git submodule update --init --recursive" }
-        Verify-LocalBuild "tilth" $manifest
-        if ($DryRun) {
-            Write-DryRun "cargo install --path $($script:ProjectRoot)\forks\tilth --force"
-        } else {
-            Write-Info "Building tilth from fork (air-gapped)..."
-            cargo install --path (Join-Path $script:ProjectRoot "forks\tilth") --force 2>&1 | Show-Output
-            Write-Ok "tilth built and installed from fork"
-        }
-    } else {
-        if ($DryRun) {
-            Write-DryRun "cargo install --git $TILTH_REPO --force"
-        } else {
-            cargo install --git $TILTH_REPO --force 2>&1 | Show-Output
-            Write-Ok "tilth installed: $(tilth --version 2>$null)"
-        }
-    }
-
-    # Host integration — tilth install <host>
-    $hosts = @()
-    if ($script:HasClaude)   { $hosts += "claude-code" }
-    if ($script:HasCodex)    { $hosts += "codex" }
-    if ($script:HasOpenCode) { $hosts += "opencode" }
-    if ($script:HasCopilot)  { $hosts += "copilot" }
-    if ($script:HasVSCode)   { $hosts += "vscode" }
-
-    foreach ($h in $hosts) {
-        if ($DryRun) {
-            Write-DryRun "tilth install $h"
-        } else {
-            try { tilth install $h 2>$null; Write-Ok "tilth MCP: $h" }
-            catch { Write-Warn "tilth MCP: $h failed (may already exist)" }
-        }
-    }
-
-    if ($hosts.Count -eq 0) {
-        Write-Warn "tilth: no AI host detected, skipping MCP registration"
-    }
-}
-
 # --- Serena -------------------------------------------------------------------
 function Install-Serena {
     Write-Header "Serena (IDE-like symbol navigation)"
@@ -652,10 +500,6 @@ args = ["--from", "git+$SERENA_REPO", "serena", "start-mcp-server", "--context=c
     "serena": {
       "command": "uvx",
       "args": ["--from", "git+$SERENA_REPO", "serena", "start-mcp-server", "--context=ide", "--open-web-dashboard", "false", "--project-from-cwd"]
-    },
-    "tilth": {
-      "command": "tilth",
-      "args": ["--mcp"]
     }
   }
 }
@@ -669,7 +513,7 @@ args = ["--from", "git+$SERENA_REPO", "serena", "start-mcp-server", "--context=c
     if ($script:HasCowork) {
         $coworkCfg = Join-Path $env:APPDATA "Claude\claude_desktop_config.json"
         if ($DryRun) {
-            Write-DryRun "Write mcpServers.serena + mcpServers.tilth to $coworkCfg"
+            Write-DryRun "Write mcpServers.serena to $coworkCfg"
         } else {
             try {
                 $data = if (Test-Path $coworkCfg) { Get-Content $coworkCfg -Raw | ConvertFrom-Json } else { [PSCustomObject]@{} }
@@ -692,16 +536,6 @@ args = ["--from", "git+$SERENA_REPO", "serena", "start-mcp-server", "--context=c
                     }
                 }
                 $data.mcpServers | Add-Member -NotePropertyName "serena" -NotePropertyValue $serenaEntry -Force
-
-                # Also register tilth if installed
-                if (Test-Cmd "tilth") {
-                    # tilth MCP subcommand is --mcp; see forks/tilth/ARCHITECTURE.md §143
-                    $tilthEntry = [PSCustomObject]@{
-                        command = "tilth"
-                        args    = @("--mcp")
-                    }
-                    $data.mcpServers | Add-Member -NotePropertyName "tilth" -NotePropertyValue $tilthEntry -Force
-                }
 
                 $data | ConvertTo-Json -Depth 10 | Set-Content -Path $coworkCfg -Encoding UTF8
                 Write-Ok "Serena MCP: Cowork / Claude Desktop ($coworkCfg)"
@@ -768,7 +602,7 @@ args = ["--from", "git+$SERENA_REPO", "serena", "start-mcp-server", "--context=c
 
 # --- ICM ----------------------------------------------------------------------
 # ICM (Infinite Context Memory) — cross-tool persistent memory MCP server.
-# Build/install mirrors RTK (cargo install). MCP registration mirrors Serena
+# Build/install via cargo install. MCP registration mirrors Serena
 # (self-written config entries). We never call `icm init`: it bakes absolute
 # current_exe() paths into ~20 host configs and would violate install-decoupling.
 # We register the bare-PATH command `icm serve --compact` ourselves instead.
@@ -983,6 +817,141 @@ args = ["serve", "--compact"]
     }
 }
 
+# --- Context7 -----------------------------------------------------------------
+# Context7 — remote HTTP MCP server serving up-to-date library documentation.
+# Nothing is compiled or installed: registration only. The endpoint defaults to
+# https://mcp.context7.com/mcp and is overridden via CONTEXT7_URL;
+# CONTEXT7_API_KEY is appended to the URL and never printed.
+function Install-Context7 {
+    Write-Header "Context7 (up-to-date library docs, remote HTTP MCP)"
+
+    $ctxUrl  = Get-Context7Url
+    $ctxBase = Get-Context7DisplayUrl
+    $keyNote = if ($env:CONTEXT7_API_KEY) { " (api key configured)" } else { "" }
+    Write-Info "Context7 endpoint: $ctxBase$keyNote"
+
+    # Claude Code — HTTP transport registration via the claude CLI.
+    if ($script:HasClaude) {
+        if ($DryRun) {
+            Write-DryRun "claude mcp add --scope user --transport http context7 $ctxBase"
+        } else {
+            & claude mcp get context7 2>$null | Out-Null
+            if ($LASTEXITCODE -eq 0) {
+                Write-Ok "Context7 MCP: Claude Code (already configured)"
+            } else {
+                try {
+                    & claude mcp add --scope user --transport http context7 $ctxUrl 2>$null
+                    Write-Ok "Context7 MCP: Claude Code"
+                } catch { Write-Warn "Context7 MCP: Claude Code setup failed" }
+            }
+        }
+    }
+
+    # Codex CLI — TOML block with url = (HTTP server, no command).
+    if ($script:HasCodex) {
+        $codexConfig = Join-Path $env:USERPROFILE ".codex\config.toml"
+        $alreadyConfigured = $false
+        if (Test-Path $codexConfig) {
+            $codexText = Get-Content $codexConfig -Raw -ErrorAction SilentlyContinue
+            if ($codexText -and ($codexText -match '(?m)^\[mcp_servers\.context7\]')) { $alreadyConfigured = $true }
+        }
+        if ($alreadyConfigured) {
+            Write-Ok "Context7 MCP: Codex CLI (already configured)"
+        } elseif ($DryRun) {
+            Write-DryRun "Append [mcp_servers.context7] block to $codexConfig"
+        } else {
+            $codexDir = Join-Path $env:USERPROFILE ".codex"
+            if (-not (Test-Path $codexDir)) { New-Item -ItemType Directory -Path $codexDir -Force | Out-Null }
+            $tomlBlock = @"
+
+# Context7 MCP server (added by token-diet)
+[mcp_servers.context7]
+url = "$ctxUrl"
+"@
+            Add-Content -Path $codexConfig -Value $tomlBlock -Encoding UTF8
+            Write-Ok "Context7 MCP: Codex CLI"
+        }
+    }
+
+    # VS Code — merge into the shared template (servers.context7).
+    if ($script:HasVSCode) {
+        $vscodeTplDir = Join-Path $env:APPDATA "token-diet"
+        $vscodeTemplate = Join-Path $vscodeTplDir "vscode-mcp.template.json"
+        if ($DryRun) {
+            Write-DryRun "Merge servers.context7 into $vscodeTemplate"
+        } else {
+            if (-not (Test-Path $vscodeTplDir)) { New-Item -ItemType Directory -Path $vscodeTplDir -Force | Out-Null }
+            try {
+                $data = if (Test-Path $vscodeTemplate) { Get-Content $vscodeTemplate -Raw | ConvertFrom-Json } else { [PSCustomObject]@{} }
+            } catch {
+                $data = [PSCustomObject]@{}
+            }
+            if (-not $data.PSObject.Properties["servers"]) {
+                $data | Add-Member -NotePropertyName "servers" -NotePropertyValue ([PSCustomObject]@{})
+            }
+            $ctx7Entry = [PSCustomObject]@{
+                type = "http"
+                url  = $ctxUrl
+            }
+            $data.servers | Add-Member -NotePropertyName "context7" -NotePropertyValue $ctx7Entry -Force
+            $data | ConvertTo-Json -Depth 10 | Set-Content -Path $vscodeTemplate -Encoding UTF8
+            Write-Ok "Context7 MCP: VS Code template ($vscodeTemplate)"
+        }
+    }
+
+    # OpenCode — JSON mcpServers.context7 { type: http, url }.
+    if ($script:HasOpenCode) {
+        $ocCfg = Join-Path $env:USERPROFILE ".opencode.json"
+        if ($DryRun) {
+            Write-DryRun "Write mcpServers.context7 entry to $ocCfg"
+        } else {
+            try {
+                $data = if (Test-Path $ocCfg) { Get-Content $ocCfg -Raw | ConvertFrom-Json } else { [PSCustomObject]@{} }
+                if (-not $data.PSObject.Properties["mcpServers"]) {
+                    $data | Add-Member -NotePropertyName "mcpServers" -NotePropertyValue ([PSCustomObject]@{})
+                }
+                $ctx7Entry = [PSCustomObject]@{
+                    type = "http"
+                    url  = $ctxUrl
+                }
+                $data.mcpServers | Add-Member -NotePropertyName "context7" -NotePropertyValue $ctx7Entry -Force
+                $data | ConvertTo-Json -Depth 10 | Set-Content -Path $ocCfg -Encoding UTF8
+                Write-Ok "Context7 MCP: OpenCode ($ocCfg)"
+            } catch {
+                Write-Warn "Context7 MCP: OpenCode setup failed — $_"
+            }
+        }
+    }
+
+    # Cowork (Claude Desktop) — JSON mcpServers.context7 { type: http, url }.
+    if ($script:HasCowork) {
+        $coworkCfg = Join-Path $env:APPDATA "Claude\claude_desktop_config.json"
+        if ($DryRun) {
+            Write-DryRun "Write mcpServers.context7 to $coworkCfg"
+        } else {
+            try {
+                $data = if (Test-Path $coworkCfg) { Get-Content $coworkCfg -Raw | ConvertFrom-Json } else { [PSCustomObject]@{} }
+                if (-not $data.PSObject.Properties["mcpServers"]) {
+                    $data | Add-Member -NotePropertyName "mcpServers" -NotePropertyValue ([PSCustomObject]@{})
+                }
+                $ctx7Entry = [PSCustomObject]@{
+                    type = "http"
+                    url  = $ctxUrl
+                }
+                $data.mcpServers | Add-Member -NotePropertyName "context7" -NotePropertyValue $ctx7Entry -Force
+                $data | ConvertTo-Json -Depth 10 | Set-Content -Path $coworkCfg -Encoding UTF8
+                Write-Ok "Context7 MCP: Cowork / Claude Desktop ($coworkCfg)"
+            } catch {
+                Write-Warn "Context7 MCP: Cowork setup failed — $_"
+            }
+        }
+    }
+
+    if ($script:HasCopilot) {
+        Write-Ok "Context7: Copilot CLI uses VS Code MCP config (shared)"
+    }
+}
+
 # --- OpenCode prompt rules injection ------------------------------------------
 function Inject-OpenCodeRules {
     if (-not $script:HasOpenCode) { return }
@@ -1037,41 +1006,6 @@ function Inject-OpenCodeRules {
     } catch {
         Write-Warn "OpenCode prompt injection failed: $_"
     }
-}
-
-# --- Overlap fix --------------------------------------------------------------
-function Configure-Dedup {
-    Write-Header "Overlap fix (Serena dedup)"
-
-    if (-not (Test-Cmd "tilth")) {
-        Write-Info "tilth not installed -- skipping dedup"
-        return
-    }
-
-    $templateDir = Join-Path $env:USERPROFILE ".config\serena"
-    if (-not (Test-Path $templateDir)) { New-Item -ItemType Directory -Path $templateDir -Force | Out-Null }
-
-    $templateFile = Join-Path $templateDir "project.local.template.yml"
-    $configSource = Join-Path $script:ProjectRoot "config\serena-dedup.template.yml"
-
-    if ($DryRun) {
-        Write-DryRun "Write serena dedup template to $templateFile"
-    } else {
-        if (Test-Path $configSource) {
-            Copy-Item $configSource $templateFile -Force
-        } else {
-            @"
-# Serena project.local.yml -- overlap fix when tilth is also installed
-context: claude-code
-disabled_tools:
-  - get_symbols_overview
-  - find_symbol
-  - read_file
-"@ | Set-Content -Path $templateFile -Encoding UTF8
-        }
-        Write-Ok "Dedup template: $templateFile"
-    }
-    Write-Info "Apply per project: Copy-Item '$templateFile' '<project>\project.local.yml'"
 }
 
 # --- Install token-diet CLI + docs -------------------------------------------
@@ -1183,14 +1117,12 @@ if errorlevel 9009 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0tok
     $tkdDoc = @"
 # Token Diet — AI Context Optimization
 
-``token-diet`` is a unified optimization layer for AI agents. It orchestrates RTK, tilth, Serena, and ICM to maximize context efficiency.
+``token-diet`` is a unified optimization layer for AI agents. It orchestrates Serena, ICM, and Context7 to maximize context efficiency.
 
 ## Core Commands
 
-- ``token-diet gain``: Current token savings and efficiency stats.
+- ``token-diet status``: Component and MCP registration status.
 - ``token-diet mcp list``: Check which hosts are currently optimized.
-- ``token-diet hook off``: Disable RTK (raw output) for troubleshooting.
-- ``token-diet hook on``: Re-enable RTK optimization.
 - ``token-diet budget status``: Check project-specific token consumption.
 - ``token-diet route <task>``: Ask ``token-diet`` which tool is best for your current task.
 - ``token-diet doctor``: Run diagnostics if tools are unresponsive.
@@ -1199,12 +1131,11 @@ if errorlevel 9009 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0tok
 
 1. **Self-Monitor**: Regularly run ``token-diet budget status`` to stay within thresholds.
 2. **Tool Selection**:
-   - Use **tilth** for code reading and symbol search.
-   - Use **Serena** for complex refactoring and diagnostics.
-   - Use **RTK** for running commands and builds.
+   - Use **Serena** for complex refactoring and symbol navigation.
    - Use **ICM** for recalling past decisions and storing facts (``icm recall``, ``icm store``).
-3. **Be Precise**: Use ``tilth_read`` with line ranges (found via ``token-diet diff-reads``) to minimize context waste.
-4. **Optimization**: If you detect you are looping or wasting tokens, run ``token-diet loops`` or ``token-diet leaks`` to self-audit.
+   - Use **Context7** for up-to-date library documentation before writing integration code.
+3. **Be Precise**: Prefer Serena symbol tools over re-reading whole files to minimize context waste.
+4. **Optimization**: If you detect you are looping or wasting tokens, run ``token-diet doctor`` to self-audit.
 "@
 
     $hostDirs = @(
@@ -1225,12 +1156,7 @@ if errorlevel 9009 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0tok
         # Add @token-diet.md reference if not already present
         if ((Test-Path $instrFile) -and -not (Select-String -Path $instrFile -Pattern "@token-diet.md" -Quiet)) {
             $instrContent = Get-Content $instrFile -Raw
-            if ($instrContent -match '@RTK\.md') {
-                # Insert before @RTK.md
-                $instrContent = $instrContent -replace '(?m)^@RTK\.md', "@token-diet.md`n@RTK.md"
-            } else {
-                $instrContent += "`n@token-diet.md`n"
-            }
+            $instrContent += "`n@token-diet.md`n"
             Set-Content -Path $instrFile -Value $instrContent -Encoding UTF8
             Write-Ok "@token-diet.md added to: $instrFile"
         }
@@ -1242,22 +1168,6 @@ function Verify-Stack {
     Write-Header "Token Stack Verification"
 
     $allOk = $true
-
-    $rtkGainAvailable = $false
-    if (Test-Cmd "rtk") {
-        rtk gain --help 2>$null | Out-Null
-        $rtkGainAvailable = ($LASTEXITCODE -eq 0)
-    }
-
-    if ($rtkGainAvailable) {
-        Write-Ok "RTK ............. $(rtk --version 2>$null)"
-    } else { Write-Warn "RTK ............. not installed or wrong version"; $allOk = $false }
-
-    if (Test-Cmd "tilth") {
-        Write-Ok "tilth ........... $(tilth --version 2>$null)"
-        $tilthIssue = Get-CodexMcpCommandIssue 'tilth'
-        if ($tilthIssue) { Write-Warn $tilthIssue; $allOk = $false }
-    } else { Write-Warn "tilth ........... not installed"; $allOk = $false }
 
     if (Test-Cmd "icm") {
         Write-Ok "ICM ............. $(icm --version 2>$null)"
@@ -1279,6 +1189,24 @@ function Verify-Stack {
     }
     $serenaIssue = Get-CodexMcpCommandIssue 'serena'
     if ($serenaIssue) { Write-Warn $serenaIssue; $allOk = $false }
+
+    # Context7: remote HTTP MCP server — verified by host registration, no binary.
+    $ctx7Base = Get-Context7DisplayUrl
+    $ctx7Registered = $false
+    foreach ($cfgPath in @(
+        (Join-Path $env:USERPROFILE ".claude\settings.json"),
+        (Join-Path $env:USERPROFILE ".opencode.json"),
+        (Join-Path $env:APPDATA "Claude\claude_desktop_config.json")
+    )) {
+        if ((Test-Path $cfgPath) -and (Select-String -Path $cfgPath -Pattern '"context7"' -Quiet)) { $ctx7Registered = $true; break }
+    }
+    if (-not $ctx7Registered -and (Test-Cmd "claude")) {
+        & claude mcp get context7 2>$null | Out-Null
+        if ($LASTEXITCODE -eq 0) { $ctx7Registered = $true }
+    }
+    if ($ctx7Registered) {
+        Write-Ok "Context7 ........ $ctx7Base (registered)"
+    } else { Write-Warn "Context7 ........ not registered in any host config"; $allOk = $false }
 
     Write-Host ""
     if (Test-Cmd "claude")               { Write-Ok "Claude Code ..... available" } else { Write-Warn "Claude Code ..... not found" }
@@ -1302,13 +1230,13 @@ function Verify-Stack {
   |                    + Cowork (Desktop)                      |
   +-----------------------------------------------------------+
            |                |                |
-      Code reading     Refactoring     Command output
+     Library docs     Refactoring       Memory
            |                |                |
-      +--------+      +---------+      +--------+
-      | tilth  |      | Serena  |      |  RTK   |
-      | (fast) |      |  (deep) |      | (filter)|
-      +--------+      +---------+      +--------+
-      tree-sitter        LSP           regex/truncate
+      +----------+      +---------+      +--------+
+      | Context7 |      | Serena  |      |  ICM   |
+      |  (HTTP)  |      |  (LSP)  |      | (recall)|
+      +----------+      +---------+      +--------+
+      current docs        LSP           cross-tool
 
 "@
 }
@@ -1317,18 +1245,10 @@ function Verify-Stack {
 function Invoke-Wizard {
     Write-Host ""
     Write-Host "  token-diet interactive installer" -ForegroundColor White
-    Write-Host "  RTK + tilth + Serena + ICM — security-patched forks" -ForegroundColor Gray
+    Write-Host "  Serena + ICM + Context7 — security-patched forks + hosted docs" -ForegroundColor Gray
     Write-Host ""
     Write-Host "  The stack — each tool is independent; install any subset:" -ForegroundColor Gray
     Write-Host ""
-    Write-Host "  RTK     command output compression" -ForegroundColor White
-    Write-Host "          What: a CLI proxy that filters verbose command output." -ForegroundColor Gray
-    Write-Host "          Why:  long build / test / git output floods the context window." -ForegroundColor Gray
-    Write-Host "          Gain: 60-90% fewer tokens on tracked commands (measured)." -ForegroundColor Gray
-    Write-Host "  tilth   AST-aware code reading" -ForegroundColor White
-    Write-Host "          What: tree-sitter reader returning symbols/structure, not whole files." -ForegroundColor Gray
-    Write-Host "          Why:  reading entire files to find one function wastes context." -ForegroundColor Gray
-    Write-Host "          Gain: ~38-44% smaller reads on average." -ForegroundColor Gray
     Write-Host "  Serena  LSP symbol navigation" -ForegroundColor White
     Write-Host "          What: language-server rename / find-references / diagnostics." -ForegroundColor Gray
     Write-Host "          Why:  precise refactors without re-reading files." -ForegroundColor Gray
@@ -1337,29 +1257,23 @@ function Invoke-Wizard {
     Write-Host "          What: a memory MCP server shared across Claude, Codex, Gemini, OpenCode." -ForegroundColor Gray
     Write-Host "          Why:  recall past decisions and facts instead of re-explaining each session." -ForegroundColor Gray
     Write-Host "          Gain: cross-session, cross-tool continuity — recall replaces re-reading." -ForegroundColor Gray
+    Write-Host "  Context7 up-to-date library docs" -ForegroundColor White
+    Write-Host "          What: remote HTTP MCP server serving current library documentation." -ForegroundColor Gray
+    Write-Host "          Why:  models hallucinate APIs when trained on stale versions." -ForegroundColor Gray
+    Write-Host "          Gain: correct, current API usage without pasting docs into context." -ForegroundColor Gray
     Write-Host ""
 
     # Which tools?
-    $answer = Read-Host "Install the full stack (all 4)? [Y/n]  (n = choose individually)"
+    $answer = Read-Host "Install the full stack (all 3)? [Y/n]  (n = choose individually)"
     if ($answer -match '^[Nn]') {
-        $r = Read-Host "  + RTK    — output compression, 60-90% fewer tokens?     [Y/n]"
-        $t = Read-Host "  + tilth  — AST code reading, ~40% smaller reads?         [Y/n]"
-        $s = Read-Host "  + Serena — rename / find-refs / diagnostics (LSP)?       [Y/n]"
-        $i = Read-Host "  + ICM    — cross-tool memory, recall not re-explain?     [Y/n]"
-        $script:WizardRtk    = $r -notmatch '^[Nn]'
-        $script:WizardTilth  = $t -notmatch '^[Nn]'
-        $script:WizardSerena = $s -notmatch '^[Nn]'
-        $script:WizardIcm    = $i -notmatch '^[Nn]'
+        $s = Read-Host "  + Serena   — rename / find-refs / diagnostics (LSP)?       [Y/n]"
+        $i = Read-Host "  + ICM      — cross-tool memory, recall not re-explain?     [Y/n]"
+        $c = Read-Host "  + Context7 — library docs via remote HTTP MCP?             [Y/n]"
+        $script:WizardSerena   = $s -notmatch '^[Nn]'
+        $script:WizardIcm      = $i -notmatch '^[Nn]'
+        $script:WizardContext7 = $c -notmatch '^[Nn]'
     } else {
-        $script:WizardRtk = $true; $script:WizardTilth = $true; $script:WizardSerena = $true; $script:WizardIcm = $true
-    }
-
-    # Skip dedup?
-    if ($script:WizardTilth -and $script:WizardSerena) {
-        $d = Read-Host "Configure Serena/tilth overlap fix? [Y/n]"
-        $script:WizardDedup = $d -notmatch '^[Nn]'
-    } else {
-        $script:WizardDedup = $false
+        $script:WizardSerena = $true; $script:WizardIcm = $true; $script:WizardContext7 = $true
     }
 
     # Local mode?
@@ -1374,12 +1288,10 @@ function Invoke-Wizard {
 
     Write-Host ""
     Write-Host "Ready to install:" -ForegroundColor White
-    if ($script:WizardRtk)    { Write-Host "  + RTK"    -ForegroundColor Green }
-    if ($script:WizardTilth)  { Write-Host "  + tilth"  -ForegroundColor Green }
-    if ($script:WizardSerena) { Write-Host "  + Serena" -ForegroundColor Green }
-    if ($script:WizardIcm)    { Write-Host "  + ICM"    -ForegroundColor Green }
-    if ($script:WizardDedup)  { Write-Host "  + Overlap fix" -ForegroundColor Green }
-    if ($script:WizardLocal)  { Write-Host "    Mode: LOCAL (air-gapped)" -ForegroundColor Yellow }
+    if ($script:WizardSerena)   { Write-Host "  + Serena"   -ForegroundColor Green }
+    if ($script:WizardIcm)      { Write-Host "  + ICM"      -ForegroundColor Green }
+    if ($script:WizardContext7) { Write-Host "  + Context7" -ForegroundColor Green }
+    if ($script:WizardLocal)    { Write-Host "    Mode: LOCAL (air-gapped)" -ForegroundColor Yellow }
     Write-Host ""
 
     $confirm = Read-Host "Proceed? [Y/n]"
@@ -1388,7 +1300,7 @@ function Invoke-Wizard {
 
 # --- Main ---------------------------------------------------------------------
 Write-Host "`n=== token-diet ===" -ForegroundColor White
-Write-Host "    RTK + tilth + Serena`n" -ForegroundColor White
+Write-Host "    Serena + ICM + Context7`n" -ForegroundColor White
 
 if ($DryRun) {
     Write-Host "    *** DRY-RUN MODE — no changes will be made ***`n" -ForegroundColor Magenta
@@ -1402,47 +1314,38 @@ if ($FullOutput) {
 if ($VerifyOnly) { Detect-Hosts; Verify-Stack; exit 0 }
 
 # Interactive mode when invoked with no arguments
-$interactive = ($PSBoundParameters.Count -eq 0 -and $Tool -eq "All" -and -not $SkipDedup)
-$script:WizardRtk    = $false
-$script:WizardTilth  = $false
-$script:WizardSerena = $false
-$script:WizardIcm    = $false
-$script:WizardDedup  = $true
+$interactive = ($PSBoundParameters.Count -eq 0 -and $Tool -eq "All")
+$script:WizardSerena   = $false
+$script:WizardIcm      = $false
+$script:WizardContext7 = $false
 
 if ($interactive) {
     Invoke-Wizard
-    $doRtk    = $script:WizardRtk
-    $doTilth  = $script:WizardTilth
-    $doSerena = $script:WizardSerena
-    $doIcm    = $script:WizardIcm
-    $skipDedup = -not $script:WizardDedup
+    $doSerena   = $script:WizardSerena
+    $doIcm      = $script:WizardIcm
+    $doContext7 = $script:WizardContext7
     if ($script:WizardLocal) { $Local = [switch]::new($true) }
     if ($script:WizardSkipTests) { $SkipTests = [switch]::new($true) }
 } else {
-    $doRtk    = $Tool -eq "All" -or $Tool -eq "RTK"
-    $doTilth  = $Tool -eq "All" -or $Tool -eq "tilth"
-    $doSerena = $Tool -eq "All" -or $Tool -eq "Serena"
-    $doIcm    = $Tool -eq "All" -or $Tool -eq "icm"
-    $skipDedup = $SkipDedup
+    $doSerena   = $Tool -eq "All" -or $Tool -eq "Serena"
+    $doIcm      = $Tool -eq "All" -or $Tool -eq "icm"
+    $doContext7 = $Tool -eq "All" -or $Tool -eq "context7"
 }
 
 if ($Local) { Write-Host "    Mode: LOCAL (air-gapped)`n" -ForegroundColor Yellow }
 
 Write-Header "Prerequisites"
 Ensure-Git
-if ($doRtk -or $doTilth -or $doIcm) { Ensure-Rust }
+if ($doIcm) { Ensure-Rust }
 if ($doSerena -and -not $Local) { Ensure-Uv }
 if ($doSerena -and $Local) { Ensure-Docker }
 
 Detect-Hosts
 Confirm-Hosts
 
-if ($doRtk)    { Install-RTK }
-if ($doTilth)  { Install-Tilth }
-if ($doSerena) { Install-Serena }
-if ($doIcm)    { Install-ICM }
-
-if (-not $skipDedup -and $doTilth -and $doSerena) { Configure-Dedup }
+if ($doSerena)   { Install-Serena }
+if ($doIcm)      { Install-ICM }
+if ($doContext7) { Install-Context7 }
 
 # Inject token-diet usage rules into OpenCode mode prompts (idempotent)
 Inject-OpenCodeRules

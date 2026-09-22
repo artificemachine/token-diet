@@ -44,5 +44,5 @@ The AOP stays a shared dashboard; it is not the collector or billing source. The
 
 ## References
 
-- [Audit report](/Users/airm2max/DevOpsSec/agent-observability-plane/docs/audits/2026-09-08-arch-audit.md)
+- [Audit report]($HOME/DevOpsSec/agent-observability-plane/docs/audits/2026-09-08-arch-audit.md)
 - [Prior architecture](ARCH-langfuse-metrics-architecture.md)

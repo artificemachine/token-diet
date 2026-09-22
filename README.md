@@ -15,7 +15,9 @@ Gemini CLI.
 
 ## What changed
 
-RTK and tilth were removed from this stack. Independent benchmarks
+RTK and tilth were removed from this stack and replaced by
+[Context7](https://github.com/upstash/context7), which supplies current library
+documentation instead of compressing output. Independent benchmarks
 ([Quesma](https://quesma.com/blog/does-rtk-make-ai-coding-cheaper/), 1,740
 attempts; [JetBrains SkillsBench](https://blog.jetbrains.com/ai/2026/07/rtk-claude-code-token-savings/))
 found RTK's reported savings did not translate into real cost savings — its

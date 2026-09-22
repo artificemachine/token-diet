@@ -762,3 +762,45 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - 2026-09-22: fix(uninstall): remove the ICM SessionStart hook when icm is uninstalled
 
 - 2026-09-22: ci(tests): scope the pre-commit suites to the staged change and speed up CI.
+
+## [2.0.0] — 2026-09-22
+
+First release since v1.15.28 and the first major version. It bundles the unreleased
+1.16.0/1.16.1 work together with the breaking component removal.
+
+### Changed (breaking)
+- RTK and tilth are removed from the stack; Context7 takes the third component slot
+  (PR #86, `e2dec98`). The removal rests on independent evidence: Quesma's 2026-09-11
+  benchmark (1,740 attempts on Terminal-Bench 2.1) found no reliable cost saving
+  (−5% total but +1% per task on Fable, +17% per task on DeepSeek), and tilth published
+  no independently validated numbers. The rationale is recorded in `docs/comparison.md`;
+  no tracked savings figure is published any more.
+- The `token-diet` CLI drops the commands whose only data source was the removed counter
+  (`clean`, `hook`, `breakdown`, `explain`, `loops`, `leaks`); `gain` survives as a hidden
+  alias of `status`. The MCP server exposes exactly `token_diet_health|status|budget|route`.
+- `config/compat.json`, the SBOM and the third-party licence inventory now describe
+  serena + icm + context7.
+
+### Added
+- `install_context7()` and `--context7-only`: remote HTTP MCP, per-host registration,
+  `CONTEXT7_URL` override and an optional `CONTEXT7_API_KEY` that is never echoed.
+- Per-component uninstall selection via `uninstall.sh --only` / `--skip` (PR #85).
+- `token-diet.md` is generated from the components actually installed (PR #83), so a
+  subset install no longer documents tools the host does not have.
+- `uninstall.sh` LEGACY CLEANUP region: rtk / rtk-mcp / tilth are no longer selectable
+  components but are always cleaned when present, so pre-existing machines still uninstall.
+
+### Fixed
+- `uninstall.sh` removes the ICM-owned `SessionStart` hook (`icm hook start 2>/dev/null || true`)
+  when the icm component is uninstalled. It was previously left behind and, because of its
+  trailing `|| true`, failed silently on every session start (PR #87).
+- The project pre-commit documentation-sync gate can no longer over-scan after a rename
+  of the help section its sed range depends on.
+- Machine-local absolute paths removed from the Langfuse design docs, which had been failing
+  the Path Leak Guard on every PR.
+
+### Version
+- `TD_VERSION` 1.16.1 → 2.0.0 in `scripts/token-diet` and `scripts/token-diet.ps1`. The
+  1.16.0 and 1.16.1 work was merged but never tagged, so this is the first tag since v1.15.28.
+
+- 2026-09-22: docs(readme): state in the README that Context7 replaced the removed RTK/tilth components.

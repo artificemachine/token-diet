@@ -3,12 +3,26 @@ name: Tests
 # Runs the bats + pytest suite server-side on every push/PR to main. Prior to
 # this workflow, the test suite was only enforced by the local pre-commit
 # hook — a fork PR or a bypass (--no-verify) could land untested.
+#
+# Two deliberate asymmetries:
+#   * The docs-only fast path applies to pull requests only. `push: main` always
+#     runs the full suite because release.yml requires the `bats + pytest`
+#     check-run of the tagged commit to conclude `success`; a skipped or
+#     cancelled run reports neither `success` nor a failure, and the release
+#     gate would then refuse to publish.
+#   * concurrency cancels superseded pull-request runs only, for the same
+#     reason: a cancelled run on main leaves the tagged commit without the
+#     check-run release.yml looks for.
 
 on:
   push:
     branches: [main]
   pull_request:
     branches: [main]
+
+concurrency:
+  group: tests-${{ github.ref }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
@@ -18,21 +32,74 @@ jobs:
     name: bats + pytest
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          # The workflow only reads the repository; do not leave the token in
+          # the workspace git config for later steps.
+          persist-credentials: false
+          # The docs-only detection diffs against the base commit, which a
+          # shallow clone does not contain.
+          fetch-depth: 0
 
-      - name: Install bats-core, jq, bc, and poppler-utils (pdftotext)
-        run: sudo apt-get update && sudo apt-get install -y bats jq bc poppler-utils
+      - name: Detect docs-only change
+        id: scope
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            base="${{ github.event.pull_request.base.sha }}"
+          else
+            base="${{ github.event.before }}"
+          fi
+          if [ -z "$base" ] ||
+            ! git cat-file -e "${base}^{commit}" 2>/dev/null; then
+            echo "docs_only=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          changed="$(git diff --name-only "$base" "${{ github.sha }}")"
+          docs_only=true
+          while IFS= read -r f; do
+            [ -n "$f" ] || continue
+            case "$f" in
+              *.md|docs/*|LICENSE|LICENSE-*|compliance/*) ;;
+              *) docs_only=false; break ;;
+            esac
+          done <<< "$changed"
+          echo "docs_only=$docs_only" >> "$GITHUB_OUTPUT"
 
+      - name: Install bats-core, jq, bc, and poppler-utils
+        if: steps.scope.outputs.docs_only != 'true'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bats jq bc poppler-utils
+
+      # v7.0.0
       - name: Set up Python
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        if: steps.scope.outputs.docs_only != 'true'
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
         with:
           python-version: '3.x'
+          cache: 'pip'
+          cache-dependency-path: requirements-test.txt
 
       - name: Install Python test dependencies
+        if: steps.scope.outputs.docs_only != 'true'
         run: pip install -r requirements-test.txt
 
       - name: Run bats tests
+        if: steps.scope.outputs.docs_only != 'true'
         run: bats tests/*.bats
 
       - name: Run pytest
+        if: steps.scope.outputs.docs_only != 'true'
         run: pytest tests/ -q
+
+      # Docs changes cannot break the suite, but they are exactly what the path
+      # guard catches — a hardcoded local path pasted into a new document. The
+      # job still runs and reports success, so a required status check is never
+      # left waiting for a report that will not arrive.
+      - name: Docs-only change — check for hardcoded paths
+        if: steps.scope.outputs.docs_only == 'true'
+        run: |
+          echo "docs-only change: skipping bats + pytest"
+          bash .github/scripts/path-leak-scan.sh --full-tree

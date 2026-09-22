@@ -758,3 +758,5 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 - docs: replace machine-local absolute paths with $HOME in the Langfuse design docs (Path Leak Guard).
+
+- 2026-09-22: fix(uninstall): remove the ICM SessionStart hook when icm is uninstalled

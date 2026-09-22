@@ -729,6 +729,14 @@ main() {
   remove_json_key "$HOME/.claude.json" "icm"
   remove_json_key "$HOME/.claude.json" "context7"
 
+  # ICM registers its OWN SessionStart hook in Claude Code (`icm hook start`).
+  # It is a hook, not an MCP registration, so remove_json_key above never saw
+  # it and a completed uninstall left a command that silently fails on every
+  # session (the `|| true` hides it). remove_hook_entry matches the command
+  # exactly and gates itself through td_component_of (`*icm*` -> icm), so
+  # --only/--skip are honoured and unrelated SessionStart entries survive.
+  remove_hook_entry "$HOME/.claude/settings.json" "SessionStart" "icm hook start 2>/dev/null || true"
+
   # Both Claude Desktop paths (macOS first, Linux second) come from the registry
   # via resolve_claude_desktop_paths; the pair matches uninstall's historical
   # targets exactly, so this is byte-identical with the production registry.

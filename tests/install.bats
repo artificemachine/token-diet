@@ -2445,3 +2445,63 @@ TOML
   [ -f "$TMP_HOME/.local/bin/serena" ]
   [ -f "$TMP_HOME/.local/bin/icm" ]
 }
+
+# ---------------------------------------------------------------------------
+# Cycle 16.4 — icm.sh: uninstall removes the ICM-owned SessionStart hook
+# ---------------------------------------------------------------------------
+
+@test "icm hooks: uninstall removes the ICM SessionStart hook and keeps unrelated hooks" {
+  mock_install_prereqs
+  mock_icm
+  mock_cmd claude
+
+  # ICM registers this hook itself (not an MCP registration), so the only way
+  # it can be cleaned is by command. The unrelated entry must survive.
+  python3 -c "
+import json
+with open('$TMP_HOME/.claude/settings.json', 'w') as f:
+    json.dump({'hooks': {'SessionStart': [
+        {'matcher': '*', 'hooks': [{'type': 'command', 'command': 'echo unrelated', 'timeout': 5}]},
+        {'matcher': '*', 'hooks': [{'type': 'command', 'command': 'icm hook start 2>/dev/null || true', 'timeout': 5}]},
+    ]}}, f)
+    f.write('\n')
+"
+  run bash "$SCRIPTS_DIR/uninstall.sh" --only icm --force
+  [ "$status" -eq 0 ]
+
+  python3 - "$TMP_HOME/.claude/settings.json" << 'PY'
+import json, sys
+d = json.load(open(sys.argv[1]))
+cmds = [h.get("command")
+        for e in d.get("hooks", {}).get("SessionStart", [])
+        for h in (e.get("hooks") or [])]
+assert "echo unrelated" in cmds, f"unrelated SessionStart hook was removed: {cmds}"
+assert "icm hook start 2>/dev/null || true" not in cmds, f"ICM SessionStart hook survived uninstall: {cmds}"
+PY
+}
+
+@test "icm hooks: uninstall leaves the ICM SessionStart hook when icm is out of scope" {
+  mock_install_prereqs
+  mock_cmd claude
+
+  python3 -c "
+import json
+with open('$TMP_HOME/.claude/settings.json', 'w') as f:
+    json.dump({'hooks': {'SessionStart': [
+        {'matcher': '*', 'hooks': [{'type': 'command', 'command': 'icm hook start 2>/dev/null || true', 'timeout': 5}]},
+    ]}}, f)
+    f.write('\n')
+"
+  run bash "$SCRIPTS_DIR/uninstall.sh" --only serena --force
+  [ "$status" -eq 0 ]
+
+  python3 - "$TMP_HOME/.claude/settings.json" << 'PY'
+import json, sys
+d = json.load(open(sys.argv[1]))
+cmds = [h.get("command")
+        for e in d.get("hooks", {}).get("SessionStart", [])
+        for h in (e.get("hooks") or [])]
+assert "icm hook start 2>/dev/null || true" in cmds, \
+    f"ICM hook removed although icm was out of scope: {cmds}"
+PY
+}

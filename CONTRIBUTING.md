@@ -26,8 +26,10 @@ bash scripts/install.sh --dry-run   # see what an install would do
 bats tests/*.bats && pytest tests/ -q
 ```
 
-`--recursive` matters: the four tools in `forks/` are submodules, and the
-air-gapped install path (`--local`) builds from them.
+`--recursive` matters: Serena and ICM in `forks/` are pinned submodules, and the
+local-source install path (`--local`) builds from them. Context7 is a remote
+service. Offline builds also need prepared dependencies and images; see the
+[Enterprise Guide](docs/enterprise.md).
 
 Requires `bash`, `python3`, `jq`, and `bc`. `bats-core` and `pytest` for tests.
 

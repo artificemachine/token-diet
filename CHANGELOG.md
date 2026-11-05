@@ -804,3 +804,5 @@ First release since v1.15.28 and the first major version. It bundles the unrelea
   1.16.0 and 1.16.1 work was merged but never tagged, so this is the first tag since v1.15.28.
 
 - 2026-09-22: docs(readme): state in the README that Context7 replaced the removed RTK/tilth components.
+
+- 2026-11-05: docs: align component inventory, offline installation prerequisites, installer selectors and CI platform claims with the implementation.

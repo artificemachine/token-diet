@@ -6,7 +6,7 @@
 |---|---|
 | [benchmarks.md](benchmarks.md) | Where every performance number comes from, and which claims are unmeasured |
 | [engineering-notes.md](engineering-notes.md) | How this project is tested and debugged, with the bugs that shaped it |
-| [comparison.md](comparison.md) | How the four tools differ and when each one applies |
+| [comparison.md](comparison.md) | Why RTK and tilth were retired, and the current three-tool stack |
 | [enterprise.md](enterprise.md) | Air-gapped and offline installation |
 
 ## Guides
@@ -33,7 +33,7 @@ about the current codebase.**
 
 ## A note on the agent instruction files
 
-`CLAUDE.md`, `AGENTS.md`, and `.github/GEMINI.md` are instruction files for AI
+`CLAUDE.md` and `AGENTS.md` are instruction files for AI
 coding agents working in this repository. They encode the same conventions
 described in [CONTRIBUTING.md](../CONTRIBUTING.md): version bumps, the
 append-only changelog, branch policy, and the rule against auto-updating the

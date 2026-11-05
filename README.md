@@ -48,8 +48,10 @@ the config files it will edit.
 ### Requirements
 
 `bash`, `python3`, `git`, `jq`, `bc`. The default install fetches Rust and `uv`
-if they're missing; `--local` builds from the pinned forks instead and needs no
-network.
+if they're missing. `--local` builds from the pinned forks and requires an
+installed Rust toolchain and Docker for Serena. Offline installation also
+requires preloaded images and cached build dependencies; `--local` alone does
+not prevent Cargo or Docker builds from accessing the network.
 
 Optional: `poppler-utils` (better PDF extraction), `tiktoken` and `pdfplumber`
 (exact token counts and richer PDF parsing). Everything degrades gracefully
@@ -153,7 +155,8 @@ rtk-mcp, and tilth artifacts left by earlier versions.
 
 ## Platform support
 
-macOS, Linux, and WSL are the supported platforms and are covered by CI.
+macOS, Linux, and WSL are supported platforms. The Bash/Python workflow runs on
+`ubuntu-latest`; it does not independently verify macOS or WSL.
 
 **Windows (native) is experimental.** PowerShell scripts exist
 (`scripts/Install.ps1`, `scripts/token-diet.ps1`) and there is a Pester suite,
@@ -163,9 +166,11 @@ context hooks (`docextract`, `ctxwarn`), `serena-gc`, the Docker helpers, or
 
 ## Air-gapped install
 
-`bash scripts/install.sh --local` builds from the pinned forks with no network
-access. See the [Enterprise Guide](docs/enterprise.md) — note that Context7 is
-the stack's one outbound registration, so skip it on isolated machines.
+`bash scripts/install.sh --local --serena-only --icm-only` selects the local
+components without registering Context7. Prepare the toolchains, Serena image,
+and Cargo dependencies before disconnecting. Local builds can fetch missing
+dependencies; the flag is not a network-isolation control. See the
+[Enterprise Guide](docs/enterprise.md) for the preparation requirements.
 
 ## Development
 
